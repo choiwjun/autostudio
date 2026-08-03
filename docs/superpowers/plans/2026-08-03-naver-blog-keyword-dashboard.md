@@ -3835,6 +3835,9 @@ git commit -m "chore: final regression pass"
 - **자동완성 실측 포맷 검증 (스펙 §4.1 필수)**: 실 네이버 엔드포인트에서 "에어프라이어" → 연관 키워드 10건 정상 파싱(구 list 포맷 확인, 파서 수정 불필요) ✓
 - **서버 기동**: `uvicorn server:app` → `/` HTTP 200(대시보드 20,105B), `/status` 정상 응답 ✓
 - **수동 수집 smoke**: `python collect.py` → `완료: 신규 0개, 스냅샷 0개, ...` 정상 종료(API 키 없이) ✓
+- **브라우저 e2e (Task 15)**: Playwright chromium으로 시드 데이터 2건 + 서버 기동 상태에서 실행 → exit 0 ✓ (게이지 렌더·빈 상태 구분·정렬 토글/aria-sort 확인)
+  - **e2e 스크립트 수정 (플랜 대비 편차 #10)**: 정렬 토글 검증을 '기회점수'(기본 활성 컬럼 → 첫 클릭이 이미 방향 토글) 대신 '증감률'로 클릭 — UX §6의 "새 컬럼 1회 내림차순 → 2회 오름차순" 의미에 정합
+- **PG 통합 테스트 (Task 15)**: 로컬 실행 시도 4경로(Docker 데몬 미기동·임베디드 패키지 PyPI 부재·WSL sudo 비밀번호 필요·EDB Linux 바이너리 ACL 차단) 모두 환경 제약으로 실패 → **`DATABASE_URL`(Supabase Session pooler) 확보 시점에 실행** (플랜 원래 계약과 동일)
 
 ### 남은 수동 단계 (Task 13 — 사용자 자격 증명 필요)
 1. **Supabase**: 프로젝트 생성 → Session pooler(5432) 문자열을 GitHub Secrets `DATABASE_URL`로, Transaction pooler(6543)를 Vercel Env로 등록

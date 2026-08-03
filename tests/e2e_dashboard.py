@@ -20,8 +20,9 @@ def main():
         if page.locator("text=아직 데이터가 없습니다").count():
             assert page.locator("button:has-text('시드 추가')").count() == 1
             assert page.locator("button:has-text('지금 수집 실행')").count() == 1
-        # 정렬 토글: 1회 클릭 내림차순(aria-sort=descending) → 2회 오름차순 (UX §6)
-        th = page.locator("th.sortable").first
+        # 정렬 토글: 새 컬럼 클릭 1회 → 내림차순(aria-sort=descending), 재클릭 → 오름차순 (UX §6)
+        # (기회점수는 기본 활성 컬럼이라 바로 방향 토글이 되므로 '증감률'로 검증)
+        th = page.locator("th.sortable", has_text="증감률")
         th.click()
         page.wait_for_timeout(200)
         assert page.locator("th[aria-sort='descending']").count() == 1
