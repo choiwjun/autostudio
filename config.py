@@ -22,7 +22,8 @@ def minutes_ago_kst_iso(minutes):
 
 def load_config(load_env=True):
     if load_env:
-        load_dotenv()
+        load_dotenv()          # .env (있으면)
+        load_dotenv(".env.local")  # 로컬 시크릿 (gitignore 대상, 우선 순위는 .env가 높음)
     return {
         "client_id": os.getenv("NAVER_CLIENT_ID", ""),
         "client_secret": os.getenv("NAVER_CLIENT_SECRET", ""),
