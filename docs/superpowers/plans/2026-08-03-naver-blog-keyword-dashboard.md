@@ -3864,3 +3864,11 @@ git commit -m "chore: final regression pass"
 - **stale lock 회수 실증**: 테스트 잔여 running 행이 실 실행에서 60분 stale 규칙으로 회수된 후 정상 진행 (원자 잠금+stale 회수 실환경 검증)
 - **용량 실측 → 캡 조정**: 키워드당 ~10초(호출 3회×~3.2초) → **ACTIVE_KEYWORD_CAP 1,000→200** (1,000개=165분으로 60분 타임아웃 초과). config 기본값·.env.local·design §8·README 반영 완료. 2일차 실행(발굴 최소화)에서 정상상태 시간 재실측 권장
 - **2일차 이후**: 전일 스냅샷 존재 → 기회점수·상업성(shop 활성화 후)·수요지수 계산되어 대시보드에 표시
+
+### v4 전환 기록 (2026-08-03 — 쇼핑 검색 API 종료 대응)
+- **원인 확정**: 네이버 쇼핑 검색 API(`search/shop.json`)가 **2026-07-31자로 공식 종료** — 404는 키/권한 문제가 아닌 서비스 종료였음. 키 재발급·신규 앱 생성으로도 해결 불가 확인
+- **대체 선정**: 쇼핑인사이트(`/v1/datalab/shopping/category/keywords`, 검색 클릭 추이) — **기존 개발자센터 키로 동작 확인**(실측: 에어프라이어 mean 6.82 vs 냉장고 36.36). myauto NCP 키(X-NCP-APIGW)는 openapi.naver.com에서 401 — 미사용
+- **설계 v4**: 상업성(상품 수·가격) → **`shop_click_idx`(쇼핑 클릭 지수)** — 수요지수와 동일한 앵커 정규화 패턴의 배치 단계. analyzer shop 호출 제거(3→2회), 은퇴·쇼커 뱃지·유망 프리셋을 클릭 지수 기준으로 재정의, 상업성 컬럼은 하위호환 유지(NULL)
+- **구현**: `shopping_insight.py` 신규(오류 DatalabError 정규화), db 스키마 `shop_click_idx` 추가(+ 실DB ALTER 완료), collect `update_shop_clicks` 단계, server `click_min`·preset 갱신, HTML 쇼핑클릭 컬럼 교체 — 테스트 **76 passed + 4 skipped**
+- **실배포 검증**: v4 워크플로우 실행 → `done / 신규 1 / 스냅샷 1 / 오류 0`, 45초(같은 날짜 스킵). 기존 99개 + 신규 1개 = 100개 키워드
+- **유의**: 쇼핑 클릭 지수는 기회점수 상위 후보만 조회하므로 **2일차부터 산출** (1일차 opportunity NULL). 쇼핑 분야 코드 기본 `50000000`(생활/건강) — 분야 미매칭 키워드는 NULL 보호. 내일 07:17 KST 크론에서 전체 지표(기회·쇼핑클릭·수요) 최초 산출 예정
