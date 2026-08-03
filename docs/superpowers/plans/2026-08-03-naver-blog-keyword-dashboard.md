@@ -3810,3 +3810,38 @@ git commit -m "chore: final regression pass"
 - **실행 잠금은 부분 유니크 인덱스로 원자 취득** — v2의 SELECT→INSERT 경합 창은 제거 (v3)
 - **DB 테스트는 SQLite 단위(17개) + Postgres 통합(Task 15)** — 배포 후에만 PG 다이얙트를 확인하던 v2 관행 제거 (v3)
 - 발굴 키워드 분야: 1차(시드 직속)만 시드 category 상속, 2차 이상은 shop 데이터로 채움 (v3)
+
+---
+
+## 구현 진행 기록 (2026-08-03 — 전체 완료)
+
+**상태: Task 0~16 구현 완료** — 단위 테스트 72 passed + PG 통합 4 skipped(DATABASE_URL 미설정 시) + 브라우저 e2e(선택). main 병합·푸시됨(`a57ce3d`).
+
+### 구현 중 발견·수정 (플랜 코드 대비 편차 — 테스트가 스펙이므로 전부 테스트 통과를 위한 정당한 수정)
+
+| # | 위치 | 편차 | 사유 |
+|---|---|---|---|
+| 1 | Task 2 `query_keywords` | NULL 동점 tiebreak를 `k.first_seen, k.id`로 | 플랜의 `k.id` 단독은 플랜 자체 테스트 2건(페이징·노스냅샷)을 동시에 만족 불가 |
+| 2 | Task 9 `run_collection` | 잠금 타임스탬프를 마이크로초 정밀도로 | 초 단위면 같은 초에 시작된 두 실행의 `started_at`이 동일해 소유권 검사가 무력화됨 |
+| 3 | Task 9 `main()` | 모든 종료 경로에서 `SystemExit` 발생 | 테스트가 `pytest.raises(SystemExit)`로 main을 직접 호출하는 계약 |
+| 4 | Task 10 `trigger_collect` | `body: CollectIn = Body(default_factory=CollectIn)` | 본문 없는 POST /collect가 FastAPI에서 422가 되는 것 방지(기본 manual) |
+| 5 | Task 0 `requirements.txt` | `psycopg2-binary==2.9.12` | 2.9.10은 Python 3.14(cp314) 휠 없음 — 로컬 설치 불가 |
+| 6 | Task 15 PG 테스트 | 4개(계획 문구의 5는 오기) | 파일 정의 그대로 4개 함수 |
+| 7 | 최종 리뷰 반영 | `update_demand`에 예산 적용(budget_seconds 파라미터) | cron-job.org 대체 경로(45초)에서 데이터랩 50배치가 Vercel 60초를 넘으면 실행이 죽고 60분 잠금이 남는 문제 — 리뷰 Important #1 |
+| 8 | 최종 리뷰 반영 | `server.py` `run_db`에 `threading.Lock` | FastAPI 스레드풀에서 단일 psycopg2 커넥션 공유는 스레드 안전하지 않음 — 리뷰 Important #2 |
+| 9 | 최종 리뷰 반영 | `analyzer.py` lprice 관용 파싱·fresh window `>` 연산(정확히 7일)·`hmac.compare_digest`·`insert_top_results` 재연결 재시도·PG 경합 테스트 스레드별 커넥션 | 리뷰 Minor #1~#4 + 테스트 실효성 |
+
+### 실측 스모크 결과
+- **자동완성 실측 포맷 검증 (스펙 §4.1 필수)**: 실 네이버 엔드포인트에서 "에어프라이어" → 연관 키워드 10건 정상 파싱(구 list 포맷 확인, 파서 수정 불필요) ✓
+- **서버 기동**: `uvicorn server:app` → `/` HTTP 200(대시보드 20,105B), `/status` 정상 응답 ✓
+- **수동 수집 smoke**: `python collect.py` → `완료: 신규 0개, 스냅샷 0개, ...` 정상 종료(API 키 없이) ✓
+
+### 남은 수동 단계 (Task 13 — 사용자 자격 증명 필요)
+1. **Supabase**: 프로젝트 생성 → Session pooler(5432) 문자열을 GitHub Secrets `DATABASE_URL`로, Transaction pooler(6543)를 Vercel Env로 등록
+2. **GitHub Secrets**: `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`, `DATABASE_URL` 등록
+3. **Vercel**: `npx vercel --prod` 배포 + Env에 `DASHBOARD_TOKEN`, `ENV=production`, `DATABASE_URL`(6543), `DATALAB_ENABLED=1`, `DATALAB_ANCHOR=냉장고`
+4. **워크플로우 검증**: `gh workflow run daily-collect.yml` → 로그 확인(차단 여부·수요갱신)
+5. **배치 시간 실측 (스펙 §8)**: 실행 소요·키워드당 호출 시간 기록 후 design.md §8 표 갱신
+6. **차단 시**: cron-job.org에서 `/collect` POST + Bearer + `{"trigger":"schedule"}` (45초 예산, 며칠에 걸쳐 순환)
+7. **PG 통합 테스트 실행**: `DATABASE_URL=... pytest tests/test_db_postgres.py -v` (로컬/CI Postgres에서 잠금 경합·재연결 검증)
+8. **브라우저 e2e(선택)**: `pip install playwright && playwright install chromium` 후 서버 기동 상태에서 `python tests/e2e_dashboard.py`
