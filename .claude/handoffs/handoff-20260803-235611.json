@@ -1,0 +1,84 @@
+{
+  "handoff": {
+    "created_at": "2026-08-03T23:56:00+09:00",
+    "project": "autostudio (네이버 블로그 키워드 대시보드)",
+    "completed_skill": "socrates (기획 — 콘텐츠 자동화 단계, 문서 생성 전)",
+    "next_skill": "screen-spec → tasks-generator → auto-orchestrate",
+    "output_files": []
+  },
+  "context_summary": {
+    "project_stage": "v6 완료 (애드포스트 1차 목표 + 집중형 대시보드). 콘텐츠 작성 자동화 기획 진행 중 — 기획 확정까지 완료, 10개 문서 생성은 미착수.",
+    "planning_docs": {
+      "plan": "docs/superpowers/plans/2026-08-03-naver-blog-keyword-dashboard.md",
+      "design_spec": "docs/superpowers/specs/2026-08-03-naver-blog-keyword-dashboard-design.md",
+      "ux_spec": "docs/superpowers/specs/2026-08-03-naver-blog-keyword-dashboard-ux.md"
+    },
+    "v6_status": {
+      "priority_formula": "0.35×AI인용(질문형×최신성×과정형) + 0.35×수요(demand_idx≤1) + 0.30×CPC등급",
+      "ai_pick_preset": "ai_cite≥0.6 & demand≥0.001 (임계값 현실화 완료)",
+      "default_view": "sort=priority, preset=ai_pick, Top-20 추천",
+      "seeds": "집중 10개 (보험/금융/건강/IT/교육) — 프로덕션 교체 완료",
+      "dashboard": "상용화 라이트 대시보드 (qwen3.8-max-preview 위임, KPI/세그먼트/Priority·AI인용 컬럼)",
+      "detail_chart": "y 0~100 고정 + y2 총글수 점선, 날짜 포맷, spanGaps, index 툴팁",
+      "dev_auth": "development는 토큰 인증 생략 (프로덕션 fail-closed 유지)",
+      "tests": "84 passed + e2e + 시각 스모크",
+      "deployed": "Vercel my1-eight-ivory.vercel.app (keywords=197, seeds=10, last_run done)"
+    },
+    "content_automation_plan": {
+      "goal": "애드포스트 1차 — AI 인용 + 조회수 키워드로 콘텐츠 생산 자동화",
+      "problem": "글쓰기 병목 + 인용 안 되는 품질 + 성과 피드백 부재 (3가지 모두 해결 대상)",
+      "starting_point": "글 자동 생성부터 (성과 측정·추천 정교화는 이후 단계)",
+      "generation_mode": "반자동: 초안 생성 → 사용자 검토·수정 → 발행",
+      "quality_strategy": "상위글 골격 분석 (블로그 검색 API description에서 FAQ·비교·수치 추출 → 초안 반영)",
+      "must_features": [
+        "글 초안 생성 (상위글 골격 분석 → 제목·첫문단 + 본문)",
+        "제목·첫문단 생성 (질문형 소제목, 첫 문단 즉답 구조)",
+        "블로그 이미지 생성 (AI 인용 전략의 절반 — 이미지만 인용 76% 데이터 근거)"
+      ],
+      "wont_features": [
+        "블로그 발행 연동 (검토 후 다음 버전)",
+        "FAQ/비교표 자동 추출 (MVP에서 제외)",
+        "성과 추적(조회수/인용 체크)",
+        "초안 관리함 (저장·목록·재편집)"
+      ],
+      "tech_stack": {
+        "text_generation": "opencode run -m opencode-go/deepseek-v4-flash (비대화형 1회성, 검증 완료 — '1+1'→'2')",
+        "image_generation": "bl image generate (qwen 계열: wan2.7-image/qwen-image) — API 키 재발급 필요 (현재 sk-sp-...Lk5p 401)",
+        "serverless": "GitHub Actions 배치 + Vercel 서버리스 — 로컬 PC 불필요",
+        "storage": "Supabase Postgres (초안·이미지 URL 저장)",
+        "cloud_api_note": "bl CLI 키(sk-sp-...Lk5p)는 401 무효. .qwen/settings.json의 BAILIAN_TOKEN_PLAN_API_KEY는 유효(대시보드 디자인에 사용됨). 글 생성은 opencode 자격증명 사용, 이미지 생성은 키 재발급 필요."
+      },
+      "open_questions": [
+        "이미지 생성용 qwen 키 재발급 필요 (사용자 작업)",
+        "상위글 골격 분석: analyzer.py가 description 필드를 버리고 있어 캡처 확장 필요",
+        "글 초안 저장 스키마 (drafts 테이블) 설계 필요"
+      ]
+    },
+    "infra_notes": {
+      "supabase": "postgres.gmnhzjfphsuqjhrkvmaz / aws-1-ap-northeast-2.pooler.supabase.com (Session 5432 / Transaction 6543)",
+      "github_secrets": "NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, DATABASE_URL (Session 5432)",
+      "vercel_env": "8개: NAVER_CLIENT_ID/SECRET, DATABASE_URL(6543), DASHBOARD_TOKEN, DATALAB_ENABLED, DATALAB_ANCHOR, ENV=production, SHOPPING_INSIGHT_CATEGORY",
+      "daily_cron": "매일 07:17 KST (GH Actions) — 내일 2일차 전체 지표 최초 산출 예정",
+      "cron_job_org": "자동완성 차단 시 대체 스케줄러 (현재 불필요 확인)"
+    }
+  },
+  "next_steps": [
+    "기획 문서 10개 생성 (PRD/화면/기능/UX/기술/페르소나) — docs/planning/ 아래",
+    "이미지 생성용 qwen API 키 재발급 (사용자 작업)",
+    "analyzer.py description 캡처 확장 → 상위글 골격 추출 모듈",
+    "drafts(초안) 테이블 스키마 설계",
+    "opencode run 서버리스 연동 (GH Actions 워크플로우 추가)"
+  ],
+  "assumptions": [
+    "글 생성은 opencode-go/deepseek-v4-flash 사용 (사용자 확정)",
+    "이미지 생성은 qwen 계열 사용 (사용자 확정) — 키 재발급 필요",
+    "초안은 사용자 검토 후 수동 발행 (반자동)",
+    "로컬 PC 없이 클라우드에서 전부 실행"
+  ],
+  "validation_criteria": [
+    "대시보드에서 키워드 → '글 생성' → deepseek-v4-flash 초안 반환",
+    "초안에 질문형 소제목 + 첫 문단 즉답 구조 포함",
+    "블로그 이미지 생성 후 초안에 삽입 가능",
+    "전부 GitHub Actions/Vercel에서 실행 (로컬 무관)"
+  ]
+}

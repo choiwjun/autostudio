@@ -8,8 +8,9 @@ data/
 .venv/
 .vercel
 
-# AI 세션 메모리 (커밋 금지)
-.claude/
+# AI 세션 메모리 (커밋 금지) — handoffs는 예외 (커밋 대상)
+.claude/*
+!.claude/handoffs/
 
 # 기획 문서 HTML 렌더링 산출물 (소스는 마크다운)
 docs/_html/
