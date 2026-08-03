@@ -50,6 +50,11 @@ def create_app(cfg):
                 return fn(get_db())
 
     def require_token(authorization: str = Header(default="")):
+        # v6: 로컬 개발(development)은 토큰이 설정돼 있어도 인증 생략 — README
+        # "로컬 개발만 인증 생략"과 일치. .env.local에 DASHBOARD_TOKEN이 있어도
+        # 개발 편의를 위해 쓰기 API가 401을 내지 않도록 한다 (프로덕션만 강제).
+        if env == "development":
+            return
         token = cfg.get("dashboard_token", "")
         if token and not hmac.compare_digest(authorization, f"Bearer {token}"):
             raise HTTPException(status_code=401, detail="invalid token")
@@ -75,7 +80,9 @@ def create_app(cfg):
         if preset == "promising":
             opportunity_min, click_min, demand_min = 70.0, 0.5, 0.01
         elif preset == "ai_pick":
-            ai_cite_min, demand_min = 0.6, 0.2
+            # v6: demand_idx는 데이터랩 앵커('냉장고') 대비 상대 비율 — 실측 0~0.01 분포.
+            #     0.2 임계는 전 키워드 탈락을 유발해 0.001(앵커의 0.1%)로 현실화 (임계는 절대값이 아닌 상대값)
+            ai_cite_min, demand_min = 0.6, 0.001
         filters = dict(category=category, commercial_min=commercial_min, q=q,
                        discovered_since=discovered_since,
                        active=None if show_inactive else 1,

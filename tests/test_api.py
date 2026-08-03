@@ -6,7 +6,7 @@ from server import create_app
 AUTH = {"Authorization": "Bearer sekret"}
 
 
-def make_app(tmp_path):
+def make_app(tmp_path, env="development"):
     dbfile = f"sqlite:///{tmp_path / 't.db'}"
     d = db.Database(dbfile)
     d.init()
@@ -34,7 +34,7 @@ def make_app(tmp_path):
         "commercial": None})
     d.close()
     return create_app({"db_url": dbfile, "dashboard_token": "sekret",
-                       "manual_budget_seconds": 45, "env": "development"})
+                       "manual_budget_seconds": 45, "env": env})
 
 
 def test_list_reads_precomputed_scores(tmp_path):
@@ -90,26 +90,31 @@ def test_detail_404_and_history_with_scores(tmp_path):
 
 
 def test_patch_active_requires_token_and_toggles(tmp_path):
+    # v6: development는 인증 생략(README "로컬 개발만 인증 생략") — 프로덕션에서만 401
     client = TestClient(make_app(tmp_path))
-    assert client.patch("/keywords/1", json={"active": False}).status_code == 401
-    resp = client.patch("/keywords/1", json={"active": False}, headers=AUTH)
-    assert resp.status_code == 200
+    assert client.patch("/keywords/1", json={"active": False}).status_code == 200
     assert client.get("/keywords?preset=").json()["count"] == 1
+    # 프로덕션: 무토큰 401, 올바른 토큰 200
+    prod = TestClient(make_app(tmp_path, env="production"))
+    assert prod.patch("/keywords/1", json={"active": True}).status_code == 401
+    assert prod.patch("/keywords/1", json={"active": True}, headers=AUTH).status_code == 200
 
 
 def test_seed_writes_require_token(tmp_path):
+    # v6: development는 인증 생략 — 쓰기 동작 자체 검증
     client = TestClient(make_app(tmp_path))
-    assert client.post("/seeds", json={"keyword": "새시드"}).status_code == 401
-    assert client.post("/seeds", json={"keyword": "새시드", "category": "육아"},
-                       headers=AUTH).status_code == 200
+    assert client.post("/seeds", json={"keyword": "새시드", "category": "육아"}).status_code == 200
     seeds = client.get("/seeds").json()
     assert len(seeds) == 2
-    assert client.delete(f"/seeds/{seeds[1]['id']}", headers=AUTH).status_code == 200
+    assert client.delete(f"/seeds/{seeds[1]['id']}").status_code == 200
+    # 프로덕션: 무토큰 401
+    prod = TestClient(make_app(tmp_path, env="production"))
+    assert prod.post("/seeds", json={"keyword": "새시드"}).status_code == 401
 
 
 def test_collect_trigger_is_manual_and_budgeted(tmp_path, monkeypatch):
+    # v6: development는 인증 생략 — 프로덕션 401은 별도 검증
     client = TestClient(make_app(tmp_path))
-    assert client.post("/collect").status_code == 401
     captured = {}
 
     def fake_run(cfg, trigger="schedule", budget_seconds=None):
@@ -118,10 +123,13 @@ def test_collect_trigger_is_manual_and_budgeted(tmp_path, monkeypatch):
                 "errors": [], "partial": False}
 
     monkeypatch.setattr(collect, "run_collection", fake_run)
-    resp = client.post("/collect", headers=AUTH)
+    resp = client.post("/collect")
     assert resp.status_code == 200
     assert captured["trigger"] == "manual"
     assert captured["budget"] == 45
+    # 프로덕션: 무토큰 401
+    prod = TestClient(make_app(tmp_path, env="production"))
+    assert prod.post("/collect").status_code == 401
 
 
 def test_collect_schedule_trigger_runs_full_pipeline(tmp_path, monkeypatch):
