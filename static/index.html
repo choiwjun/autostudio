@@ -249,7 +249,7 @@
       </div>
       <div class="panel-body">
         <div id="detailError"></div>
-        <canvas id="chart" height="220"></canvas>
+        <canvas id="chart" height="240"></canvas>
       </div>
     </div>
   </div>
@@ -561,22 +561,45 @@ async function detail(id) {
   showDetailPanel(true);
   const ctx = document.getElementById('chart');
   if (chart) chart.destroy();
+  const chartUnit = { '기회점수': '점수', '수요지수×100': '지수', '쇼핑클릭×100': '지수', '총 글 수': '글' };
   chart = new Chart(ctx, {
     type: 'line',
     data: {
-      labels: d.history.map(h => h.day),
+      labels: d.history.map(h => /^\d{8}$/.test(h.day)
+        ? `${Number(h.day.slice(4, 6))}/${Number(h.day.slice(6, 8))}`
+        : h.day),
       datasets: [
-        { label: '기회점수', data: d.history.map(h => h.opportunity), borderColor: '#16a34a', yAxisID: 'y' },
-        { label: '수요지수×100', data: d.history.map(h => h.demand_idx === null ? null : h.demand_idx * 100), borderColor: '#3b82f6', yAxisID: 'y' },
-        { label: '총 글 수', data: d.history.map(h => h.total_sim), borderColor: '#9ca3af', yAxisID: 'y2' },
-        { label: '쇼핑클릭×100', data: d.history.map(h => h.shop_click_idx === null ? null : h.shop_click_idx * 100), borderColor: '#f59e0b', yAxisID: 'y' },
+        { label: '기회점수', data: d.history.map(h => h.opportunity), borderColor: '#16a34a', backgroundColor: '#16a34a', yAxisID: 'y', borderWidth: 2.5, pointRadius: 3, tension: 0.3, spanGaps: true },
+        { label: '수요지수×100', data: d.history.map(h => h.demand_idx === null ? null : h.demand_idx * 100), borderColor: '#3b82f6', backgroundColor: '#3b82f6', yAxisID: 'y', borderWidth: 2.5, pointRadius: 3, tension: 0.3, spanGaps: true },
+        { label: '총 글 수', data: d.history.map(h => h.total_sim), borderColor: '#9ca3af', backgroundColor: '#9ca3af', yAxisID: 'y2', borderWidth: 1.5, borderDash: [5, 5], pointRadius: 3, tension: 0.3, spanGaps: true },
+        { label: '쇼핑클릭×100', data: d.history.map(h => h.shop_click_idx === null ? null : h.shop_click_idx * 100), borderColor: '#f59e0b', backgroundColor: '#f59e0b', yAxisID: 'y', borderWidth: 2.5, pointRadius: 3, tension: 0.3, spanGaps: true },
       ],
     },
     options: {
       responsive: true,
+      maintainAspectRatio: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top', labels: { boxWidth: 12 } },
+        tooltip: {
+          callbacks: {
+            label: (item) => {
+              const v = item.parsed.y;
+              if (v === null || v === undefined) return `${item.dataset.label}: -`;
+              const num = Number(v).toLocaleString('ko-KR', { maximumFractionDigits: 1 });
+              return `${item.dataset.label}: ${num} ${chartUnit[item.dataset.label] || ''}`;
+            },
+          },
+        },
+      },
       scales: {
-        y: { position: 'left', suggestedMin: 0, suggestedMax: 100 },
-        y2: { position: 'right', grid: { drawOnChartArea: false } },
+        x: { grid: { display: false } },
+        y: { position: 'left', min: 0, max: 100, grid: { color: '#eef2f7' } },
+        y2: {
+          position: 'right',
+          grid: { drawOnChartArea: false },
+          ticks: { callback: v => Number(v).toLocaleString('ko-KR') },
+        },
       },
     },
   });
