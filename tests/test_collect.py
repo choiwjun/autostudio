@@ -1,0 +1,182 @@
+# tests/test_collect.py
+import pytest
+
+import collect
+import config as config_mod
+import db
+from collect import run_collection
+
+
+class FakeClient:
+    def search_blog(self, query, sort="sim", display=100, start=1):
+        return {"total": 100, "items": [{"postdate": "20260101"}]}
+
+    def search_shop(self, query, display=10, start=1):
+        return {"total": 10, "items": []}
+
+
+def make_cfg(tmp_path):
+    return {
+        "db_url": f"sqlite:///{tmp_path / 't.db'}",
+        "client_id": "cid", "client_secret": "csec",
+        "daily_new_keyword_cap": 100, "active_keyword_cap": 1000,
+        "autocomplete_url": "http://ac.test", "autocomplete_max_depth": 1,
+        "autocomplete_max_requests": 10, "manual_budget_seconds": 45,
+        "dashboard_token": "", "datalab_enabled": False, "datalab_anchor": "냉장고",
+        "env": "development", "run_lock_stale_minutes": 60,  # v3
+    }
+
+
+def test_two_day_snapshot_precomputes_scores(tmp_path):
+    cfg = make_cfg(tmp_path)
+    d = db.Database(cfg["db_url"])
+    d.init()
+    kid = d.upsert_keyword("키워드1", day="2026-07-31")
+    r1 = run_collection(cfg, client=FakeClient(), today="2026-08-01")
+    r2 = run_collection(cfg, client=FakeClient(), today="2026-08-02")
+    assert r1["snapshotted"] == 1 and r2["snapshotted"] == 1
+    hist = d.get_history(kid)
+    assert len(hist) == 2
+    assert hist[0]["opportunity"] is None  # 1일차: 전일 없음 → NULL ("데이터 쌓는 중")
+    assert hist[1]["growth"] == 0.0        # (100−100)/100
+    assert hist[1]["opportunity"] == 15.0  # 40×0 + 30×0 + 30×(1−0.5)
+    assert hist[1]["commercial"] == 1.2    # 60×(10/500) + 40×0
+    d.close()
+
+
+def test_same_day_rerun_is_idempotent(tmp_path):
+    cfg = make_cfg(tmp_path)
+    d = db.Database(cfg["db_url"])
+    d.init()
+    d.upsert_keyword("키워드1", day="2026-07-31")
+    run_collection(cfg, client=FakeClient(), today="2026-08-01")
+    again = run_collection(cfg, client=FakeClient(), today="2026-08-01")
+    assert again["snapshotted"] == 0  # 같은 날짜 스킵 → 수동+자동 중복에도 안전
+    d.close()
+
+
+def test_manual_budget_partial(tmp_path):
+    cfg = make_cfg(tmp_path)
+    d = db.Database(cfg["db_url"])
+    d.init()
+    d.upsert_keyword("키워드1", day="2026-07-31")
+    d.upsert_keyword("키워드2", day="2026-07-31")
+    result = run_collection(cfg, client=FakeClient(), today="2026-08-01",
+                            trigger="manual", budget_seconds=0)
+    assert result["partial"] is True
+    assert result["snapshotted"] == 0
+    d.close()
+
+
+def test_active_cap_blocks_discovery(tmp_path, monkeypatch):
+    cfg = dict(make_cfg(tmp_path), active_keyword_cap=1)
+    d = db.Database(cfg["db_url"])
+    d.init()
+    d.add_seed("시드", "요리")
+    d.upsert_keyword("이미있음", day="2026-07-31")
+
+    def boom(*a, **k):
+        raise AssertionError("총량 캡 도달 시 크롤을 시작하면 안 됨")
+
+    monkeypatch.setattr(collect, "expand_keywords", boom)
+    result = run_collection(cfg, client=FakeClient(), today="2026-08-01")
+    assert result["new_keywords"] == 0
+    assert result["snapshotted"] == 1
+    d.close()
+
+
+def test_locked_when_run_in_progress(tmp_path):
+    cfg = make_cfg(tmp_path)
+    d = db.Database(cfg["db_url"])
+    d.init()
+    assert d.start_run("schedule", config_mod.now_kst_iso(),
+                       config_mod.minutes_ago_kst_iso(30)) is not None
+    result = run_collection(cfg, client=FakeClient(), today="2026-08-01")
+    assert result["locked"] is True
+    d.close()
+
+
+def test_schedule_run_retires_and_cleans(tmp_path):
+    cfg = make_cfg(tmp_path)
+    d = db.Database(cfg["db_url"])
+    d.init()
+    bad = d.upsert_keyword("낡고나쁨", day="2026-07-01")
+    d.insert_daily_stats(bad, "2026-08-01", {
+        "total_date": 100, "opportunity": 10.0, "commercial": 5.0})
+    d.insert_daily_stats(bad, "2026-01-15", {"total_sim": 1})  # 90일 보존 초과분
+    d.insert_top_results(bad, "2026-01-15", ["20260101"])      # 30일 보존 초과분
+    result = run_collection(cfg, client=FakeClient(), today="2026-08-02")
+    assert result["snapshotted"] == 1
+    assert result["retired"] == 1  # 8/2 스냅샷도 기회 15 < 35, 상업성 1.2 < 30 → 은퇴
+    assert d.count_active() == 0
+    assert all(h["day"] >= "2026-05-04" for h in d.get_history(bad))
+    assert d.get_top_results(bad, "2026-01-15") == []
+    d.close()
+
+
+def test_date_gap_keeps_growth_null(tmp_path):
+    # v3: 전일(day-1) 스냅샷만 증감률·기회점수 산출 — 8/2 공백이면 8/3은 NULL
+    cfg = make_cfg(tmp_path)
+    d = db.Database(cfg["db_url"])
+    d.init()
+    kid = d.upsert_keyword("키워드1", day="2026-07-30")
+    run_collection(cfg, client=FakeClient(), today="2026-08-01")
+    run_collection(cfg, client=FakeClient(), today="2026-08-03")
+    hist = d.get_history(kid)
+    assert hist[-1]["growth"] is None        # 며칠치 증가율을 하루치로 계산 금지
+    assert hist[-1]["opportunity"] is None
+    d.close()
+
+
+def test_blocked_crawl_marks_partial_and_exit(tmp_path, monkeypatch):
+    # v3: 차단은 스냅샷 성공 여부와 무관하게 exit 1 — 조용히 성공 처리 금지 (스펙 §5)
+    cfg = make_cfg(tmp_path)
+    d = db.Database(cfg["db_url"])
+    d.init()
+    d.add_seed("시드", "요리")
+    monkeypatch.setattr(collect, "expand_keywords",
+                        lambda *a, **k: ([], {}, "blocked"))
+    result = run_collection(cfg, client=FakeClient(), today="2026-08-01")
+    assert result["crawl_stopped"] == "blocked"
+    runs = d.get_last_runs(1)
+    assert runs[0]["status"] == "partial"   # 발굴 중단은 partial로 기록
+    monkeypatch.setattr(collect, "run_collection",
+                        lambda *a, **k: {"locked": False, "new_keywords": 0,
+                                         "snapshotted": 1, "errors": [],
+                                         "partial": False, "crawl_stopped": "blocked",
+                                         "retired": 0, "demand_updated": 0})
+    with pytest.raises(SystemExit) as exc:
+        collect.main()
+    assert exc.value.code == 1
+    d.close()
+
+
+def test_reject_log_carries_reason(tmp_path, monkeypatch):
+    # v3: 필터 사유를 collection_log에 저장 — 리젝 로그 리뷰의 입력 (스펙 §4.2)
+    cfg = make_cfg(tmp_path)
+    d = db.Database(cfg["db_url"])
+    d.init()
+    d.add_seed("시드", "요리")
+    monkeypatch.setattr(collect, "expand_keywords",
+                        lambda *a, **k: (["야동사이트 후기", "정상키워드"],
+                                         {"야동사이트 후기": "시드", "정상키워드": "시드"}, None))
+    run_collection(cfg, client=FakeClient(), today="2026-08-01")
+    logs = d.get_logs()
+    assert any(l["action"] == "reject" and l["note"] == "substring" for l in logs)
+    assert any(l["action"] == "new" and l["keyword"] == "정상키워드" for l in logs)
+    # 1차 파생 키워드(유래=시드)는 시드 분야 상속 (v3)
+    assert d.query_keywords(q="정상키워드")[0]["category"] == "요리"
+    d.close()
+
+
+def test_manual_discovery_respects_budget(tmp_path):
+    # v3: 첫 실행(활성 0개) 수동 발굴도 예산 내 중단 — 예산 초과는 blocked가 아닌 budget
+    cfg = make_cfg(tmp_path)
+    d = db.Database(cfg["db_url"])
+    d.init()
+    d.add_seed("시드", "요리")
+    result = run_collection(cfg, client=FakeClient(), today="2026-08-01",
+                            trigger="manual", budget_seconds=0)
+    assert result["crawl_stopped"] == "budget"
+    assert result["new_keywords"] == 0
+    d.close()
