@@ -28,7 +28,8 @@ def load_config(load_env=True):
         "client_id": os.getenv("NAVER_CLIENT_ID", ""),
         "client_secret": os.getenv("NAVER_CLIENT_SECRET", ""),
         "db_url": os.getenv("DATABASE_URL", "sqlite:///data/keywords.db"),
-        "daily_new_keyword_cap": int(os.getenv("DAILY_NEW_KEYWORD_CAP", "100")),
+        # 0 = 일일 신규 제한 없음. ACTIVE_KEYWORD_CAP은 별도 안전 상한.
+        "daily_new_keyword_cap": int(os.getenv("DAILY_NEW_KEYWORD_CAP", "0")),
         "active_keyword_cap": int(os.getenv("ACTIVE_KEYWORD_CAP", "200")),
         "autocomplete_url": os.getenv(
             "AUTOCOMPLETE_URL", "https://ac.search.naver.com/nx/ac"

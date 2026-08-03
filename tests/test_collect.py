@@ -83,6 +83,22 @@ def test_active_cap_blocks_discovery(tmp_path, monkeypatch):
     d.close()
 
 
+def test_zero_daily_cap_uses_active_room(tmp_path, monkeypatch):
+    # v5: DAILY_NEW_KEYWORD_CAP=0 해제 시 활성 총량 여유분까지 발굴
+    cfg = dict(make_cfg(tmp_path), daily_new_keyword_cap=0, active_keyword_cap=1)
+    d = db.Database(cfg["db_url"])
+    d.init()
+    d.add_seed("트렌드", "정보")
+    monkeypatch.setattr(
+        collect, "expand_keywords",
+        lambda *a, **k: (["트렌드 새키워드"], {"트렌드 새키워드": "트렌드"}, None),
+    )
+    result = run_collection(cfg, client=FakeClient(), today="2026-08-03")
+    assert result["new_keywords"] == 1
+    assert d.count_active() == 1
+    d.close()
+
+
 def test_locked_when_run_in_progress(tmp_path):
     cfg = make_cfg(tmp_path)
     d = db.Database(cfg["db_url"])

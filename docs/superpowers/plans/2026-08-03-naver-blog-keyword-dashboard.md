@@ -108,8 +108,9 @@ DATABASE_URL=sqlite:///data/keywords.db
 ENV=development
 # 실행 잠금 stale 기준 — GH Actions timeout-minutes(60)와 정합 (v3: 30분은 장시간 실행이 회수될 수 있음)
 RUN_LOCK_STALE_MINUTES=60
-DAILY_NEW_KEYWORD_CAP=100
-ACTIVE_KEYWORD_CAP=1000
+# 0 = 일일 신규 제한 없음 (활성 총량 캡이 안전 상한)
+DAILY_NEW_KEYWORD_CAP=0
+ACTIVE_KEYWORD_CAP=200
 AUTOCOMPLETE_URL=https://ac.search.naver.com/nx/ac
 AUTOCOMPLETE_MAX_DEPTH=2
 AUTOCOMPLETE_MAX_REQUESTS=300
@@ -251,8 +252,8 @@ def load_config(load_env=True):
         "client_id": os.getenv("NAVER_CLIENT_ID", ""),
         "client_secret": os.getenv("NAVER_CLIENT_SECRET", ""),
         "db_url": os.getenv("DATABASE_URL", "sqlite:///data/keywords.db"),
-        "daily_new_keyword_cap": int(os.getenv("DAILY_NEW_KEYWORD_CAP", "100")),
-        "active_keyword_cap": int(os.getenv("ACTIVE_KEYWORD_CAP", "1000")),
+        "daily_new_keyword_cap": int(os.getenv("DAILY_NEW_KEYWORD_CAP", "0")),
+        "active_keyword_cap": int(os.getenv("ACTIVE_KEYWORD_CAP", "200")),
         "autocomplete_url": os.getenv(
             "AUTOCOMPLETE_URL", "https://ac.search.naver.com/nx/ac"
         ),
@@ -3881,3 +3882,10 @@ git commit -m "chore: final regression pass"
 - **환경변수 8개(Production, Sensitive)**: NAVER_CLIENT_ID/SECRET, DATABASE_URL(Transaction pooler 6543), DASHBOARD_TOKEN, DATALAB_ENABLED=1, DATALAB_ANCHOR, ENV=production, SHOPPING_INSIGHT_CATEGORY
 - **검증 완료**: `/` 200(대시보드 20,607B), `/status` 200(keywords=100 seeds=3), `/keywords` 200, `/collect` 무토큰 **401**(fail-closed), 토큰 포함 200(`snapshotted:0, errors:[]` — 같은 날짜 멱등)
 - **부가 효과**: Vercel이 GitHub(autostudio, main)와 자동 연동 — 이후 push 시 자동 배포 (meta: githubCommitSha 76a8ff9)
+
+### 트렌드 발굴 확장 (v5, 2026-08-03)
+- **일일 신규 캡 해제**: `DAILY_NEW_KEYWORD_CAP=0`을 기본값으로 사용. `collect.discover()`는 일일 신규 수를 제한하지 않고 `ACTIVE_KEYWORD_CAP - 활성 수` 여유분까지 발굴한다. 수동 실행은 별도 30개 제한과 45초 예산을 유지한다.
+- **안전상한 유지**: `ACTIVE_KEYWORD_CAP=200`은 유지한다. 첫 실측에서 키워드당 약 10초가 확인되어 1,000개는 GH Actions 60분 한도를 초과하기 때문이다.
+- **시드 확장**: 기존 에어프라이어·홍삼·캠핑 3개에서 이슈/계절/건강/경제/반려동물/여행/IT/육아/생활 분야 22개로 확장했다. 공식 전체 인기검색어 목록 API가 없으므로 자동완성 BFS가 시드 주변 후보를 발굴한다.
+- **운영 결과**: 일일 캡 해제 후 첫 워크플로우는 같은 날 신규 0건(기존 당일 신규 100건이 이미 활성 캡을 점유)으로 정상 종료했다. 다음 KST 실행부터 새 시드 후보가 발굴된다.
+- **평가 기준**: 2일차부터 증감률·수요지수·기회점수를 정렬해 상승 후보를 확인한다. 인기 키워드가 네이버 노출이나 AI 인용을 보장하지 않으므로 콘텐츠 품질·관련성·신뢰도는 별도 작성 자동화 단계에서 관리한다.

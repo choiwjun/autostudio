@@ -53,15 +53,20 @@ def discover(d, cfg, today, now, trigger, result, budget_seconds=None):
         return
     if trigger == "manual" and d.count_active() > 0:
         return  # 수동 수집은 스냅샷 갱신 전용 — 발굴은 스케줄러 몫 (첫 실행만 예외)
-    max_new = cfg["daily_new_keyword_cap"]
     max_requests = cfg["autocomplete_max_requests"]
-    if trigger == "manual":
-        max_new = min(max_new, MANUAL_DISCOVERY_MAX_NEW)
-        max_requests = min(max_requests, MANUAL_DISCOVERY_MAX_REQUESTS)
     cap_room = cfg["active_keyword_cap"] - d.count_active()
-    remaining = min(max_new - d.count_new_keywords_today(today), cap_room)
+    daily_cap = cfg["daily_new_keyword_cap"]
+    if daily_cap > 0:
+        remaining = min(daily_cap - d.count_new_keywords_today(today), cap_room)
+    else:
+        # 0 disables the daily cap; ACTIVE_KEYWORD_CAP remains the hard safety bound.
+        remaining = cap_room
+    if trigger == "manual":
+        remaining = min(remaining, MANUAL_DISCOVERY_MAX_NEW)
+        max_requests = min(max_requests, MANUAL_DISCOVERY_MAX_REQUESTS)
     if remaining <= 0:
-        d.log_collection("(seed)", "skip", "일일/총량 상한 도달", now)
+        reason = "총량 상한 도달" if daily_cap <= 0 else "일일/총량 상한 도달"
+        d.log_collection("(seed)", "skip", reason, now)
         return
     try:
         # v3: 예산을 발굴에도 적용(잔여 예산 기반 타임아웃·중단), 유래 키워드(origins) 추적
