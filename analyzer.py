@@ -13,7 +13,7 @@ def compute_fresh_ratio(post_dates, today, window_days=7):
             d = date(int(pd[:4]), int(pd[4:6]), int(pd[6:8]))
         except (ValueError, IndexError):
             continue
-        if d >= cutoff:
+        if d > cutoff:
             fresh += 1
     return fresh / len(post_dates)
 
@@ -31,7 +31,12 @@ def analyze_keyword(client, keyword, today):
 
     post_dates = [item.get("postdate", "") for item in blog_sim.get("items", [])]
     shop_items = shop.get("items", []) if shop else []
-    prices = [int(i.get("lprice", 0)) for i in shop_items if i.get("lprice")]
+    prices = []
+    for i in shop_items:
+        try:
+            prices.append(int(i.get("lprice", 0)))
+        except (ValueError, TypeError):
+            continue
     category = ""
     if shop_items:
         category = shop_items[0].get("category1", "")

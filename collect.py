@@ -126,13 +126,16 @@ def snapshot(d, cfg, client, today, now, started, budget_seconds, result):
         time.sleep(0.3)
 
 
-def update_demand(d, cfg, today, now):
+def update_demand(d, cfg, today, now, budget_seconds=None, started=None):
     if not cfg.get("datalab_enabled", True):
         return 0
     start = (date.fromisoformat(today)
              - timedelta(days=DATALAB_WINDOW_DAYS)).isoformat()
     updated = 0
     for batch in _chunks(d.top_by_opportunity(today, DATALAB_TOP_N), 4):
+        if budget_seconds is not None and time.monotonic() - started >= budget_seconds:
+            d.log_collection("(datalab)", "partial", "시간 예산 초과로 수요 단계 중단", now)
+            break
         try:
             ratios = fetch_demand_ratios(
                 cfg["client_id"], cfg["client_secret"],
@@ -186,7 +189,8 @@ def run_collection(cfg, client=None, today=None, trigger="schedule",
         snapshot(d, cfg, client, today, now, started, budget_seconds, result)
         if trigger == "schedule":
             base = date.fromisoformat(today)
-            result["demand_updated"] = update_demand(d, cfg, today, now)
+            result["demand_updated"] = update_demand(
+                d, cfg, today, now, budget_seconds, started)
             result["retired"] = retire(d, today, now)
             d.cleanup(
                 (base - timedelta(days=STATS_RETENTION_DAYS)).isoformat(),

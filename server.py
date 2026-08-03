@@ -1,4 +1,6 @@
+import hmac
 import os
+import threading
 from datetime import timedelta
 
 import config as config_mod
@@ -30,6 +32,7 @@ def create_app(cfg):
         raise RuntimeError("DASHBOARD_TOKEN required in production (fail-closed)")
     app = FastAPI()
     state = {"db": None}
+    lock = threading.Lock()
 
     def get_db():
         if state["db"] is None:
@@ -39,15 +42,16 @@ def create_app(cfg):
 
     def run_db(fn):
         # 서버리스에서 유휴 종료된 커넥션 대비: 연결 오류 1회 재연결 후 재시도 (스펙 §3)
-        try:
-            return fn(get_db())
-        except db.CONNECTION_ERRORS:
-            state["db"] = None
-            return fn(get_db())
+        with lock:
+            try:
+                return fn(get_db())
+            except db.CONNECTION_ERRORS:
+                state["db"] = None
+                return fn(get_db())
 
     def require_token(authorization: str = Header(default="")):
         token = cfg.get("dashboard_token", "")
-        if token and authorization != f"Bearer {token}":
+        if token and not hmac.compare_digest(authorization, f"Bearer {token}"):
             raise HTTPException(status_code=401, detail="invalid token")
 
     @app.get("/keywords")

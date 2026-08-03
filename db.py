@@ -348,12 +348,20 @@ ORDER BY ds.opportunity DESC LIMIT ?"""
         if not rows:
             return
         if self.dialect == "postgres":
-            with self.conn.cursor() as cur:
-                cur.executemany(
-                    "INSERT INTO top_results (keyword_id, day, post_date) VALUES (%s, %s, %s)",
-                    rows,
-                )
-                self.conn.commit()
+            for attempt in (0, 1):
+                try:
+                    with self.conn.cursor() as cur:
+                        cur.executemany(
+                            "INSERT INTO top_results (keyword_id, day, post_date) "
+                            "VALUES (%s, %s, %s)",
+                            rows,
+                        )
+                        self.conn.commit()
+                    break
+                except CONNECTION_ERRORS:
+                    if attempt == 1:
+                        raise
+                    self._connect()
         else:
             self.conn.executemany(
                 "INSERT INTO top_results (keyword_id, day, post_date) VALUES (?, ?, ?)",

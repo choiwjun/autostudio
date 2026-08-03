@@ -44,7 +44,10 @@ def test_run_lock_atomic_under_concurrency():
 
     def acquire():
         try:
+            d = db.Database(PG_URL)
+            d.init()
             ids.append(d.start_run("schedule", now, stale))
+            d.close()
         except Exception as e:  # noqa: BLE001
             errors.append(e)
 
