@@ -3848,3 +3848,9 @@ git commit -m "chore: final regression pass"
 6. **차단 시**: cron-job.org에서 `/collect` POST + Bearer + `{"trigger":"schedule"}` (45초 예산, 며칠에 걸쳐 순환)
 7. **PG 통합 테스트 실행**: `DATABASE_URL=... pytest tests/test_db_postgres.py -v` (로컬/CI Postgres에서 잠금 경합·재연결 검증)
 8. **브라우저 e2e(선택)**: `pip install playwright && playwright install chromium` 후 서버 기동 상태에서 `python tests/e2e_dashboard.py`
+
+### 배포 진행 기록 (2026-08-03 — Supabase 연동 완료)
+- **Supabase 프로젝트 연결 확정**: 리전 서울, 호스트 **`aws-1-ap-northeast-2.pooler.supabase.com`** (신형 aws-1 풀러 — aws-0은 테넌트 미등록). Session=5432, Transaction=6543. 직결(`db.<ref>.supabase.co`)은 IPv6 전용으로 이 PC/GH Actions/Vercel에서 연결 불가 확인(스펙 §3 예측과 일치)
+- **PG 통합 테스트 4건 실 DB 통과** (2026-08-03): 스키마 멱등 init + `idx_collection_runs_running` 인덱스, upsert/조회 roundtrip(LEFT JOIN·COALESCE), **8스레드 동시 start_run 원자 잠금**, 풀러 재연결 — 전부 통과. 테스트 데이터는 정리 완료, 프로덕션 스키마 6개 테이블 생성됨
+- **GitHub Secrets**: `DATABASE_URL`(Session pooler 5432) 등록 완료. 대기: `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET`
+- **DASHBOARD_TOKEN**: 생성 완료(사용자에게 전달됨 — Vercel Env·cron-job.org용, 레포 커밋 금지)
