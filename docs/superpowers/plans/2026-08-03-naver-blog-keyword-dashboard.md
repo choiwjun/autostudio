@@ -3872,3 +3872,12 @@ git commit -m "chore: final regression pass"
 - **구현**: `shopping_insight.py` 신규(오류 DatalabError 정규화), db 스키마 `shop_click_idx` 추가(+ 실DB ALTER 완료), collect `update_shop_clicks` 단계, server `click_min`·preset 갱신, HTML 쇼핑클릭 컬럼 교체 — 테스트 **76 passed + 4 skipped**
 - **실배포 검증**: v4 워크플로우 실행 → `done / 신규 1 / 스냅샷 1 / 오류 0`, 45초(같은 날짜 스킵). 기존 99개 + 신규 1개 = 100개 키워드
 - **유의**: 쇼핑 클릭 지수는 기회점수 상위 후보만 조회하므로 **2일차부터 산출** (1일차 opportunity NULL). 쇼핑 분야 코드 기본 `50000000`(생활/건강) — 분야 미매칭 키워드는 NULL 보호. 내일 07:17 KST 크론에서 전체 지표(기회·쇼핑클릭·수요) 최초 산출 예정
+
+### Vercel 배포 완료 (2026-08-03)
+- **URL**: `https://my1-eight-ivory.vercel.app` (프로젝트 my1, 프레임워크 fastapi 자동 감지)
+- **수정 필요했던 항목 2건**:
+  1. **rewrites 제거** — 프레임워크 자동 라우팅(framework=fastapi)과 명시적 rewrite `/(.*)→/api/index` 충돌로 모든 경로가 FastAPI 404(`{"detail":"Not Found"}`) → rewrite 삭제 후 전 라우트 정상
+  2. **SSO 배포 보호 해제** — 프로젝트 기본값 `all_except_custom_domains`라 vercel.app 별칭 접속이 로그인 화면(302 sso-api)으로 막힘 → API PATCH로 해제 (조회 공개는 설계 의도, 쓰기는 토큰 인증)
+- **환경변수 8개(Production, Sensitive)**: NAVER_CLIENT_ID/SECRET, DATABASE_URL(Transaction pooler 6543), DASHBOARD_TOKEN, DATALAB_ENABLED=1, DATALAB_ANCHOR, ENV=production, SHOPPING_INSIGHT_CATEGORY
+- **검증 완료**: `/` 200(대시보드 20,607B), `/status` 200(keywords=100 seeds=3), `/keywords` 200, `/collect` 무토큰 **401**(fail-closed), 토큰 포함 200(`snapshotted:0, errors:[]` — 같은 날짜 멱등)
+- **부가 효과**: Vercel이 GitHub(autostudio, main)와 자동 연동 — 이후 push 시 자동 배포 (meta: githubCommitSha 76a8ff9)
