@@ -3900,12 +3900,12 @@ git commit -m "chore: final regression pass"
 - 애드포스트 RPM: 금융/보험 800~1,000 > IT 500~700 > 맛집/여행 300~500 > 일상 200~400
 
 **코드 변경**:
-- scoring.py: question_pattern_score/i_citation_score(0.5×질문형+0.3×최신성+0.2×카테고리)/cpc_tier_score/6_priority(0.35×AI인용+0.35×수요+0.30×CPC) 신규
-- nalyzer.py: loggername 캡처 → 	op_bloggers (작성자 권위 프록시)
-- db.py: daily_stats.ai_cite_idx 컬럼 + _migrate() 자동 ALTER(기존 DB 포함) + priority 정렬 SQL + i_cite 정렬
+- scoring.py: question_pattern_score/ai_citation_score(0.5×질문형+0.3×최신성+0.2×카테고리)/cpc_tier_score/v6_priority(0.35×AI인용+0.35×수요+0.30×CPC) 신규
+- analyzer.py: bloggername 캡처 → top_bloggers (작성자 권위 프록시)
+- db.py: daily_stats.ai_cite_idx 컬럼 + _migrate() 자동 ALTER(기존 DB 포함) + priority 정렬 SQL + ai_cite 정렬
 - collect.py: compute_scores에서 ai_cite_idx 사전계산 + 시드 없으면 default_focus_seeds 자동 초기화
 - config.py: DEFAULT_FOCUS_SEEDS(보험/금융/건강/IT/교육 10개), DEFAULT_CPC_TIERS
-- server.py: 기본 프리셋 i_pick(ai_cite≥0.6 & demand≥0.2), 기본 정렬 priority, 기본 뷰 Top-20 추천
+- server.py: 기본 프리셋 ai_pick(ai_cite≥0.6 & demand≥0.001), 기본 정렬 priority, 기본 뷰 Top-20 추천
 - static/index.html: **상용화 라이트 전문가형 대시보드 재설계** (qwen3.8-max-preview 위임) — KPI 카드 4개, 프리셋 세그먼트(AI픽/유망/전체), Priority·AI인용 컬럼, Pretendard, 반응형
 - scripts/replace_seeds.py: 프로덕션 시드 교체 스크립트 (기존 22개 삭제 → 집중 10개)
 
@@ -3914,3 +3914,27 @@ git commit -m "chore: final regression pass"
 **검증**: 단위 84 passed + e2e(브라우저) 통과 + 시각 스모크(콘솔 에러 0) + 스크린샷 docs/v6-screenshots/
 
 **오케스트레이션**: 프론트엔드는 qwen3.8-max-preview CLI에 위임, 지휘·검증은 메인 에이전트 담당. (qwen non-interactive는 시작 시 'Built-in Provider Update' 프롬프트에서 대기 → tmux interactive 모드로 실행 필요)
+
+### v6.1 전환 기록 (2026-08-03 — 임계값 현실화 + 개발 편의)
+
+**demand 임계값 현실화 (server.py)**:
+- **문제**: ai_pick 프리셋의 `demand_min=0.2`는 데이터랩 앵커('냉장고') 대비 **상대 비율**의 실측 분포(0~0.01)와 동떨어져 전 키워드가 ai_pick에서 탈락 — Priority 뷰가 비는 버그로 확인
+- **수정**: `demand_min=0.2 → 0.001` (앵커의 0.1%). demand_idx는 절대값이 아닌 상대값이므로 임계도 상대 기준으로 현실화
+- **검증**: 로컬 2일차 시뮬레이션에서 ai_pick 3건 노출 확인 (priority 51~54)
+
+**development 인증 생략 (server.py)**:
+- **문제**: `.env.local`에 DASHBOARD_TOKEN이 설정되면서 로컬 개발에서 쓰기 API(수집/시드)가 401
+- **수정**: `require_token`에 `env == "development"`면 토큰이 있어도 인증 생략 — README "로컬 개발만 인증 생략"과 일치, 프로덕션(ENV=production) fail-closed는 유지
+- **검증**: 테스트를 development/production 분리 검증으로 업데이트 (84 passed)
+
+**차트 가독성 개선 (static/index.html — qwen3.8-max-preview 위임)**:
+- **문제**: 상세 모달 차트에서 총 글 수(수천~수만)와 점수(0~100)가 한 축에 섞여 점수 라인이 바닥에 눌림
+- **수정**: y축(왼쪽) 0~100 고정 = 점수 3종 / y2축(오른쪽) = 총 글 수(콤마). 총 글 수 회색 점선(borderDash), x축 날짜 포맷(20260802→8/2), spanGaps로 null 연결, 툴팁 index 모드(같은 날짜 4지표 동시 표시)
+- **검증**: 브라우저 Chart 설정 확인(4 dataset, y 0~100, spanGaps, 점선) + 콘솔 에러 0
+
+**커밋**: `11fa6ec`(차트) · `4bb9c00`(임계값+인증) — push 완료
+
+**프로덕션 적용 완료 (2026-08-03)**:
+- **시드 교체 실행**: `scripts/replace_seeds.py` — 기존 22개 트렌드 시드 삭제 → 집중 10개(보험/금융/건강/IT/교육) 교체 완료 (Vercel 확인: seeds=10)
+- **수집 배치 실행**: `gh workflow run daily-collect.yml` → 성공 (`신규 7개, 스냅샷 7개, 오류 0`, 1m43s) — 새 집중 시드 기준 발굴 동작 확인
+- **Vercel 배포**: push 자동 배포, `/status` 정상 (keywords=197, seeds=10)
