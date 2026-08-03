@@ -4,120 +4,272 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>키워드 대시보드</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <style>
-  body { font-family: 'Malgun Gothic', sans-serif; margin: 24px; background: #f7f8fa; }
-  h1 { font-size: 20px; }
-  .bar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
-  table { width: 100%; border-collapse: collapse; background: #fff; }
-  th, td { padding: 8px 10px; border-bottom: 1px solid #eee; text-align: left; font-size: 13px; }
-  /* v3: sticky header — 1,000행 스크롤 편의 (UX §3) */
-  thead th { position: sticky; top: 0; background: #fff; z-index: 2; }
-  th.sortable { cursor: pointer; background: #f0f2f5; user-select: none; }
-  .arr { font-size: 10px; color: #2e8b57; font-weight: 700; }
-  /* v3: 기회점수 게이지 막대 (UX §3 — 점수는 신호라 숫자+막대 함께) */
-  .gauge { display: inline-block; width: 44px; height: 6px; background: #e8eaed;
-           border-radius: 3px; vertical-align: middle; margin-right: 4px; }
-  .gauge i { display: block; height: 100%; background: #2e8b57; border-radius: 3px; }
-  .dim { color: #6b7280; }
-  .rise { color: #2e8b57; } .fall { color: #c0392b; }
-  .excluded { opacity: 0.45; }  /* v3: 제외된 행 흐림 (UX §5.3) */
-  /* v3: 첫 로드 스켈레톤 (UX §5.5) */
-  .skel td { height: 38px; background: linear-gradient(90deg, #f3f4f6 25%, #e9ebee 37%, #f3f4f6 63%);
-             background-size: 400% 100%; animation: pulse 1.2s infinite; border: none; }
+  /* v6: 라이트 전문가형 — Stripe/Linear/Vercel 대시보드 톤 */
+  :root {
+    --primary: #3b82f6; --primary-dark: #2563eb;
+    --success: #16a34a; --warning: #f59e0b; --danger: #ef4444;
+    --bg: #f9fafb; --card: #fff; --border: #e5e7eb;
+    --text: #111827; --muted: #6b7280;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-size: 14px;
+         font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont,
+                      system-ui, Roboto, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+
+  /* 상단 바 */
+  .topbar { background: var(--card); border-bottom: 1px solid var(--border); padding: 18px 0; }
+  .topbar .wrap { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0; font-weight: 700; letter-spacing: -0.02em; }
+  .sub { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+  main.wrap { padding: 20px; }
+
+  /* KPI 카드 */
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .kpi { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .kpi-label { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .kpi-value { font-size: 24px; font-weight: 700; margin-top: 6px; letter-spacing: -0.02em;
+               font-variant-numeric: tabular-nums; }
+  .kpi-value.warn { color: var(--warning); }
+  .kpi-sub { font-size: 12px; color: var(--muted); margin-top: 4px;
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+
+  /* 상태 라인 */
+  #status { display: block; font-size: 12px; color: var(--muted); margin-bottom: 12px; min-height: 16px; }
+  #status.warn { color: var(--danger); font-weight: 600; }
+
+  /* 필터 바 */
+  .filters { padding: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+  .filters select, .filters input { height: 34px; padding: 0 10px; border: 1px solid var(--border);
+    border-radius: 8px; background: #fff; font-size: 13px; color: var(--text); font-family: inherit; }
+  .filters select:focus, .filters input:focus { outline: none; border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, .15); }
+  #q { min-width: 160px; }
+  .chk { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .token-box { margin-left: auto; display: inline-flex; gap: 6px; }
+  .token-box input { width: 110px; }
+
+  /* 버튼 */
+  .btn { height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--border);
+         background: #fff; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--text);
+         font-family: inherit; }
+  .btn:hover { background: #f3f4f6; }
+  .btn:disabled { opacity: .55; cursor: default; }
+  .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .btn-primary:hover { background: var(--primary-dark); }
+  .btn-sm { height: 26px; padding: 0 10px; font-size: 12px; border-radius: 6px; }
+
+  /* 프리셋 세그먼트 */
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button { height: 32px; padding: 0 12px; border: 0; border-right: 1px solid var(--border);
+                background: #fff; font-size: 12px; font-weight: 600; color: var(--muted);
+                cursor: pointer; font-family: inherit; }
+  .seg button:last-child { border-right: 0; }
+  .seg button:hover { background: #f3f4f6; }
+  .seg button.on { background: #eff6ff; color: #1d4ed8; }
+
+  /* 테이블 */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 1000px; }
+  th, td { padding: 10px 12px; font-size: 13px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  thead th { position: sticky; top: 0; background: var(--bg); z-index: 2;
+             font-size: 12px; color: var(--muted); font-weight: 600; }
+  th.sortable { cursor: pointer; user-select: none; color: var(--text); }
+  th.sortable:hover { color: var(--primary); }
+  .arr { font-size: 10px; color: var(--primary); font-weight: 700; }
+  tbody tr { cursor: pointer; }
+  tbody tr:nth-child(even) { background: #fafbfc; }
+  tbody tr:hover { background: #eff6ff; }
+  .td-kw { max-width: 260px; white-space: normal; word-break: break-all; font-weight: 600; }
+  .num { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .gauge { display: inline-block; width: 56px; height: 6px; background: var(--border);
+           border-radius: 3px; vertical-align: middle; margin-right: 6px; overflow: hidden; }
+  .gauge i { display: block; height: 100%; border-radius: 3px; }
+  .g-blue i { background: var(--primary); }
+  .g-green i { background: var(--success); }
+  .dim { color: #9ca3af; }
+  .rise { color: var(--success); font-weight: 600; }
+  .fall { color: var(--danger); font-weight: 600; }
+  .excluded { opacity: 0.45; }
+
+  /* 배지 */
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+           font-weight: 600; border: 1px solid transparent; }
+  .b-gold { background: #fef3c7; color: #92400e; border-color: #fde68a; }   /* AI유망 */
+  .b-green { background: #dcfce7; color: #15803d; border-color: #bbf7d0; }  /* 애포 */
+  .b-warn { background: #ffedd5; color: #c2410c; border-color: #fed7aa; }   /* 수요낮음 */
+  .b-gray { background: #f3f4f6; color: #6b7280; border-color: var(--border); }
+
+  /* 스켈레톤 */
+  .skel td { height: 40px; background: linear-gradient(90deg, #f3f4f6 25%, #e9ebee 37%, #f3f4f6 63%);
+             background-size: 400% 100%; animation: pulse 1.2s infinite; border-bottom: 1px solid var(--border); }
   @keyframes pulse { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
-  .btn { padding: 6px 14px; border: 1px solid #ccc; background: #fff; cursor: pointer; border-radius: 4px; }
-  .btn:hover { background: #eee; }
-  .btn:disabled { opacity: .5; cursor: default; }
-  .btn.on { background: #2e8b57; color: #fff; border-color: #2e8b57; }  /* v3: 프리셋 활성 */
-  .btn-sm { padding: 2px 8px; font-size: 11px; }
-  .empty { color: #999; padding: 40px; text-align: center; }
-  .warn { color: #c0392b; font-weight: bold; }
-  .badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; }
-  .b-gold { background: #fff3d6; color: #8a6d00; }
-  .b-gray { background: #eee; color: #666; }
-  #detail { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none; align-items: center; justify-content: center; }
-  #detail .panel { background: #fff; padding: 24px; border-radius: 8px; width: 720px; max-width: 90vw; }
-  /* v3: 상세 모달 오류 패널 (UX §5.4 — 404/네트워크 오류) */
-  #detailError { display: none; margin-bottom: 12px; padding: 12px;
-                 background: #fdf2f2; border: 1px solid #f0c4c4; border-radius: 6px; font-size: 13px; }
+  .empty { color: var(--muted); padding: 48px 16px; text-align: center; line-height: 1.9; white-space: normal; }
+
+  /* 페이저 */
+  .pager { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--border); }
+  #pageInfo { font-size: 12px; color: var(--muted); }
+
+  /* 시드 패널 */
+  #seedsPanel { margin-top: 12px; padding: 16px; }
+  #seedsPanel .seed-form { display: flex; gap: 8px; flex-wrap: wrap; }
+  #seedList { list-style: none; margin: 12px 0 0; padding: 0; }
+  #seedList li { display: flex; justify-content: space-between; align-items: center; gap: 8px;
+                 padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  #seedList li:last-child { border-bottom: 0; }
+
+  /* 상세 모달 */
+  #detail { position: fixed; inset: 0; background: rgba(17, 24, 39, .5); display: none;
+            align-items: center; justify-content: center; padding: 20px; z-index: 50; }
+  #detail .panel { background: #fff; border-radius: 14px; width: 760px; max-width: 94vw;
+                   max-height: 90vh; overflow: auto; box-shadow: 0 20px 50px rgba(0, 0, 0, .2); }
+  .panel-head { display: flex; justify-content: space-between; align-items: center;
+                padding: 16px 20px; border-bottom: 1px solid var(--border); }
+  .panel-head h3 { margin: 0; font-size: 16px; letter-spacing: -0.01em; }
+  .x { border: 0; background: transparent; font-size: 16px; cursor: pointer; color: var(--muted); padding: 4px; }
+  .x:hover { color: var(--text); }
+  .panel-body { padding: 20px; }
+  #detailError { display: none; margin-bottom: 12px; padding: 12px; background: #fef2f2;
+                 border: 1px solid #fecaca; border-radius: 8px; font-size: 13px; color: #991b1b; }
 </style>
 </head>
 <body>
-  <h1>키워드 대시보드</h1>
-  <div class="bar">
-    <button class="btn" id="collectBtn" onclick="collect()">지금 수집 실행</button>
-    <span style="font-size:12px;color:#888">수동 수집은 일부 갱신용 — 전체 수집은 매일 아침 자동</span>
+  <header class="topbar">
+    <div class="wrap">
+      <div>
+        <h1>키워드 대시보드</h1>
+        <p class="sub">AI 인용 · 수요 · CPC 기반 상용화 키워드 우선순위</p>
+      </div>
+      <button class="btn btn-primary" id="collectBtn" onclick="collect()">지금 수집 실행</button>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <!-- v6: KPI 카드 — /status + 상위 priority -->
+    <section class="kpis" aria-label="핵심 지표">
+      <div class="kpi">
+        <div class="kpi-label">키워드</div>
+        <div class="kpi-value" id="kpiKeywords">-</div>
+        <div class="kpi-sub">활성 기준</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">시드 키워드</div>
+        <div class="kpi-value" id="kpiSeeds">-</div>
+        <div class="kpi-sub">발굴 기준점</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">마지막 수집</div>
+        <div class="kpi-value" id="kpiLast">-</div>
+        <div class="kpi-sub" id="kpiLastSub">확인 중</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">상위 Priority</div>
+        <div class="kpi-value" id="kpiTop">-</div>
+        <div class="kpi-sub" id="kpiTopSub">&nbsp;</div>
+      </div>
+    </section>
+
     <span id="status"></span>
+
+    <section class="card filters" aria-label="필터">
+      <select id="category" onchange="resetAndLoad()" aria-label="분야 필터">
+        <option value="">전체 분야</option>
+      </select>
+      <select id="click" onchange="resetAndLoad()" aria-label="쇼핑클릭 필터">
+        <option value="">쇼핑클릭 전체</option>
+        <option value="0.5">클릭 0.5+ (앵커 대비)</option>
+        <option value="0.2">클릭 0.2+</option>
+      </select>
+      <select id="discovered" onchange="resetAndLoad()" aria-label="발견기간 필터">
+        <option value="">발견기간 전체</option>
+        <option value="7">최근 7일</option>
+        <option value="30">최근 30일</option>
+      </select>
+      <input id="q" placeholder="키워드 검색" oninput="onSearchInput()" aria-label="키워드 검색">
+      <label class="chk"><input type="checkbox" id="showInactive" onchange="resetAndLoad()"> 제외 목록 포함</label>
+      <div class="seg" role="group" aria-label="프리셋">
+        <button type="button" id="presetAi" onclick="togglePreset('ai_pick')">AI픽</button>
+        <button type="button" id="presetProm" onclick="togglePreset('promising')">유망</button>
+        <button type="button" id="presetAll" onclick="togglePreset('')">전체</button>
+      </div>
+      <button class="btn" onclick="toggleSeeds()">시드키워드 관리</button>
+      <div class="token-box">
+        <input id="token" type="password" placeholder="토큰" aria-label="대시보드 토큰">
+        <button class="btn" onclick="saveToken()">토큰 저장</button>
+      </div>
+    </section>
+
+    <section class="card" aria-label="키워드 목록">
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th class="sortable" data-sort="priority" onclick="setSort('priority')">Priority</th>
+            <th>키워드</th>
+            <th>분야</th>
+            <th class="sortable" data-sort="ai_cite" onclick="setSort('ai_cite')">AI인용</th>
+            <th class="sortable" data-sort="opportunity" onclick="setSort('opportunity')">기회점수</th>
+            <th class="sortable" data-sort="click" onclick="setSort('click')">쇼핑클릭</th>
+            <th class="sortable" data-sort="demand" onclick="setSort('demand')">수요지수</th>
+            <th>총 글 수</th>
+            <th class="sortable" data-sort="growth" onclick="setSort('growth')">증감률</th>
+            <th>일수</th>
+            <th>권장</th>
+            <th></th>
+          </tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <button class="btn btn-sm" onclick="prevPage()">이전</button>
+        <span id="pageInfo"></span>
+        <button class="btn btn-sm" onclick="nextPage()">다음</button>
+      </div>
+    </section>
+
+    <section id="seedsPanel" class="card" style="display:none">
+      <div class="seed-form">
+        <input id="seedInput" placeholder="시드키워드" aria-label="시드키워드 입력">
+        <input id="seedCat" placeholder="분야" aria-label="분야 입력">
+        <button class="btn" onclick="addSeed()">추가</button>
+      </div>
+      <ul id="seedList"></ul>
+    </section>
+  </main>
+
+  <div id="detail" role="dialog" aria-modal="true">
+    <div class="panel">
+      <div class="panel-head">
+        <h3 id="detailTitle"></h3>
+        <button class="x" onclick="closeDetail()" aria-label="닫기">✕</button>
+      </div>
+      <div class="panel-body">
+        <div id="detailError"></div>
+        <canvas id="chart" height="220"></canvas>
+      </div>
+    </div>
   </div>
-  <div class="bar">
-    <select id="category" onchange="resetAndLoad()">
-      <option value="">전체 분야</option>
-    </select>
-    <select id="click" onchange="resetAndLoad()">
-      <option value="">쇼핑클릭 전체</option>
-      <option value="0.5">클릭 0.5+ (앵커 대비)</option>
-      <option value="0.2">클릭 0.2+</option>
-    </select>
-    <select id="discovered" onchange="resetAndLoad()">
-      <option value="">발견기간 전체</option>
-      <option value="7">최근 7일</option>
-      <option value="30">최근 30일</option>
-    </select>
-    <input id="q" placeholder="키워드 검색" oninput="onSearchInput()">
-    <label style="font-size:12px"><input type="checkbox" id="showInactive" onchange="resetAndLoad()"> 제외 목록 포함</label>
-    <button class="btn" id="presetBtn" onclick="togglePreset()">유망 프리셋</button>  <!-- v3: UX §8 -->
-    <button class="btn" onclick="toggleSeeds()">시드키워드 관리</button>
-    <input id="token" type="password" placeholder="토큰" style="width:100px">
-    <button class="btn" onclick="saveToken()">토큰 저장</button>
-  </div>
-  <table>
-    <thead><tr>
-      <th class="sortable" data-sort="opportunity" onclick="setSort('opportunity')">기회점수</th>
-      <th class="sortable" data-sort="click" onclick="setSort('click')">쇼핑클릭</th>
-      <th class="sortable" data-sort="demand" onclick="setSort('demand')">수요지수</th>
-      <th>키워드</th>
-      <th>분야</th>
-      <th>총 글 수</th>
-      <th class="sortable" data-sort="growth" onclick="setSort('growth')">증감률</th>
-      <th>일수</th>
-      <th>권장</th>
-      <th></th>
-    </tr></thead>
-    <tbody id="rows"></tbody>
-  </table>
-  <div class="bar" style="margin-top:12px">
-    <button class="btn" onclick="prevPage()">이전</button>
-    <span id="pageInfo"></span>
-    <button class="btn" onclick="nextPage()">다음</button>
-  </div>
-  <div id="seedsPanel" style="display:none; margin-top:16px; background:#fff; padding:16px;">
-    <input id="seedInput" placeholder="시드키워드">
-    <input id="seedCat" placeholder="분야">
-    <button class="btn" onclick="addSeed()">추가</button>
-    <ul id="seedList"></ul>
-  </div>
-  <div id="detail"><div class="panel">
-    <h3 id="detailTitle"></h3>
-    <div id="detailError"></div>
-    <canvas id="chart" height="220"></canvas>
-    <button class="btn" onclick="closeDetail()">닫기</button>
-  </div></div>
+
 <script>
-let sortBy = 'opportunity';
-let sortDir = 'desc';      // v3: 정렬 토글 — 1회 내림차순 → 2회 오름차순 (UX §6)
+// v6: 기본 정렬 priority, 기본 프리셋 ai_pick (server 기본값과 일치)
+let sortBy = 'priority';
+let sortDir = 'desc';
 let page = 1;
-let preset = '';           // v3: 유망 프리셋 'promising' — 기회≥70 & 상업성≥60 & 수요≥0.01 (UX §8)
-let loading = true;        // v3: 첫 로드 스켈레톤 (UX §5.5)
-let loadError = false;     // v3: API 오류 → [다시 시도] (UX §5.5)
-let collectBusy = false;   // v3: 수집 중 버튼 비활성 (UX §5.1)
-let detailError = null;    // v3: 상세 모달 오류 패널 (UX §5.4)
+let preset = 'ai_pick';
+let loading = true;
+let loadError = false;
+let collectBusy = false;
+let detailError = null;
 const PAGE_SIZE = 50;
 let totalCount = 0;
 let chart = null;
 let qTimer = null;
 
-// 외부 유래 문자열(키워드·분야 등)은 반드시 이스케이프 (XSS 방지 — 스펙 §4.10)
+// 외부 유래 문자열(키워드·분야 등)은 반드시 이스케이프 (XSS 방지)
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -143,28 +295,30 @@ function setStatus(msg, warn) {
 async function api(path, opts) {
   const r = await fetch(path, opts);
   if (r.status === 401) { setStatus('토큰이 올바르지 않습니다 — 토큰 입력 후 저장', true); throw new Error('401'); }
-  if (!r.ok) throw new Error('HTTP ' + r.status);  // v3: 404/500 → load()의 오류 UI (UX §5.5)
+  if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 }
 
+// v6 권장 배지: priority>=70 'AI유망' → opportunity>=60 '애포' → demand<0.01 '수요낮음' → '보류'
 function recommend(i) {
-  if (i.opportunity === null) return { label: '데이터 쌓는 중', cls: 'b-gray' };
-  if (i.demand_idx !== null && i.demand_idx < 0.01) return { label: '수요낮음', cls: 'b-gray' };
-  // v4: 쇼핑 검색 API 종료 — 쇼커는 쇼핑 클릭 지수(앵커 대비) ≥ 0.5로 판정
-  if (i.opportunity >= 70 && i.shop_click_idx !== null && i.shop_click_idx >= 0.5) return { label: '쇼커', cls: 'b-gold' };
-  if (i.opportunity >= 60) return { label: '애포', cls: 'b-gold' };
-  if (i.opportunity <= 35) return { label: '경쟁과열', cls: 'b-gray' };
+  if (i.priority !== null && i.priority >= 70) return { label: 'AI유망', cls: 'b-gold' };
+  if (i.opportunity !== null && i.opportunity >= 60) return { label: '애포', cls: 'b-green' };
+  if (i.demand_idx !== null && i.demand_idx < 0.01) return { label: '수요낮음', cls: 'b-warn' };
   return { label: '보류', cls: 'b-gray' };
 }
 
-// v3: 기회점수 = 숫자 + 옅은 게이지 막대 (UX §3)
+function priorityCell(p) {
+  if (p === null) return '<span class="dim">—</span>';
+  const w = Math.max(0, Math.min(100, p));
+  return `<span class="gauge g-blue"><i style="width:${w}%"></i></span><span class="num">${p.toFixed(1)}</span>`;
+}
+
 function gaugeCell(opp) {
   if (opp === null) return '<span class="dim">쌓는 중</span>';
   const w = Math.max(0, Math.min(100, opp));
-  return `<span class="gauge"><i style="width:${w}%"></i></span>${opp.toFixed(0)}`;
+  return `<span class="gauge g-green"><i style="width:${w}%"></i></span><span class="num">${opp.toFixed(0)}</span>`;
 }
 
-// v3: 활성 정렬 컬럼에 ↑/↓ 화살표 + aria-sort (UX §7)
 function renderSortArrows() {
   document.querySelectorAll('th.sortable').forEach(th => {
     th.removeAttribute('aria-sort');
@@ -180,9 +334,8 @@ function renderSortArrows() {
 }
 
 function skeletonRows() {
-  // v3: 첫 로드 스켈레톤 — 컬럼 골격 유지 (UX §5.5)
   let html = '';
-  for (let i = 0; i < 8; i++) html += '<tr class="skel"><td colspan="10"></td></tr>';
+  for (let i = 0; i < 8; i++) html += '<tr class="skel"><td colspan="12"></td></tr>';
   return html;
 }
 
@@ -206,9 +359,8 @@ async function load() {
     if (String(e.message) === '401') return;
     loading = false;
     loadError = true;
-    // v3: API 오류 → [다시 시도] (UX §5.5)
     document.getElementById('rows').innerHTML =
-      '<tr><td colspan="10" class="empty">데이터를 불러오지 못했습니다 ' +
+      '<tr><td colspan="12" class="empty">데이터를 불러오지 못했습니다 ' +
       '<button class="btn btn-sm" onclick="load()">다시 시도</button></td></tr>';
     return;
   }
@@ -218,36 +370,36 @@ async function load() {
   const rows = document.getElementById('rows');
   rows.innerHTML = '';
   if (!data.items.length) {
-    // v3: 온보딩(전체 0건)과 필터/프리셋/페이지 0건을 구분 — 온보딩 카피는 전체 0건일 때만 (UX §5.5)
     const filtering = preset || params.get('q') || params.get('category')
       || Number(params.get('click_min')) > 0 || Number(params.get('discovered_within')) > 0
       || params.get('show_inactive') == 1 || page > 1;
     rows.innerHTML = filtering
-      ? '<tr><td colspan="10" class="empty">검색 결과가 없습니다 — 필터를 조정하거나 <button class="btn btn-sm" onclick="resetFilters()">필터 초기화</button></td></tr>'
-      : '<tr><td colspan="10" class="empty">아직 데이터가 없습니다 — 시드 추가 후 "지금 수집 실행" (점수는 2일차부터)<br><br>'
+      ? '<tr><td colspan="12" class="empty">검색 결과가 없습니다 — 필터를 조정하거나 <button class="btn btn-sm" onclick="resetFilters()">필터 초기화</button></td></tr>'
+      : '<tr><td colspan="12" class="empty">아직 데이터가 없습니다 — 시드 추가 후 "지금 수집 실행" (점수는 2일차부터)<br>'
         + '<button class="btn" onclick="openSeeds()">시드 추가</button> '
-        + '<button class="btn" onclick="collect()">지금 수집 실행</button></td></tr>';
+        + '<button class="btn btn-primary" onclick="collect()">지금 수집 실행</button></td></tr>';
   }
   data.items.forEach(i => {
-    // v4: 쇼핑클릭 = 쇼핑인사이트 앵커 대비 클릭 지수 (쇼핑 검색 API 종료 대체)
     const clickVal = i.shop_click_idx === null ? '-' : i.shop_click_idx.toFixed(2);
     const clickTip = '쇼핑인사이트 클릭 추이 (앵커 대비)';
     const demand = i.demand_idx === null ? '-' : i.demand_idx.toFixed(2);
+    const aiCite = i.ai_cite_idx === null ? '-' : i.ai_cite_idx.toFixed(2);
     const growth = i.growth === null ? '-'
       : `<span class="${i.growth > 0 ? 'rise' : i.growth < 0 ? 'fall' : ''}">${i.growth > 0 ? '▲ ' : i.growth < 0 ? '▼ ' : ''}${(i.growth * 100).toFixed(1)}%</span>`;
     const rec = recommend(i);
     const tr = document.createElement('tr');
-    if (!i.active) tr.classList.add('excluded');  // v3: 제외 행 opacity 0.45 (UX §5.3)
-    tr.style.cursor = 'pointer';
+    if (!i.active) tr.classList.add('excluded');
     tr.innerHTML = `
-      <td>${gaugeCell(i.opportunity)}</td>
-      <td title="${esc(clickTip)}">${esc(clickVal)}</td>
-      <td>${esc(demand)}</td>
-      <td>${esc(i.keyword)}${i.active ? '' : ' <span class="badge b-gray">제외됨</span>'}</td>
+      <td>${priorityCell(i.priority)}</td>
+      <td class="td-kw">${esc(i.keyword)}${i.active ? '' : ' <span class="badge b-gray">제외됨</span>'}</td>
       <td>${esc(i.category)}</td>
-      <td>${Number(i.total_sim).toLocaleString()}</td>
+      <td class="num">${esc(aiCite)}</td>
+      <td>${gaugeCell(i.opportunity)}</td>
+      <td class="num" title="${esc(clickTip)}">${esc(clickVal)}</td>
+      <td class="num">${esc(demand)}</td>
+      <td class="num">${Number(i.total_sim).toLocaleString()}</td>
       <td title="최신순 글 수(total_date) 전일 대비 — 총 글 수는 정확도순(total_sim)">${growth}</td>
-      <td>${esc(i.days)}일</td>
+      <td class="num">${esc(i.days)}일</td>
       <td><span class="badge ${rec.cls}">${esc(rec.label)}</span></td>
       <td><button class="btn btn-sm" onclick="toggleActive(${i.id}, ${i.active ? 'false' : 'true'}, event)">${i.active ? '제외' : '복원'}</button></td>`;
     tr.onclick = () => detail(i.id);
@@ -265,19 +417,26 @@ function resetFilters() {
   document.getElementById('discovered').value = '';
   document.getElementById('q').value = '';
   document.getElementById('showInactive').checked = false;
-  preset = '';
+  preset = 'ai_pick';
   updatePresetBtn();
   resetAndLoad();
 }
 function setSort(col) {
-  // v3: 같은 컬럼 재클릭 → 방향 토글 (UX §6: 1회 내림차순, 2회 오름차순)
   if (col === sortBy) sortDir = sortDir === 'desc' ? 'asc' : 'desc';
   else { sortBy = col; sortDir = 'desc'; }
   resetAndLoad();
 }
-function togglePreset() { preset = preset ? '' : 'promising'; updatePresetBtn(); resetAndLoad(); }
+// v6: 프리셋 세그먼트 — 활성 프리셋 재클릭 시 해제(''), '전체'는 필터 없음
+function togglePreset(p) {
+  if (!p) preset = '';
+  else preset = preset === p ? '' : p;
+  updatePresetBtn();
+  resetAndLoad();
+}
 function updatePresetBtn() {
-  document.getElementById('presetBtn').classList.toggle('on', !!preset);
+  document.getElementById('presetAi').classList.toggle('on', preset === 'ai_pick');
+  document.getElementById('presetProm').classList.toggle('on', preset === 'promising');
+  document.getElementById('presetAll').classList.toggle('on', preset === '');
 }
 function onSearchInput() { clearTimeout(qTimer); qTimer = setTimeout(resetAndLoad, 300); }
 function prevPage() { if (page > 1) { page--; load(); } }
@@ -294,12 +453,14 @@ async function toggleActive(id, active, ev) {
 }
 
 async function loadCategories() {
-  const cats = await api('/categories');
-  const sel = document.getElementById('category');
-  const cur = sel.value;
-  sel.innerHTML = '<option value="">전체 분야</option>'
-    + cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
-  sel.value = cur;
+  try {
+    const cats = await api('/categories');
+    const sel = document.getElementById('category');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">전체 분야</option>'
+      + cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+    sel.value = cur;
+  } catch (e) { /* 카테고리 로드 실패해도 목록은 표시 */ }
 }
 
 async function collect() {
@@ -308,7 +469,7 @@ async function collect() {
   const btn = document.getElementById('collectBtn');
   btn.disabled = true;
   btn.textContent = '수집 중...';
-  setStatus('수집 실행 중... (최대 45초)');  // v3: 전 구간 예산 문구 (UX §5.1)
+  setStatus('수집 실행 중... (최대 45초)');
   try {
     const res = await api('/collect', { method: 'POST', headers: authHeaders() });
     if (res.locked) setStatus('이미 수집이 실행 중입니다 — 잠시 후 새로고침');
@@ -322,26 +483,60 @@ async function collect() {
     btn.textContent = '지금 수집 실행';
   }
   await refreshStatus();
+  loadTopKpi();
   load();
 }
 
 async function refreshStatus() {
-  const s = await api('/status');
+  let s;
+  try {
+    s = await api('/status');
+  } catch (e) {
+    if (String(e.message) !== '401') setStatus('상태를 불러오지 못했습니다', true);
+    return;
+  }
+  document.getElementById('kpiKeywords').textContent = Number(s.keyword_count).toLocaleString();
+  document.getElementById('kpiSeeds').textContent = Number(s.seed_count).toLocaleString();
+  const lastEl = document.getElementById('kpiLast');
+  const lastSub = document.getElementById('kpiLastSub');
   let msg = `키워드 ${s.keyword_count}개 · 시드 ${s.seed_count}개`;
   let warn = false;
   if (s.last_success) {
     const day = (s.last_success.finished_at || '').slice(0, 10);
     const ageDays = Math.floor((new Date(s.today) - new Date(day)) / 86400000);
+    lastEl.textContent = day;
+    lastEl.classList.toggle('warn', ageDays > 2);
+    lastSub.textContent = ageDays > 2 ? `${ageDays}일 전 — 수집 지연 ⚠` : `${ageDays}일 전`;
     msg += ` · 마지막 성공 수집 ${day}`;
     if (ageDays > 2) { msg += ' ⚠ 수집이 밀려 있습니다 (Actions/Supabase 상태 확인)'; warn = true; }
   } else {
+    lastEl.textContent = '-';
+    lastSub.textContent = '수집 이력 없음';
     msg += ' · 수집 이력 없음';
   }
   setStatus(msg, warn);
 }
 
+// v6: KPI '상위 Priority' — 전체 1위 키워드 (프리셋 해제 상태로 조회)
+async function loadTopKpi() {
+  const el = document.getElementById('kpiTop');
+  const sub = document.getElementById('kpiTopSub');
+  try {
+    const d = await api('/keywords?' + new URLSearchParams({
+      sort: 'priority', sort_dir: 'desc', page: 1, page_size: 1, preset: '',
+    }));
+    const top = d.items[0];
+    if (top && top.priority !== null) {
+      el.textContent = top.priority.toFixed(1);
+      sub.textContent = top.keyword;
+    } else {
+      el.textContent = '-';
+      sub.textContent = '데이터 없음';
+    }
+  } catch (e) { /* KPI 전용 — 실패해도 목록과 무관 */ }
+}
+
 async function detail(id) {
-  // v3: 상세 모달 오류 패널 — 404는 "키워드를 찾을 수 없습니다", 그 외는 [다시 시도] (UX §5.4)
   detailError = null;
   document.getElementById('detailError').style.display = 'none';
   let d;
@@ -371,10 +566,10 @@ async function detail(id) {
     data: {
       labels: d.history.map(h => h.day),
       datasets: [
-        { label: '기회점수', data: d.history.map(h => h.opportunity), borderColor: '#2e8b57', yAxisID: 'y' },
-        { label: '수요지수×100', data: d.history.map(h => h.demand_idx === null ? null : h.demand_idx * 100), borderColor: '#3399ff', yAxisID: 'y' },
-        { label: '총 글 수', data: d.history.map(h => h.total_sim), borderColor: '#666', yAxisID: 'y2' },
-        { label: '쇼핑클릭×100', data: d.history.map(h => h.shop_click_idx === null ? null : h.shop_click_idx * 100), borderColor: '#e8a13a', yAxisID: 'y' },
+        { label: '기회점수', data: d.history.map(h => h.opportunity), borderColor: '#16a34a', yAxisID: 'y' },
+        { label: '수요지수×100', data: d.history.map(h => h.demand_idx === null ? null : h.demand_idx * 100), borderColor: '#3b82f6', yAxisID: 'y' },
+        { label: '총 글 수', data: d.history.map(h => h.total_sim), borderColor: '#9ca3af', yAxisID: 'y2' },
+        { label: '쇼핑클릭×100', data: d.history.map(h => h.shop_click_idx === null ? null : h.shop_click_idx * 100), borderColor: '#f59e0b', yAxisID: 'y' },
       ],
     },
     options: {
@@ -389,7 +584,6 @@ async function detail(id) {
 
 function showDetailPanel(open) { document.getElementById('detail').style.display = open ? 'flex' : 'none'; }
 function closeDetail() { showDetailPanel(false); }
-// v3: Esc / 배경 클릭으로 모달 닫기 (UX §5.4)
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
 document.getElementById('detail').addEventListener('click',
   e => { if (e.target.id === 'detail') closeDetail(); });
@@ -400,19 +594,25 @@ async function toggleSeeds() {
   await renderSeeds();
 }
 
-// v3: 빈 상태 CTA — [시드 추가]는 시드 패널을 펼침 (UX §5.5)
 function openSeeds() {
   document.getElementById('seedsPanel').style.display = 'block';
   renderSeeds();
 }
 
 async function renderSeeds() {
-  const seeds = await api('/seeds');
+  let seeds;
+  try {
+    seeds = await api('/seeds');
+  } catch (e) {
+    if (String(e.message) !== '401') setStatus('시드 목록을 불러오지 못했습니다', true);
+    return;
+  }
   const ul = document.getElementById('seedList');
   ul.innerHTML = '';
   seeds.forEach(s => {
     const li = document.createElement('li');
-    li.innerHTML = `${esc(s.keyword)} (${esc(s.category)}) <button class="btn btn-sm" onclick="deleteSeed(${s.id})">삭제</button>`;
+    li.innerHTML = `<span>${esc(s.keyword)} <span class="dim">(${esc(s.category)})</span></span>`
+      + `<button class="btn btn-sm" onclick="deleteSeed(${s.id})">삭제</button>`;
     ul.appendChild(li);
   });
 }
@@ -436,7 +636,9 @@ async function deleteSeed(id) {
 }
 
 document.getElementById('token').value = localStorage.getItem('dashboard_token') || '';
+updatePresetBtn();
 refreshStatus();
+loadTopKpi();
 loadCategories();
 load();
 </script>

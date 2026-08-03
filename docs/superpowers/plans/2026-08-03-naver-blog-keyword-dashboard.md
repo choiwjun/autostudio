@@ -3889,3 +3889,28 @@ git commit -m "chore: final regression pass"
 - **시드 확장**: 기존 에어프라이어·홍삼·캠핑 3개에서 이슈/계절/건강/경제/반려동물/여행/IT/육아/생활 분야 22개로 확장했다. 공식 전체 인기검색어 목록 API가 없으므로 자동완성 BFS가 시드 주변 후보를 발굴한다.
 - **운영 결과**: 일일 캡 해제 후 첫 워크플로우는 같은 날 신규 0건(기존 당일 신규 100건이 이미 활성 캡을 점유)으로 정상 종료했다. 다음 KST 실행부터 새 시드 후보가 발굴된다.
 - **평가 기준**: 2일차부터 증감률·수요지수·기회점수를 정렬해 상승 후보를 확인한다. 인기 키워드가 네이버 노출이나 AI 인용을 보장하지 않으므로 콘텐츠 품질·관련성·신뢰도는 별도 작성 자동화 단계에서 관리한다.
+
+### v6 전환 기록 (2026-08-03 — 애드포스트 1차 목표 + 집중형 대시보드)
+
+**목표 전환**: 무작정 인기키워드 발굴 → **애드포스트 1차 목표** 기준. 네이버 AI 인용 가능성 + 조회수(수요) + CPC 단가 기반 키워드 우선순위로 재편.
+
+**리서치 근거** (2026-08-03):
+- AI 브리핑 답변의 최대 70%가 UGC(네이버 공식) — 블로그가 인용 경제의 중심
+- 인용 = 고유경험 × 구체디테일 × 정리 (786개 인용글 분석) — 키워드 레벨에선 질문형 패턴·최신성·과정형 카테고리로 근사
+- 애드포스트 RPM: 금융/보험 800~1,000 > IT 500~700 > 맛집/여행 300~500 > 일상 200~400
+
+**코드 변경**:
+- scoring.py: question_pattern_score/i_citation_score(0.5×질문형+0.3×최신성+0.2×카테고리)/cpc_tier_score/6_priority(0.35×AI인용+0.35×수요+0.30×CPC) 신규
+- nalyzer.py: loggername 캡처 → 	op_bloggers (작성자 권위 프록시)
+- db.py: daily_stats.ai_cite_idx 컬럼 + _migrate() 자동 ALTER(기존 DB 포함) + priority 정렬 SQL + i_cite 정렬
+- collect.py: compute_scores에서 ai_cite_idx 사전계산 + 시드 없으면 default_focus_seeds 자동 초기화
+- config.py: DEFAULT_FOCUS_SEEDS(보험/금융/건강/IT/교육 10개), DEFAULT_CPC_TIERS
+- server.py: 기본 프리셋 i_pick(ai_cite≥0.6 & demand≥0.2), 기본 정렬 priority, 기본 뷰 Top-20 추천
+- static/index.html: **상용화 라이트 전문가형 대시보드 재설계** (qwen3.8-max-preview 위임) — KPI 카드 4개, 프리셋 세그먼트(AI픽/유망/전체), Priority·AI인용 컬럼, Pretendard, 반응형
+- scripts/replace_seeds.py: 프로덕션 시드 교체 스크립트 (기존 22개 삭제 → 집중 10개)
+
+**시드 정책**: 발굴 카테고리를 고CPC × AI 인용 유망 5개(보험/금융/건강/IT/교육)로 한정. 프로덕션은 스크립트로 교체.
+
+**검증**: 단위 84 passed + e2e(브라우저) 통과 + 시각 스모크(콘솔 에러 0) + 스크린샷 docs/v6-screenshots/
+
+**오케스트레이션**: 프론트엔드는 qwen3.8-max-preview CLI에 위임, 지휘·검증은 메인 에이전트 담당. (qwen non-interactive는 시작 시 'Built-in Provider Update' 프롬프트에서 대기 → tmux interactive 모드로 실행 필요)

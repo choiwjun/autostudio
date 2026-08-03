@@ -23,11 +23,12 @@ def make_app(tmp_path):
         "total_sim": 130, "total_date": 140, "fresh_ratio": 0.5,
         "shop_total": 520, "shop_avg_price": 35000, "shop_category": "가전",
         "growth": 0.27, "opportunity": 64.1, "commercial": None,
-        "demand_idx": 0.08, "shop_click_idx": 0.9})  # v4: 쇼핑클릭 지수
+        "demand_idx": 0.5, "shop_click_idx": 0.9, "ai_cite_idx": 0.8})  # v6: ai_pick 프리셋 통과
     d.insert_daily_stats(b, "2026-08-02", {
         "total_sim": 10, "total_date": 10, "fresh_ratio": 0.0,
         "shop_total": 10, "shop_avg_price": 1000, "shop_category": "가전",
-        "commercial": None, "opportunity": 30.0, "shop_click_idx": 0.1})  # v3/v4
+        "commercial": None, "opportunity": 30.0, "shop_click_idx": 0.1,
+        "ai_cite_idx": 0.3})  # v3/v4/v6: ai_pick 미달 (ai_cite<0.6)
     d.insert_daily_stats(c, "2026-08-02", {
         "total_sim": 5, "total_date": 5, "shop_category": "디지털",
         "commercial": None})
@@ -38,33 +39,45 @@ def make_app(tmp_path):
 
 def test_list_reads_precomputed_scores(tmp_path):
     client = TestClient(make_app(tmp_path))
-    body = client.get("/keywords").json()
+    body = client.get("/keywords?preset=").json()  # v6: 기본 프리셋(ai_pick) 회피 — 전체 목록
     assert body["count"] == 2                 # 비활성 제외
     item = body["items"][0]
     assert item["keyword"] == "에어프라이어"   # 기회점수 NULL은 뒤로
     assert item["opportunity"] == 64.1        # 저장값 그대로 (조회 시 재계산 없음)
     assert item["growth"] == 0.27
-    assert item["demand_idx"] == 0.08
+    assert item["demand_idx"] == 0.5
     assert item["shop_click_idx"] == 0.9      # v4: 쇼핑 클릭 지수
+    assert item["ai_cite_idx"] == 0.8         # v6: AI 인용 가능성
     assert item["days"] == 2
+
+
+def test_default_preset_is_ai_pick(tmp_path):
+    # v6: 기본 뷰 = '지금 써야 할 키워드' — ai_cite≥0.6 & demand≥0.2만 노출 (에어프라이어만 통과)
+    client = TestClient(make_app(tmp_path))
+    body = client.get("/keywords").json()
+    assert body["count"] == 1
+    assert body["items"][0]["keyword"] == "에어프라이어"
+    assert body["items"][0]["priority"] is not None
+    body2 = client.get("/keywords?sort=priority").json()
+    assert body2["items"][0]["keyword"] == "에어프라이어"
 
 
 def test_paging(tmp_path):
     client = TestClient(make_app(tmp_path))
-    body = client.get("/keywords?page_size=1").json()
+    body = client.get("/keywords?preset=&page_size=1").json()
     assert body["count"] == 2
     assert len(body["items"]) == 1
-    body2 = client.get("/keywords?page_size=1&page=2").json()
+    body2 = client.get("/keywords?preset=&page_size=1&page=2").json()
     assert body2["items"][0]["keyword"] == "선풍기"
-    assert client.get("/keywords?page_size=1&page=3").json()["items"] == []
+    assert client.get("/keywords?preset=&page_size=1&page=3").json()["items"] == []
 
 
 def test_filters(tmp_path):
     client = TestClient(make_app(tmp_path))
-    assert client.get("/keywords?click_min=0.5").json()["count"] == 1  # v4
-    body = client.get("/keywords?q=선풍").json()
+    assert client.get("/keywords?preset=&click_min=0.5").json()["count"] == 1  # v4
+    body = client.get("/keywords?preset=&q=선풍").json()
     assert [i["keyword"] for i in body["items"]] == ["선풍기"]
-    assert client.get("/keywords?show_inactive=1").json()["count"] == 3
+    assert client.get("/keywords?preset=&show_inactive=1").json()["count"] == 3
 
 
 def test_detail_404_and_history_with_scores(tmp_path):
@@ -81,7 +94,7 @@ def test_patch_active_requires_token_and_toggles(tmp_path):
     assert client.patch("/keywords/1", json={"active": False}).status_code == 401
     resp = client.patch("/keywords/1", json={"active": False}, headers=AUTH)
     assert resp.status_code == 200
-    assert client.get("/keywords").json()["count"] == 1
+    assert client.get("/keywords?preset=").json()["count"] == 1
 
 
 def test_seed_writes_require_token(tmp_path):
@@ -131,15 +144,18 @@ def test_collect_schedule_trigger_runs_full_pipeline(tmp_path, monkeypatch):
 
 def test_sort_dir_and_promising_preset(tmp_path):
     # v3/v4: 정렬 토글(sort_dir) + 유망 프리셋(preset=promising, 쇼핑클릭 기준) — UX §6·§8 계약
+    # v6: 기본 프리셋이 ai_pick이므로 전체 목록은 preset= 명시
     client = TestClient(make_app(tmp_path))
-    desc = client.get("/keywords?sort=opportunity").json()
+    desc = client.get("/keywords?preset=&sort=opportunity").json()
     assert [i["keyword"] for i in desc["items"]] == ["에어프라이어", "선풍기"]
-    asc = client.get("/keywords?sort=opportunity&sort_dir=asc").json()
+    asc = client.get("/keywords?preset=&sort=opportunity&sort_dir=asc").json()
     assert [i["keyword"] for i in asc["items"]] == ["선풍기", "에어프라이어"]
-    click = client.get("/keywords?sort=click").json()
+    click = client.get("/keywords?preset=&sort=click").json()
     assert [i["keyword"] for i in click["items"]] == ["에어프라이어", "선풍기"]
     # 유망 = 기회≥70 & 쇼핑클릭≥0.5 & 수요≥0.01 → 픽스처 최고 64.1 → 0건 (서버 필터 확인)
     assert client.get("/keywords?preset=promising").json()["count"] == 0
+    # v6: ai_pick 프리셋 = ai_cite≥0.6 & demand≥0.2 → 에어프라이어(0.8/0.5)만 통과
+    assert client.get("/keywords?preset=ai_pick").json()["count"] == 1
 
 
 def test_production_without_token_fails_closed(tmp_path):

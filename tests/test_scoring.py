@@ -1,5 +1,8 @@
 # tests/test_scoring.py
-from scoring import commercial_score, competition, growth_rate, opportunity_score
+from scoring import (
+    ai_citation_score, commercial_score, competition, cpc_tier_score,
+    growth_rate, opportunity_score, question_pattern_score, v6_priority,
+)
 
 
 def test_growth_rate():
@@ -36,3 +39,40 @@ def test_commercial_score():
     assert commercial_score(250, 15000) == 50.0
     # 60×(10/500) + 40×(1000/30000) = 1.2 + 1.33… → 2.5 (v1 계획의 기대값 10은 오류)
     assert commercial_score(10, 1000) == 2.5
+
+
+# ---------- v6: AI 인용 가능성 + 애드포스트 CPC ----------
+
+def test_question_pattern_score():
+    assert question_pattern_score("보험 비교 방법") == 1.0
+    assert question_pattern_score("노트북 추천") == 1.0
+    assert question_pattern_score("자격증 준비") == 1.0
+    assert question_pattern_score("에어프라이어") == 0.0  # 질문형 패턴 없음
+    assert question_pattern_score("") == 0.0
+
+
+def test_ai_citation_score_formula():
+    # 0.5×질문형 + 0.3×fresh + 0.2×카테고리가중 (보험 가중 0.9)
+    assert ai_citation_score("보험 비교 방법", 1.0, "보험") == 0.98   # 0.5+0.3+0.18
+    assert ai_citation_score("보험 비교 방법", 0.0, "보험") == 0.68   # 0.5+0.0+0.18
+    assert ai_citation_score("에어프라이어", 0.5, "가전") == 0.29    # 0+0.15+0.14
+    # 과정형(여행 1.0) vs 결과물형(인테리어 0.4) 카테고리 가중 차이
+    assert ai_citation_score("여행 코스 추천", 0.5, "여행") > ai_citation_score(
+        "여행 코스 추천", 0.5, "인테리어")
+
+
+def test_cpc_tier_defaults():
+    assert cpc_tier_score("보험") == 1.0
+    assert cpc_tier_score("금융") == 1.0
+    assert cpc_tier_score("IT") == 0.8
+    assert cpc_tier_score("일상") == 0.3
+    assert cpc_tier_score("미분류") == 0.5  # 기본값
+    assert cpc_tier_score("보험", {"보험": 0.9}) == 0.9  # tiers 오버라이드
+
+
+def test_v6_priority_bounds():
+    # 0.35×ai + 0.35×demand(≤1) + 0.30×cpc
+    assert v6_priority(1.0, 1.0, 1.0) == 100.0
+    assert v6_priority(0.0, 0.0, 0.0) == 0.0
+    assert v6_priority(None, None, None) == 0.0  # NULL 보호
+    assert v6_priority(1.0, 5.0, 1.0) == 100.0   # demand 1 초과는 1로 클램프

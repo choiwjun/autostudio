@@ -10,7 +10,7 @@ from autocomplete import expand_keywords
 from datalab import DatalabError, fetch_demand_ratios
 from naver_client import NaverAPIError, NaverClient
 from refine import refine_keywords
-from scoring import growth_rate, opportunity_score
+from scoring import ai_citation_score, growth_rate, opportunity_score
 from shopping_insight import fetch_click_ratios
 
 RUN_LOCK_STALE_MINUTES = 60  # v3: GH Actions timeout-minutes(60)와 정합 (기본값, cfg로 조정)
@@ -31,7 +31,8 @@ def compute_scores(d, keyword_id, day, stats):
     """점수 사전계산 (조회 시 재계산 금지 — 스펙 §4.5).
     v3: 증감률·기회점수는 전일(day-1) 스냅샷 대비만 산출 — 공백(2일 이상)이면
     NULL ("데이터 쌓는 중"). 최근 과거 스냅샷으로 며칠치 증가율을 하루치로 계산하지 않음.
-    v4: 쇼핑 검색 API 종료로 상업성은 항상 NULL — 쇼핑 클릭 지수는 배치 단계에서 갱신."""
+    v4: 쇼핑 검색 API 종료로 상업성은 항상 NULL — 쇼핑 클릭 지수는 배치 단계에서 갱신.
+    v6: ai_cite_idx는 키워드·카테고리·신선도 기반 프록시 — 스냅샷 시점에 사전계산 저장."""
     prev = d.get_prev_stats(keyword_id, day)
     growth = opportunity = None
     prev_day = (date.fromisoformat(day) - timedelta(days=1)).isoformat()
@@ -39,7 +40,8 @@ def compute_scores(d, keyword_id, day, stats):
         growth = growth_rate(prev["total_date"], stats["total_date"])
         opportunity = opportunity_score(
             stats["fresh_ratio"], growth, stats["total_sim"])
-    return growth, opportunity, None
+    ai_cite = ai_citation_score(stats["keyword"], stats["fresh_ratio"], stats.get("category", ""))
+    return growth, opportunity, None, ai_cite
 
 
 def _chunks(seq, n):
@@ -49,6 +51,12 @@ def _chunks(seq, n):
 
 def discover(d, cfg, today, now, trigger, result, budget_seconds=None):
     seeds = d.list_seeds()
+    if not seeds:
+        # v6: 시드 없으면 집중 기본 시드로 자동 초기화 (애드포스트 1차 목표 기준)
+        for kw, cat in cfg.get("default_focus_seeds", []):
+            d.add_seed(kw, cat)
+            d.log_collection(kw, "seed", "집중 시드 자동 초기화", now)
+        seeds = d.list_seeds()
     if not seeds:
         return
     if trigger == "manual" and d.count_active() > 0:
@@ -112,10 +120,13 @@ def snapshot(d, cfg, client, today, now, started, budget_seconds, result):
                 1.0, min(getattr(client, "timeout", 10.0) or 10.0, remaining / 2))
         try:
             stats = analyze_keyword(client, kw["keyword"], base_date)
-            growth, opportunity, commercial = compute_scores(
+            # v6: ai_citation_score가 키워드·카테고리를 참조하므로 stats에 주입
+            stats["keyword"] = kw["keyword"]
+            stats["category"] = kw.get("category", "")
+            growth, opportunity, commercial, ai_cite = compute_scores(
                 d, kw["id"], today, stats)
             stats.update({"growth": growth, "opportunity": opportunity,
-                          "commercial": commercial})
+                          "commercial": commercial, "ai_cite_idx": ai_cite})
             d.insert_daily_stats(kw["id"], today, stats)
             d.insert_top_results(kw["id"], today, stats["top_post_dates"])
             result["snapshotted"] += 1

@@ -7,3 +7,6 @@ __pycache__/
 data/
 .venv/
 .vercel
+
+# AI 세션 메모리 (커밋 금지)
+.claude/

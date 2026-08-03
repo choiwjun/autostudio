@@ -22,7 +22,21 @@ def make_cfg(tmp_path):
         "dashboard_token": "", "datalab_enabled": False, "datalab_anchor": "냉장고",
         "env": "development", "run_lock_stale_minutes": 60,  # v3
         "shopping_insight_category": "50000000",  # v4
+        "default_focus_seeds": [], "cpc_tiers": {},  # v6: 시드 자동 초기화 비활성(기존 테스트 보존)
     }
+
+
+def test_empty_seeds_auto_init_focus_seeds(tmp_path):
+    # v6: 시드 없으면 집중 기본 시드 자동 초기화 → 발굴 진행 (애드포스트 1차 목표)
+    cfg = make_cfg(tmp_path)
+    cfg["default_focus_seeds"] = [("보험 비교 방법", "보험"), ("재테크 방법", "금융")]
+    d = db.Database(cfg["db_url"])
+    d.init()
+    run_collection(cfg, client=FakeClient(), today="2026-08-01")
+    seeds = d.list_seeds()
+    assert {s["keyword"] for s in seeds} == {"보험 비교 방법", "재테크 방법"}
+    assert {s["category"] for s in seeds} == {"보험", "금융"}
+    d.close()
 
 
 def test_two_day_snapshot_precomputes_scores(tmp_path):

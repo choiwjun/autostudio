@@ -20,15 +20,24 @@ def compute_fresh_ratio(post_dates, today, window_days=7):
 
 def analyze_keyword(client, keyword, today):
     # v4: 쇼핑 검색 API 종료로 shop 호출 제거 — 상업 신호는 쇼핑인사이트 배치(collect.py)로 대체.
+    # v6: bloggername 수집 — 상위글 작성자 권위(AI 인용 C-Rank 프록시) 신호의 원자료.
     # 키워드당 호출: blog 2종 (sim + date)
     blog_sim = client.search_blog(keyword, sort="sim", display=20)
     blog_date = client.search_blog(keyword, sort="date", display=100)
 
-    post_dates = [item.get("postdate", "") for item in blog_sim.get("items", [])]
+    items = blog_sim.get("items", [])
+    post_dates = [item.get("postdate", "") for item in items]
+    # v6: 상위 20개 중 작성자 중복 빈도 — 동일 블로거가 다수 점유 = 권위 블로거 존재(경쟁/성숙 신호)
+    bloggers = [item.get("bloggername", "") for item in items if item.get("bloggername")]
+    top_bloggers = sorted(
+        {b: bloggers.count(b) for b in set(bloggers)}.items(),
+        key=lambda kv: (-kv[1], kv[0]),
+    )[:5]
 
     return {
         "total_sim": int(blog_sim.get("total", 0)),
         "total_date": int(blog_date.get("total", 0)),
         "fresh_ratio": compute_fresh_ratio(post_dates, today),
         "top_post_dates": post_dates,
+        "top_bloggers": top_bloggers,
     }

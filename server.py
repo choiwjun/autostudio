@@ -55,11 +55,11 @@ def create_app(cfg):
             raise HTTPException(status_code=401, detail="invalid token")
 
     @app.get("/keywords")
-    def list_keywords(sort: str = "opportunity", sort_dir: str = "desc",
+    def list_keywords(sort: str = "priority", sort_dir: str = "desc",
                       category: str = "", commercial_min: float = 0,
                       click_min: float = 0, q: str = "",
                       discovered_within: int = 0,
-                      preset: str = "", show_inactive: int = 0,
+                      preset: str = "ai_pick", show_inactive: int = 0,
                       page: int = 1, page_size: int = 50):
         page = max(page, 1)
         page_size = min(max(page_size, 1), 200)
@@ -69,14 +69,18 @@ def create_app(cfg):
                 config_mod.today_kst() - timedelta(days=discovered_within)
             ).isoformat()
         # v4: 유망 프리셋 — 기회≥70 & 쇼핑클릭≥0.5 & 수요지수≥0.01 (쇼핑 검색 API 종료 대체)
-        opportunity_min, demand_min = 0.0, 0.0
+        # v6: 기본 프리셋 'ai_pick' — AI 인용 가능성 + 수요(조회수 프록시) 기반,
+        #     애드포스트 1차 목표에 맞는 '지금 써야 할 키워드' 상위 20개 중심
+        opportunity_min, demand_min, ai_cite_min = 0.0, 0.0, 0.0
         if preset == "promising":
             opportunity_min, click_min, demand_min = 70.0, 0.5, 0.01
+        elif preset == "ai_pick":
+            ai_cite_min, demand_min = 0.6, 0.2
         filters = dict(category=category, commercial_min=commercial_min, q=q,
                        discovered_since=discovered_since,
                        active=None if show_inactive else 1,
                        opportunity_min=opportunity_min, demand_min=demand_min,
-                       click_min=click_min)
+                       click_min=click_min, ai_cite_min=ai_cite_min)
         items = run_db(lambda d: d.query_keywords(
             sort=sort, sort_dir=sort_dir, limit=page_size,
             offset=(page - 1) * page_size, **filters))

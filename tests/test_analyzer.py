@@ -33,3 +33,20 @@ def test_analyze_keyword_combines_sources():
     assert result["fresh_ratio"] == 1.0  # 20260801은 기준일 8/3의 7일 내
     assert result["top_post_dates"][0] == "20260801"
     assert calls["n"] == 2
+
+
+def test_analyze_keyword_captures_top_bloggers():
+    # v6: 상위글 작성자 집중도 — 동일 블로거 다수 점유가 권위 블로거 존재 신호
+    items = ([{"postdate": "20260801", "bloggername": "권위블로거"}] * 12
+             + [{"postdate": "20260801", "bloggername": "일반1"}] * 5
+             + [{"postdate": "20260801", "bloggername": "일반2"}] * 3)
+
+    class FakeClient:
+        def search_blog(self, query, sort="sim", display=100, start=1):
+            return {"total": 50, "items": items}
+
+    result = analyze_keyword(FakeClient(), "보험 비교", TODAY)
+    assert result["top_bloggers"][0] == ("권위블로거", 12)
+    assert result["top_bloggers"][1] == ("일반1", 5)
+    assert result["top_bloggers"][2] == ("일반2", 3)
+    assert len(result["top_bloggers"]) == 3

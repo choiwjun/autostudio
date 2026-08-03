@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS daily_stats (
     commercial REAL,
     demand_idx REAL,
     shop_click_idx REAL,
+    ai_cite_idx REAL,
     UNIQUE(keyword_id, day)
 );
 CREATE TABLE IF NOT EXISTS top_results (
@@ -99,6 +100,7 @@ CREATE TABLE IF NOT EXISTS daily_stats (
     commercial DOUBLE PRECISION,
     demand_idx DOUBLE PRECISION,
     shop_click_idx DOUBLE PRECISION,
+    ai_cite_idx DOUBLE PRECISION,
     UNIQUE(keyword_id, day)
 );
 CREATE TABLE IF NOT EXISTS top_results (
@@ -134,17 +136,33 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_collection_runs_running
 _STATS_COLUMNS = (
     "total_sim", "total_date", "fresh_ratio", "shop_total", "shop_avg_price",
     "shop_category", "shop_error", "growth", "opportunity", "commercial",
-    "demand_idx", "shop_click_idx",
+    "demand_idx", "shop_click_idx", "ai_cite_idx",
 )
 
 
 class Database:
+    # v6: priority = 0.35×ai_cite_idx + 0.35×demand_idx(≤1) + 0.30×CPC등급(카테고리)
+    # SORT_COLUMNS에 쓰이는 priority 표현식 — SELECT에도 동일 alias로 노출 (server 조회용)
+    CPC_TIER_SQL = (
+        "CASE WHEN k.category IN ('보험','금융','재테크') THEN 1.0 "
+        "WHEN k.category IN ('부동산','법률','건강','의료') THEN 0.9 "
+        "WHEN k.category IN ('IT','디지털','교육','자격증') THEN 0.8 "
+        "ELSE 0.5 END"
+    )
+    PRIORITY_SQL = (
+        "ROUND(35.0 * COALESCE(ds.ai_cite_idx, 0) "
+        "+ 35.0 * CASE WHEN COALESCE(ds.demand_idx, 0) > 1 THEN 1.0 "
+        "ELSE COALESCE(ds.demand_idx, 0) END "
+        f"+ 30.0 * {CPC_TIER_SQL}, 1)"
+    )
     SORT_COLUMNS = {
         "opportunity": "ds.opportunity",
         "commercial": "ds.commercial",
         "click": "ds.shop_click_idx",  # v4: 쇼핑 클릭 지수 (쇼핑 검색 API 종료 대체)
         "demand": "ds.demand_idx",
         "growth": "ds.growth",
+        "ai_cite": "ds.ai_cite_idx",   # v6: AI 인용 가능성
+        "priority": PRIORITY_SQL,      # v6: 종합 우선순위
     }
 
     # 키워드별 "최신 스냅샷 1건"을 조인하는 공통 베이스 (N+1 제거의 핵심)
@@ -215,11 +233,31 @@ LEFT JOIN daily_stats ds
                 else:
                     self.conn.executescript(SCHEMAS["sqlite"])
                     self.conn.commit()
+                self._migrate()
                 return
             except CONNECTION_ERRORS:
                 if attempt == 1:
                     raise
                 self._connect()
+
+    def _migrate(self):
+        # v6: 기존 DB(스키마 변경 전 생성)에 신규 컬럼 추가 — CREATE TABLE IF NOT EXISTS는
+        # 이미 존재하는 테이블에는 컬럼을 추가하지 않으므로 명시적 ALTER 필요.
+        # (SQLite: PRAGMA 검사, Postgres: ADD COLUMN IF NOT EXISTS 네이티브)
+        if self.dialect == "postgres":
+            self._q(
+                None,
+                "ALTER TABLE daily_stats ADD COLUMN IF NOT EXISTS ai_cite_idx "
+                "DOUBLE PRECISION",
+                (),
+            )
+            return
+        rows = self._qd(
+            "SELECT name FROM pragma_table_info('daily_stats') WHERE name = 'ai_cite_idx'",
+            (), fetch=True,
+        )
+        if not rows:
+            self._qd("ALTER TABLE daily_stats ADD COLUMN ai_cite_idx REAL", ())
 
     # ---------- 시드 ----------
 
@@ -296,13 +334,14 @@ ORDER BY last_day, k.id"""
             stats.get("shop_error") or "",
             stats.get("growth"), stats.get("opportunity"),
             stats.get("commercial"), stats.get("demand_idx"),
-            stats.get("shop_click_idx"),
+            stats.get("shop_click_idx"), stats.get("ai_cite_idx"),
         )
         cols = ", ".join(("keyword_id", "day") + _STATS_COLUMNS)
+        placeholders = ", ".join("?" * len(values))
+        pg_placeholders = ", ".join(["%s"] * len(values))
         self._q(
-            f"INSERT OR REPLACE INTO daily_stats ({cols}) "
-            f"VALUES ({', '.join('?' * 14)})",
-            f"INSERT INTO daily_stats ({cols}) VALUES ({', '.join(['%s'] * 14)}) "
+            f"INSERT OR REPLACE INTO daily_stats ({cols}) VALUES ({placeholders})",
+            f"INSERT INTO daily_stats ({cols}) VALUES ({pg_placeholders}) "
             "ON CONFLICT (keyword_id, day) DO UPDATE SET "
             + ", ".join(f"{c} = EXCLUDED.{c}" for c in _STATS_COLUMNS),
             values,
@@ -482,7 +521,8 @@ ORDER BY k.id"""
     # ---------- 대시보드 목록 (단일 쿼리 + 페이징) ----------
 
     def _keyword_where(self, category, commercial_min, q, discovered_since, active,
-                       opportunity_min=0.0, demand_min=0.0, click_min=0.0):
+                       opportunity_min=0.0, demand_min=0.0, click_min=0.0,
+                       ai_cite_min=0.0):
         where, params = [], []
         if active is not None:
             where.append("k.active = ?")
@@ -502,6 +542,9 @@ ORDER BY k.id"""
         if click_min:        # v4: 쇼핑 클릭 지수 최소 (유망 프리셋·필터)
             where.append("ds.shop_click_idx >= ?")
             params.append(click_min)
+        if ai_cite_min:      # v6: AI 인용 가능성 최소 (AI 유망 프리셋)
+            where.append("ds.ai_cite_idx >= ?")
+            params.append(ai_cite_min)
         if q:
             where.append("k.keyword LIKE ?")
             params.append(f"%{q}%")
@@ -513,17 +556,18 @@ ORDER BY k.id"""
     def query_keywords(self, sort="opportunity", sort_dir="desc", category="",
                        commercial_min=0.0, q="", discovered_since="", active=1,
                        opportunity_min=0.0, demand_min=0.0, click_min=0.0,
-                       limit=50, offset=0):
+                       ai_cite_min=0.0, limit=50, offset=0):
         col = self.SORT_COLUMNS.get(sort, "ds.opportunity")
         order = "ASC" if sort_dir == "asc" else "DESC"  # v3: 정렬 토글 (UX §6)
         where_sql, params = self._keyword_where(
             category, commercial_min, q, discovered_since, active,
-            opportunity_min, demand_min, click_min)
+            opportunity_min, demand_min, click_min, ai_cite_min)
         sql = f"""
 SELECT k.id, k.keyword, k.active, k.first_seen, ds.day,
        COALESCE(NULLIF(ds.shop_category, ''), k.category) AS category,
        ds.opportunity, ds.commercial, ds.growth, ds.demand_idx, ds.shop_click_idx,
-       ds.fresh_ratio, ds.total_sim, ds.shop_total,
+       ds.fresh_ratio, ds.total_sim, ds.shop_total, ds.ai_cite_idx,
+       {self.PRIORITY_SQL} AS priority,
        (SELECT COUNT(*) FROM daily_stats h WHERE h.keyword_id = k.id) AS days
 {self._KEYWORD_BASE}{where_sql}
 ORDER BY CASE WHEN {col} IS NULL THEN 1 ELSE 0 END, {col} {order}, k.first_seen, k.id
@@ -532,10 +576,11 @@ LIMIT ? OFFSET ?"""
 
     def count_keywords(self, category="", commercial_min=0.0, q="",
                        discovered_since="", active=1,
-                       opportunity_min=0.0, demand_min=0.0, click_min=0.0):
+                       opportunity_min=0.0, demand_min=0.0, click_min=0.0,
+                       ai_cite_min=0.0):
         where_sql, params = self._keyword_where(
             category, commercial_min, q, discovered_since, active,
-            opportunity_min, demand_min, click_min)
+            opportunity_min, demand_min, click_min, ai_cite_min)
         sql = f"SELECT COUNT(*) AS c {self._KEYWORD_BASE}{where_sql}"
         return self._qd(sql, tuple(params), fetch=True)[0]["c"]
 
