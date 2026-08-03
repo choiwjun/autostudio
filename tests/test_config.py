@@ -16,7 +16,7 @@ def test_load_config_with_defaults(monkeypatch):
     cfg = config.load_config(load_env=False)
     assert cfg["db_url"] == "sqlite:///data/keywords.db"
     assert cfg["daily_new_keyword_cap"] == 100
-    assert cfg["active_keyword_cap"] == 1000
+    assert cfg["active_keyword_cap"] == 200  # 실측(키워드당 ~10초) 기준 60분 한도 내 값 (v3)
     assert cfg["autocomplete_max_depth"] == 2
     assert cfg["autocomplete_max_requests"] == 300
     assert cfg["manual_budget_seconds"] == 45

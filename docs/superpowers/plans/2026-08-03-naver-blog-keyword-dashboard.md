@@ -3695,8 +3695,9 @@ if __name__ == "__main__":
 - [ ] **Step 3: 실행**
 
 ```
-# 로컬 Postgres/Docker 또는 CI 환경에서
-DATABASE_URL=postgresql://u:p@localhost:5432/db python -m pytest tests/test_db_postgres.py -v
+# 로컬 Postgres/Docker 또는 CI 환경에서 (v3: PG_TESTS=1 명시 옵트인 — .env.local의
+# DATABASE_URL로는 절대 실행되지 않음, 프로덕션 오염 방지)
+PG_TESTS=1 DATABASE_URL=postgresql://u:p@localhost:5432/db python -m pytest tests/test_db_postgres.py -v
 # 브라우저 e2e (서버 기동 후, 선택)
 python tests/e2e_dashboard.py
 ```
@@ -3851,6 +3852,15 @@ git commit -m "chore: final regression pass"
 
 ### 배포 진행 기록 (2026-08-03 — Supabase 연동 완료)
 - **Supabase 프로젝트 연결 확정**: 리전 서울, 호스트 **`aws-1-ap-northeast-2.pooler.supabase.com`** (신형 aws-1 풀러 — aws-0은 테넌트 미등록). Session=5432, Transaction=6543. 직결(`db.<ref>.supabase.co`)은 IPv6 전용으로 이 PC/GH Actions/Vercel에서 연결 불가 확인(스펙 §3 예측과 일치)
-- **PG 통합 테스트 4건 실 DB 통과** (2026-08-03): 스키마 멱등 init + `idx_collection_runs_running` 인덱스, upsert/조회 roundtrip(LEFT JOIN·COALESCE), **8스레드 동시 start_run 원자 잠금**, 풀러 재연결 — 전부 통과. 테스트 데이터는 정리 완료, 프로덕션 스키마 6개 테이블 생성됨
-- **GitHub Secrets**: `DATABASE_URL`(Session pooler 5432) 등록 완료. 대기: `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET`
+- **PG 통합 테스트 4건 실 DB 통과** (2026-08-03): 스키마 멱등 init + `idx_collection_runs_running` 인덱스, upsert/조회 roundtrip(LEFT JOIN·COALESCE), **8스레드 동시 start_run 원자 잠금**, 풀러 재연결 — 전부 통과. 테스트 데이터는 정리 완료, 프로덕션 스키마 6개 테이블 생성됨. **후속 조치: `.env.local`이 DATABASE_URL을 설정하면서 로컬 pytest가 프로덕션 DB에 실행되던 문제를 발견 → `PG_TESTS=1` 명시 옵트인으로 차단** (리뷰 Minor #7 "공유 DB 위험" 실증)
+- **GitHub Secrets**: `DATABASE_URL`(Session pooler 5432), `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` 등록 완료
 - **DASHBOARD_TOKEN**: 생성 완료(사용자에게 전달됨 — Vercel Env·cron-job.org용, 레포 커밋 금지)
+
+### 실배포 첫 실행 결과 (2026-08-03 — GH Actions workflow_dispatch)
+- **결과: 성공** — `완료: 신규 99개, 스냅샷 99개, 수요갱신 1개, 은퇴 0개, 오류 0개` (시드 3개: 에어프라이어/홍삼/캠핑)
+- **소요 18분 52초** (collect.py 시작 05:21:58 → 완료 05:40:50 UTC+9)
+- **자동완성 차단 없음** — GH 러너(데이터센터 IP)에서 네이버 자동완성 정상 동작, cron-job.org 대체 불필요 확인
+- **shop API 404 확인**: 네이버 앱 설정에서 "쇼핑" 검색 API 미활성 — shop_error로 graceful 처리(상업성 NULL, 오류 0)됐고, 대시보드에서 상업성 "-"로 표시됨. **사용자 조치: 네이버 개발자센터 앱 설정에서 검색 API 중 쇼핑 체크 필요**
+- **stale lock 회수 실증**: 테스트 잔여 running 행이 실 실행에서 60분 stale 규칙으로 회수된 후 정상 진행 (원자 잠금+stale 회수 실환경 검증)
+- **용량 실측 → 캡 조정**: 키워드당 ~10초(호출 3회×~3.2초) → **ACTIVE_KEYWORD_CAP 1,000→200** (1,000개=165분으로 60분 타임아웃 초과). config 기본값·.env.local·design §8·README 반영 완료. 2일차 실행(발굴 최소화)에서 정상상태 시간 재실측 권장
+- **2일차 이후**: 전일 스냅샷 존재 → 기회점수·상업성(shop 활성화 후)·수요지수 계산되어 대시보드에 표시

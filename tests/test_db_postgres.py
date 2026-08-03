@@ -6,8 +6,12 @@ import pytest
 
 import db
 
+# v3: 프로덕션 DB 오염 방지 — .env.local의 DATABASE_URL로는 실행되지 않도록
+# 명시적 옵트인(PG_TESTS=1) 필수. 실행: PG_TESTS=1 DATABASE_URL=... pytest ...
 PG_URL = os.getenv("DATABASE_URL", "")
-pytestmark = pytest.mark.skipif(not PG_URL, reason="DATABASE_URL 미설정")
+pytestmark = pytest.mark.skipif(
+    not PG_URL or os.getenv("PG_TESTS") != "1",
+    reason="PG_TESTS=1 + DATABASE_URL 설정 시에만 실행 (프로덕션 오염 방지)")
 
 
 def make_db():

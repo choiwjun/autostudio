@@ -29,7 +29,7 @@ def load_config(load_env=True):
         "client_secret": os.getenv("NAVER_CLIENT_SECRET", ""),
         "db_url": os.getenv("DATABASE_URL", "sqlite:///data/keywords.db"),
         "daily_new_keyword_cap": int(os.getenv("DAILY_NEW_KEYWORD_CAP", "100")),
-        "active_keyword_cap": int(os.getenv("ACTIVE_KEYWORD_CAP", "1000")),
+        "active_keyword_cap": int(os.getenv("ACTIVE_KEYWORD_CAP", "200")),
         "autocomplete_url": os.getenv(
             "AUTOCOMPLETE_URL", "https://ac.search.naver.com/nx/ac"
         ),
