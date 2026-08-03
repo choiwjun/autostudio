@@ -25,6 +25,7 @@ def test_load_config_with_defaults(monkeypatch):
     assert cfg["datalab_anchor"] == "냉장고"
     assert cfg["env"] == "development"          # v3: fail-closed 분기용
     assert cfg["run_lock_stale_minutes"] == 60  # v3: GH Actions timeout 정합
+    assert cfg["shopping_insight_category"] == "50000000"  # v4
 
 
 def test_load_config_with_env(monkeypatch):

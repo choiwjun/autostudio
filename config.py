@@ -39,6 +39,7 @@ def load_config(load_env=True):
         "dashboard_token": os.getenv("DASHBOARD_TOKEN", ""),
         "datalab_enabled": os.getenv("DATALAB_ENABLED", "1") == "1",
         "datalab_anchor": os.getenv("DATALAB_ANCHOR", "냉장고"),
+        "shopping_insight_category": os.getenv("SHOPPING_INSIGHT_CATEGORY", "50000000"),
         "env": os.getenv("ENV", "development"),
         "run_lock_stale_minutes": int(os.getenv("RUN_LOCK_STALE_MINUTES", "60")),
     }

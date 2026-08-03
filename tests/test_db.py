@@ -168,9 +168,10 @@ def test_retire_candidates_and_cleanup(tmp_path):
     bad = d.upsert_keyword("낡고나쁨", day="2026-07-01")
     good = d.upsert_keyword("낡지만좋음", day="2026-07-01")
     d.upsert_keyword("수집끊김", day="2026-07-01")  # 최근 스냅샷 없음 → 은퇴 보호
-    d.insert_daily_stats(bad, "2026-08-01", {"opportunity": 10.0, "commercial": 5.0})
-    d.insert_daily_stats(good, "2026-08-01", {"opportunity": 80.0, "commercial": 5.0})
-    victims = d.find_retire_candidates("2026-07-20", "2026-07-27", 35.0, 30.0)
+    # v4: 은퇴는 기회점수 + 쇼핑 클릭 지수로 판정 (쇼핑 검색 API 종료)
+    d.insert_daily_stats(bad, "2026-08-01", {"opportunity": 10.0, "shop_click_idx": 0.1})
+    d.insert_daily_stats(good, "2026-08-01", {"opportunity": 80.0, "shop_click_idx": 0.1})
+    victims = d.find_retire_candidates("2026-07-20", "2026-07-27", 35.0, 0.5)
     assert [v["keyword"] for v in victims] == ["낡고나쁨"]
     d.set_active(victims[0]["id"], 0)
     assert d.count_active() == 2
@@ -212,14 +213,14 @@ def test_start_run_atomic_blocks_duplicate(tmp_path):
 
 
 def test_retire_protects_null_scores(tmp_path):
-    # v3: shop_error(commercial NULL) 키워드는 0점 취급 금지 — 은퇴 보호
+    # v3/v4: 쇼핑 클릭 미조회(분야 미매칭) 키워드는 0점 취급 금지 — 은퇴 보호
     d = make_db(tmp_path)
-    d.upsert_keyword("쇼핑실패", day="2026-07-01")
+    d.upsert_keyword("쇼핑클릭미조회", day="2026-07-01")
     bad = d.upsert_keyword("확실히저조", day="2026-07-01")
-    d.insert_daily_stats(d.upsert_keyword("쇼핑실패", day="2026-07-01"),
-                         "2026-08-01", {"opportunity": 10.0, "commercial": None})
-    d.insert_daily_stats(bad, "2026-08-01", {"opportunity": 10.0, "commercial": 5.0})
-    victims = d.find_retire_candidates("2026-07-20", "2026-07-27", 35.0, 30.0)
+    d.insert_daily_stats(d.upsert_keyword("쇼핑클릭미조회", day="2026-07-01"),
+                         "2026-08-01", {"opportunity": 10.0, "shop_click_idx": None})
+    d.insert_daily_stats(bad, "2026-08-01", {"opportunity": 10.0, "shop_click_idx": 0.1})
+    victims = d.find_retire_candidates("2026-07-20", "2026-07-27", 35.0, 0.5)
     assert [v["keyword"] for v in victims] == ["확실히저조"]
 
 
@@ -233,15 +234,17 @@ def test_categories_include_seed_and_keyword(tmp_path):
 
 
 def test_query_sort_dir_and_thresholds(tmp_path):
-    # v3: 정렬 방향 + 유망 프리셋 임계 필터
+    # v3/v4: 정렬 방향 + 유망 프리셋 임계 필터 (쇼핑 클릭 지수 기준)
     d = make_db(tmp_path)
     a = d.upsert_keyword("에어프라이어", day="2026-08-01")
     b = d.upsert_keyword("선풍기", day="2026-08-02")
     d.insert_daily_stats(a, "2026-08-02", {
-        "total_sim": 100, "opportunity": 64.1, "commercial": 100.0, "demand_idx": 0.08})
+        "total_sim": 100, "opportunity": 64.1, "shop_click_idx": 0.9, "demand_idx": 0.08})
     d.insert_daily_stats(b, "2026-08-02", {
-        "total_sim": 10, "opportunity": 30.0, "commercial": 2.5, "demand_idx": None})
+        "total_sim": 10, "opportunity": 30.0, "shop_click_idx": 0.1, "demand_idx": None})
     assert [r["keyword"] for r in d.query_keywords()] == ["에어프라이어", "선풍기"]
     assert [r["keyword"] for r in d.query_keywords(sort_dir="asc")] == ["선풍기", "에어프라이어"]
+    assert [r["keyword"] for r in d.query_keywords(sort="click")] == ["에어프라이어", "선풍기"]
     assert [r["keyword"] for r in d.query_keywords(
-        opportunity_min=70, commercial_min=60, demand_min=0.01)] == []
+        opportunity_min=70, click_min=0.5, demand_min=0.01)] == []
+    assert [r["keyword"] for r in d.query_keywords(click_min=0.5)] == ["에어프라이어"]

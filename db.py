@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS daily_stats (
     opportunity REAL,
     commercial REAL,
     demand_idx REAL,
+    shop_click_idx REAL,
     UNIQUE(keyword_id, day)
 );
 CREATE TABLE IF NOT EXISTS top_results (
@@ -97,6 +98,7 @@ CREATE TABLE IF NOT EXISTS daily_stats (
     opportunity DOUBLE PRECISION,
     commercial DOUBLE PRECISION,
     demand_idx DOUBLE PRECISION,
+    shop_click_idx DOUBLE PRECISION,
     UNIQUE(keyword_id, day)
 );
 CREATE TABLE IF NOT EXISTS top_results (
@@ -131,7 +133,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_collection_runs_running
 
 _STATS_COLUMNS = (
     "total_sim", "total_date", "fresh_ratio", "shop_total", "shop_avg_price",
-    "shop_category", "shop_error", "growth", "opportunity", "commercial", "demand_idx",
+    "shop_category", "shop_error", "growth", "opportunity", "commercial",
+    "demand_idx", "shop_click_idx",
 )
 
 
@@ -139,6 +142,7 @@ class Database:
     SORT_COLUMNS = {
         "opportunity": "ds.opportunity",
         "commercial": "ds.commercial",
+        "click": "ds.shop_click_idx",  # v4: 쇼핑 클릭 지수 (쇼핑 검색 API 종료 대체)
         "demand": "ds.demand_idx",
         "growth": "ds.growth",
     }
@@ -292,12 +296,13 @@ ORDER BY last_day, k.id"""
             stats.get("shop_error") or "",
             stats.get("growth"), stats.get("opportunity"),
             stats.get("commercial"), stats.get("demand_idx"),
+            stats.get("shop_click_idx"),
         )
         cols = ", ".join(("keyword_id", "day") + _STATS_COLUMNS)
         self._q(
             f"INSERT OR REPLACE INTO daily_stats ({cols}) "
-            f"VALUES ({', '.join('?' * 13)})",
-            f"INSERT INTO daily_stats ({cols}) VALUES ({', '.join(['%s'] * 13)}) "
+            f"VALUES ({', '.join('?' * 14)})",
+            f"INSERT INTO daily_stats ({cols}) VALUES ({', '.join(['%s'] * 14)}) "
             "ON CONFLICT (keyword_id, day) DO UPDATE SET "
             + ", ".join(f"{c} = EXCLUDED.{c}" for c in _STATS_COLUMNS),
             values,
@@ -328,6 +333,13 @@ ORDER BY last_day, k.id"""
         self._qd(
             "UPDATE daily_stats SET demand_idx = ? WHERE keyword_id = ? AND day = ?",
             (demand_idx, keyword_id, day),
+        )
+
+    def update_shop_click_idx(self, keyword_id, day, shop_click_idx):
+        # v4: 쇼핑 클릭 지수 (쇼핑인사이트 앵커 정규화)
+        self._qd(
+            "UPDATE daily_stats SET shop_click_idx = ? WHERE keyword_id = ? AND day = ?",
+            (shop_click_idx, keyword_id, day),
         )
 
     def top_by_opportunity(self, day, limit):
@@ -443,23 +455,24 @@ ORDER BY ds.opportunity DESC LIMIT ?"""
 
     # ---------- 수명주기 ----------
 
-    def find_retire_candidates(self, first_seen_before, since_day, opp_lt, com_lt):
+    def find_retire_candidates(self, first_seen_before, since_day, opp_lt, click_lt):
         """발견 오래됨 + 최근 스냅샷 존재 + 최근 성과 전부 저조 → 은퇴 후보.
-        v3: 최근 7일 창의 스냅샷 중 하나라도 기회/상업성 점수가 NULL이면 보호한다
-        (shop_error로 상업성 미산출된 키워드를 0점 취급해 오은퇴시키지 않음 — 스펙 §4.6).
+        v4: 쇼핑 검색 API 종료로 상업성은 항상 NULL이므로 은퇴는 기회점수 + 쇼핑 클릭 지수로 판정.
+        최근 7일 창의 스냅샷 중 하나라도 기회/쇼핑 클릭 점수가 NULL이면 보호한다
+        (미조회·분야 미매칭 키워드를 0점 취급해 오은퇴시키지 않음 — 스펙 §4.6).
         NULL은 수집 실패일 수 있으므로 '저성과' 판정의 근거가 될 수 없다."""
         sql = """
 SELECT k.id, k.keyword FROM keywords k
 WHERE k.active = 1 AND k.first_seen <= ?
   AND EXISTS (
     SELECT 1 FROM daily_stats ds WHERE ds.keyword_id = k.id AND ds.day >= ?
-      AND ds.opportunity IS NOT NULL AND ds.commercial IS NOT NULL)
+      AND ds.opportunity IS NOT NULL AND ds.shop_click_idx IS NOT NULL)
   AND NOT EXISTS (
     SELECT 1 FROM daily_stats ds WHERE ds.keyword_id = k.id AND ds.day >= ?
-      AND (ds.opportunity IS NULL OR ds.commercial IS NULL
-           OR ds.opportunity >= ? OR ds.commercial >= ?))
+      AND (ds.opportunity IS NULL OR ds.shop_click_idx IS NULL
+           OR ds.opportunity >= ? OR ds.shop_click_idx >= ?))
 ORDER BY k.id"""
-        return self._qd(sql, (first_seen_before, since_day, since_day, opp_lt, com_lt), fetch=True)
+        return self._qd(sql, (first_seen_before, since_day, since_day, opp_lt, click_lt), fetch=True)
 
     def cleanup(self, stats_before_day, top_before_day, log_before_ts):
         self._qd("DELETE FROM daily_stats WHERE day < ?", (stats_before_day,))
@@ -469,7 +482,7 @@ ORDER BY k.id"""
     # ---------- 대시보드 목록 (단일 쿼리 + 페이징) ----------
 
     def _keyword_where(self, category, commercial_min, q, discovered_since, active,
-                       opportunity_min=0.0, demand_min=0.0):
+                       opportunity_min=0.0, demand_min=0.0, click_min=0.0):
         where, params = [], []
         if active is not None:
             where.append("k.active = ?")
@@ -486,6 +499,9 @@ ORDER BY k.id"""
         if demand_min:       # v3: 유망 프리셋용
             where.append("ds.demand_idx >= ?")
             params.append(demand_min)
+        if click_min:        # v4: 쇼핑 클릭 지수 최소 (유망 프리셋·필터)
+            where.append("ds.shop_click_idx >= ?")
+            params.append(click_min)
         if q:
             where.append("k.keyword LIKE ?")
             params.append(f"%{q}%")
@@ -496,16 +512,17 @@ ORDER BY k.id"""
 
     def query_keywords(self, sort="opportunity", sort_dir="desc", category="",
                        commercial_min=0.0, q="", discovered_since="", active=1,
-                       opportunity_min=0.0, demand_min=0.0, limit=50, offset=0):
+                       opportunity_min=0.0, demand_min=0.0, click_min=0.0,
+                       limit=50, offset=0):
         col = self.SORT_COLUMNS.get(sort, "ds.opportunity")
         order = "ASC" if sort_dir == "asc" else "DESC"  # v3: 정렬 토글 (UX §6)
         where_sql, params = self._keyword_where(
             category, commercial_min, q, discovered_since, active,
-            opportunity_min, demand_min)
+            opportunity_min, demand_min, click_min)
         sql = f"""
 SELECT k.id, k.keyword, k.active, k.first_seen, ds.day,
        COALESCE(NULLIF(ds.shop_category, ''), k.category) AS category,
-       ds.opportunity, ds.commercial, ds.growth, ds.demand_idx,
+       ds.opportunity, ds.commercial, ds.growth, ds.demand_idx, ds.shop_click_idx,
        ds.fresh_ratio, ds.total_sim, ds.shop_total,
        (SELECT COUNT(*) FROM daily_stats h WHERE h.keyword_id = k.id) AS days
 {self._KEYWORD_BASE}{where_sql}
@@ -515,10 +532,10 @@ LIMIT ? OFFSET ?"""
 
     def count_keywords(self, category="", commercial_min=0.0, q="",
                        discovered_since="", active=1,
-                       opportunity_min=0.0, demand_min=0.0):
+                       opportunity_min=0.0, demand_min=0.0, click_min=0.0):
         where_sql, params = self._keyword_where(
             category, commercial_min, q, discovered_since, active,
-            opportunity_min, demand_min)
+            opportunity_min, demand_min, click_min)
         sql = f"SELECT COUNT(*) AS c {self._KEYWORD_BASE}{where_sql}"
         return self._qd(sql, tuple(params), fetch=True)[0]["c"]
 

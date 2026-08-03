@@ -19,8 +19,6 @@ def test_analyze_keyword_combines_sources():
     blog_sim = {"total": 1000, "items": [
         {"postdate": "20260801", "bloggername": "a"} for _ in range(20)]}
     blog_date = {"total": 1200, "items": []}
-    shop = {"total": 530, "items": [
-        {"lprice": "30000", "category1": "가전/디지털", "category2": "주방가전"}]}
     calls = {"n": 0}
 
     class FakeClient:
@@ -28,31 +26,10 @@ def test_analyze_keyword_combines_sources():
             calls["n"] += 1
             return blog_sim if sort == "sim" else blog_date
 
-        def search_shop(self, query, display=10, start=1):
-            calls["n"] += 1
-            return shop
-
+    # v4: 쇼핑 검색 API 종료 — 호출은 blog 2종만
     result = analyze_keyword(FakeClient(), "에어프라이어", TODAY)
     assert result["total_sim"] == 1000
     assert result["total_date"] == 1200
     assert result["fresh_ratio"] == 1.0  # 20260801은 기준일 8/3의 7일 내
-    assert result["shop_total"] == 530
-    assert result["shop_avg_price"] == 30000
-    assert result["shop_category"] == "가전/디지털/주방가전"
-    assert result["shop_error"] is None
-    assert calls["n"] == 3
-
-
-def test_analyze_keyword_shop_failure_partial():
-    class FailShopClient:
-        def search_blog(self, query, sort="sim", display=100, start=1):
-            return {"total": 100, "items": [{"postdate": "20260101"}]}
-
-        def search_shop(self, query, display=10, start=1):
-            raise Exception("shop down")
-
-    result = analyze_keyword(FailShopClient(), "키워드", TODAY)
-    assert result["total_sim"] == 100
-    assert result["shop_total"] == 0
-    assert result["shop_avg_price"] == 0
-    assert result["shop_error"] is not None
+    assert result["top_post_dates"][0] == "20260801"
+    assert calls["n"] == 2

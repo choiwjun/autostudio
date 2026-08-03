@@ -19,37 +19,16 @@ def compute_fresh_ratio(post_dates, today, window_days=7):
 
 
 def analyze_keyword(client, keyword, today):
+    # v4: 쇼핑 검색 API 종료로 shop 호출 제거 — 상업 신호는 쇼핑인사이트 배치(collect.py)로 대체.
+    # 키워드당 호출: blog 2종 (sim + date)
     blog_sim = client.search_blog(keyword, sort="sim", display=20)
     blog_date = client.search_blog(keyword, sort="date", display=100)
 
-    shop = None
-    shop_error = None
-    try:
-        shop = client.search_shop(keyword, display=10)
-    except Exception as e:
-        shop_error = str(e)
-
     post_dates = [item.get("postdate", "") for item in blog_sim.get("items", [])]
-    shop_items = shop.get("items", []) if shop else []
-    prices = []
-    for i in shop_items:
-        try:
-            prices.append(int(i.get("lprice", 0)))
-        except (ValueError, TypeError):
-            continue
-    category = ""
-    if shop_items:
-        category = shop_items[0].get("category1", "")
-        if shop_items[0].get("category2"):
-            category = f"{category}/{shop_items[0].get('category2')}"
 
     return {
         "total_sim": int(blog_sim.get("total", 0)),
         "total_date": int(blog_date.get("total", 0)),
         "fresh_ratio": compute_fresh_ratio(post_dates, today),
         "top_post_dates": post_dates,
-        "shop_total": int(shop.get("total", 0)) if shop else 0,
-        "shop_avg_price": int(sum(prices) / len(prices)) if prices else 0,
-        "shop_category": category,
-        "shop_error": shop_error,
     }

@@ -18,19 +18,19 @@ def make_app(tmp_path):
     d.insert_daily_stats(a, "2026-08-01", {
         "total_sim": 100, "total_date": 110, "fresh_ratio": 0.3,
         "shop_total": 500, "shop_avg_price": 35000, "shop_category": "가전",
-        "commercial": 100.0})
+        "commercial": None})
     d.insert_daily_stats(a, "2026-08-02", {
         "total_sim": 130, "total_date": 140, "fresh_ratio": 0.5,
         "shop_total": 520, "shop_avg_price": 35000, "shop_category": "가전",
-        "growth": 0.27, "opportunity": 64.1, "commercial": 100.0,
-        "demand_idx": 0.08})
+        "growth": 0.27, "opportunity": 64.1, "commercial": None,
+        "demand_idx": 0.08, "shop_click_idx": 0.9})  # v4: 쇼핑클릭 지수
     d.insert_daily_stats(b, "2026-08-02", {
         "total_sim": 10, "total_date": 10, "fresh_ratio": 0.0,
         "shop_total": 10, "shop_avg_price": 1000, "shop_category": "가전",
-        "commercial": 2.5, "opportunity": 30.0})  # v3: 정렬 방향 검증용 점수 추가
+        "commercial": None, "opportunity": 30.0, "shop_click_idx": 0.1})  # v3/v4
     d.insert_daily_stats(c, "2026-08-02", {
         "total_sim": 5, "total_date": 5, "shop_category": "디지털",
-        "commercial": 0.0})
+        "commercial": None})
     d.close()
     return create_app({"db_url": dbfile, "dashboard_token": "sekret",
                        "manual_budget_seconds": 45, "env": "development"})
@@ -45,6 +45,7 @@ def test_list_reads_precomputed_scores(tmp_path):
     assert item["opportunity"] == 64.1        # 저장값 그대로 (조회 시 재계산 없음)
     assert item["growth"] == 0.27
     assert item["demand_idx"] == 0.08
+    assert item["shop_click_idx"] == 0.9      # v4: 쇼핑 클릭 지수
     assert item["days"] == 2
 
 
@@ -60,7 +61,7 @@ def test_paging(tmp_path):
 
 def test_filters(tmp_path):
     client = TestClient(make_app(tmp_path))
-    assert client.get("/keywords?commercial_min=50").json()["count"] == 1
+    assert client.get("/keywords?click_min=0.5").json()["count"] == 1  # v4
     body = client.get("/keywords?q=선풍").json()
     assert [i["keyword"] for i in body["items"]] == ["선풍기"]
     assert client.get("/keywords?show_inactive=1").json()["count"] == 3
@@ -129,13 +130,15 @@ def test_collect_schedule_trigger_runs_full_pipeline(tmp_path, monkeypatch):
 
 
 def test_sort_dir_and_promising_preset(tmp_path):
-    # v3: 정렬 토글(sort_dir) + 유망 프리셋(preset=promising) — UX §6·§8 계약
+    # v3/v4: 정렬 토글(sort_dir) + 유망 프리셋(preset=promising, 쇼핑클릭 기준) — UX §6·§8 계약
     client = TestClient(make_app(tmp_path))
     desc = client.get("/keywords?sort=opportunity").json()
     assert [i["keyword"] for i in desc["items"]] == ["에어프라이어", "선풍기"]
     asc = client.get("/keywords?sort=opportunity&sort_dir=asc").json()
     assert [i["keyword"] for i in asc["items"]] == ["선풍기", "에어프라이어"]
-    # 유망 = 기회≥70 & 상업성≥60 & 수요≥0.01 → 픽스처 최고 64.1 → 0건 (서버 필터 확인)
+    click = client.get("/keywords?sort=click").json()
+    assert [i["keyword"] for i in click["items"]] == ["에어프라이어", "선풍기"]
+    # 유망 = 기회≥70 & 쇼핑클릭≥0.5 & 수요≥0.01 → 픽스처 최고 64.1 → 0건 (서버 필터 확인)
     assert client.get("/keywords?preset=promising").json()["count"] == 0
 
 

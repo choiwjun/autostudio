@@ -54,10 +54,10 @@
     <select id="category" onchange="resetAndLoad()">
       <option value="">전체 분야</option>
     </select>
-    <select id="commercial" onchange="resetAndLoad()">
-      <option value="">상업성 전체</option>
-      <option value="60">상업성 60+</option>
-      <option value="30">상업성 30+</option>
+    <select id="click" onchange="resetAndLoad()">
+      <option value="">쇼핑클릭 전체</option>
+      <option value="0.5">클릭 0.5+ (앵커 대비)</option>
+      <option value="0.2">클릭 0.2+</option>
     </select>
     <select id="discovered" onchange="resetAndLoad()">
       <option value="">발견기간 전체</option>
@@ -74,12 +74,11 @@
   <table>
     <thead><tr>
       <th class="sortable" data-sort="opportunity" onclick="setSort('opportunity')">기회점수</th>
-      <th class="sortable" data-sort="commercial" onclick="setSort('commercial')">상업성</th>
+      <th class="sortable" data-sort="click" onclick="setSort('click')">쇼핑클릭</th>
       <th class="sortable" data-sort="demand" onclick="setSort('demand')">수요지수</th>
       <th>키워드</th>
       <th>분야</th>
       <th>총 글 수</th>
-      <th>쇼핑상품</th>
       <th class="sortable" data-sort="growth" onclick="setSort('growth')">증감률</th>
       <th>일수</th>
       <th>권장</th>
@@ -151,7 +150,8 @@ async function api(path, opts) {
 function recommend(i) {
   if (i.opportunity === null) return { label: '데이터 쌓는 중', cls: 'b-gray' };
   if (i.demand_idx !== null && i.demand_idx < 0.01) return { label: '수요낮음', cls: 'b-gray' };
-  if (i.opportunity >= 70 && i.commercial !== null && i.commercial >= 60) return { label: '쇼커', cls: 'b-gold' };
+  // v4: 쇼핑 검색 API 종료 — 쇼커는 쇼핑 클릭 지수(앵커 대비) ≥ 0.5로 판정
+  if (i.opportunity >= 70 && i.shop_click_idx !== null && i.shop_click_idx >= 0.5) return { label: '쇼커', cls: 'b-gold' };
   if (i.opportunity >= 60) return { label: '애포', cls: 'b-gold' };
   if (i.opportunity <= 35) return { label: '경쟁과열', cls: 'b-gray' };
   return { label: '보류', cls: 'b-gray' };
@@ -182,7 +182,7 @@ function renderSortArrows() {
 function skeletonRows() {
   // v3: 첫 로드 스켈레톤 — 컬럼 골격 유지 (UX §5.5)
   let html = '';
-  for (let i = 0; i < 8; i++) html += '<tr class="skel"><td colspan="11"></td></tr>';
+  for (let i = 0; i < 8; i++) html += '<tr class="skel"><td colspan="10"></td></tr>';
   return html;
 }
 
@@ -193,7 +193,7 @@ async function load() {
   const params = new URLSearchParams({
     sort: sortBy, sort_dir: sortDir, page: page, page_size: PAGE_SIZE,
     category: document.getElementById('category').value,
-    commercial_min: document.getElementById('commercial').value || 0,
+    click_min: document.getElementById('click').value || 0,
     discovered_within: document.getElementById('discovered').value || 0,
     q: document.getElementById('q').value.trim(),
     show_inactive: document.getElementById('showInactive').checked ? 1 : 0,
@@ -208,7 +208,7 @@ async function load() {
     loadError = true;
     // v3: API 오류 → [다시 시도] (UX §5.5)
     document.getElementById('rows').innerHTML =
-      '<tr><td colspan="11" class="empty">데이터를 불러오지 못했습니다 ' +
+      '<tr><td colspan="10" class="empty">데이터를 불러오지 못했습니다 ' +
       '<button class="btn btn-sm" onclick="load()">다시 시도</button></td></tr>';
     return;
   }
@@ -220,17 +220,18 @@ async function load() {
   if (!data.items.length) {
     // v3: 온보딩(전체 0건)과 필터/프리셋/페이지 0건을 구분 — 온보딩 카피는 전체 0건일 때만 (UX §5.5)
     const filtering = preset || params.get('q') || params.get('category')
-      || Number(params.get('commercial_min')) > 0 || Number(params.get('discovered_within')) > 0
+      || Number(params.get('click_min')) > 0 || Number(params.get('discovered_within')) > 0
       || params.get('show_inactive') == 1 || page > 1;
     rows.innerHTML = filtering
-      ? '<tr><td colspan="11" class="empty">검색 결과가 없습니다 — 필터를 조정하거나 <button class="btn btn-sm" onclick="resetFilters()">필터 초기화</button></td></tr>'
-      : '<tr><td colspan="11" class="empty">아직 데이터가 없습니다 — 시드 추가 후 "지금 수집 실행" (점수는 2일차부터)<br><br>'
+      ? '<tr><td colspan="10" class="empty">검색 결과가 없습니다 — 필터를 조정하거나 <button class="btn btn-sm" onclick="resetFilters()">필터 초기화</button></td></tr>'
+      : '<tr><td colspan="10" class="empty">아직 데이터가 없습니다 — 시드 추가 후 "지금 수집 실행" (점수는 2일차부터)<br><br>'
         + '<button class="btn" onclick="openSeeds()">시드 추가</button> '
         + '<button class="btn" onclick="collect()">지금 수집 실행</button></td></tr>';
   }
   data.items.forEach(i => {
-    const stars = i.commercial === null ? '-' : '★'.repeat(Math.max(1, Math.round(i.commercial / 33)));
-    const comTip = '쇼핑 데이터 수집 실패';
+    // v4: 쇼핑클릭 = 쇼핑인사이트 앵커 대비 클릭 지수 (쇼핑 검색 API 종료 대체)
+    const clickVal = i.shop_click_idx === null ? '-' : i.shop_click_idx.toFixed(2);
+    const clickTip = '쇼핑인사이트 클릭 추이 (앵커 대비)';
     const demand = i.demand_idx === null ? '-' : i.demand_idx.toFixed(2);
     const growth = i.growth === null ? '-'
       : `<span class="${i.growth > 0 ? 'rise' : i.growth < 0 ? 'fall' : ''}">${i.growth > 0 ? '▲ ' : i.growth < 0 ? '▼ ' : ''}${(i.growth * 100).toFixed(1)}%</span>`;
@@ -240,12 +241,11 @@ async function load() {
     tr.style.cursor = 'pointer';
     tr.innerHTML = `
       <td>${gaugeCell(i.opportunity)}</td>
-      <td><span class="badge ${i.commercial === null ? 'b-gray' : 'b-gold'}" ${i.commercial === null ? `title="${esc(comTip)}"` : ''}>${esc(stars)}</span></td>
+      <td title="${esc(clickTip)}">${esc(clickVal)}</td>
       <td>${esc(demand)}</td>
       <td>${esc(i.keyword)}${i.active ? '' : ' <span class="badge b-gray">제외됨</span>'}</td>
       <td>${esc(i.category)}</td>
       <td>${Number(i.total_sim).toLocaleString()}</td>
-      <td>${Number(i.shop_total).toLocaleString()}</td>
       <td title="최신순 글 수(total_date) 전일 대비 — 총 글 수는 정확도순(total_sim)">${growth}</td>
       <td>${esc(i.days)}일</td>
       <td><span class="badge ${rec.cls}">${esc(rec.label)}</span></td>
@@ -261,7 +261,7 @@ async function load() {
 function resetAndLoad() { page = 1; load(); }
 function resetFilters() {
   document.getElementById('category').value = '';
-  document.getElementById('commercial').value = '';
+  document.getElementById('click').value = '';
   document.getElementById('discovered').value = '';
   document.getElementById('q').value = '';
   document.getElementById('showInactive').checked = false;
@@ -374,7 +374,7 @@ async function detail(id) {
         { label: '기회점수', data: d.history.map(h => h.opportunity), borderColor: '#2e8b57', yAxisID: 'y' },
         { label: '수요지수×100', data: d.history.map(h => h.demand_idx === null ? null : h.demand_idx * 100), borderColor: '#3399ff', yAxisID: 'y' },
         { label: '총 글 수', data: d.history.map(h => h.total_sim), borderColor: '#666', yAxisID: 'y2' },
-        { label: '쇼핑 상품 수', data: d.history.map(h => h.shop_total), borderColor: '#e8a13a', yAxisID: 'y2' },
+        { label: '쇼핑클릭×100', data: d.history.map(h => h.shop_click_idx === null ? null : h.shop_click_idx * 100), borderColor: '#e8a13a', yAxisID: 'y' },
       ],
     },
     options: {

@@ -11,9 +11,6 @@ class FakeClient:
     def search_blog(self, query, sort="sim", display=100, start=1):
         return {"total": 100, "items": [{"postdate": "20260101"}]}
 
-    def search_shop(self, query, display=10, start=1):
-        return {"total": 10, "items": []}
-
 
 def make_cfg(tmp_path):
     return {
@@ -24,6 +21,7 @@ def make_cfg(tmp_path):
         "autocomplete_max_requests": 10, "manual_budget_seconds": 45,
         "dashboard_token": "", "datalab_enabled": False, "datalab_anchor": "냉장고",
         "env": "development", "run_lock_stale_minutes": 60,  # v3
+        "shopping_insight_category": "50000000",  # v4
     }
 
 
@@ -40,7 +38,7 @@ def test_two_day_snapshot_precomputes_scores(tmp_path):
     assert hist[0]["opportunity"] is None  # 1일차: 전일 없음 → NULL ("데이터 쌓는 중")
     assert hist[1]["growth"] == 0.0        # (100−100)/100
     assert hist[1]["opportunity"] == 15.0  # 40×0 + 30×0 + 30×(1−0.5)
-    assert hist[1]["commercial"] == 1.2    # 60×(10/500) + 40×0
+    assert hist[1]["commercial"] is None   # v4: 쇼핑 검색 API 종료 — 상업성 NULL (쇼핑클릭은 배치 갱신)
     d.close()
 
 
@@ -96,18 +94,26 @@ def test_locked_when_run_in_progress(tmp_path):
     d.close()
 
 
-def test_schedule_run_retires_and_cleans(tmp_path):
+def test_schedule_run_retires_and_cleans(tmp_path, monkeypatch):
     cfg = make_cfg(tmp_path)
     d = db.Database(cfg["db_url"])
     d.init()
     bad = d.upsert_keyword("낡고나쁨", day="2026-07-01")
     d.insert_daily_stats(bad, "2026-08-01", {
-        "total_date": 100, "opportunity": 10.0, "commercial": 5.0})
+        "total_date": 100, "opportunity": 10.0, "shop_click_idx": 0.1})
     d.insert_daily_stats(bad, "2026-01-15", {"total_sim": 1})  # 90일 보존 초과분
     d.insert_top_results(bad, "2026-01-15", ["20260101"])      # 30일 보존 초과분
+
+    # v4: 쇼핑 클릭 지수는 배치 단계 갱신 — 8/2 스냅샷에 저조한 클릭 0.1 주입
+    def fake_shop_clicks(d2, cfg2, today, now, budget_seconds=None, started=None):
+        d2.update_shop_click_idx(bad, today, 0.1)
+        return 1
+
+    monkeypatch.setattr(collect, "update_shop_clicks", fake_shop_clicks)
     result = run_collection(cfg, client=FakeClient(), today="2026-08-02")
     assert result["snapshotted"] == 1
-    assert result["retired"] == 1  # 8/2 스냅샷도 기회 15 < 35, 상업성 1.2 < 30 → 은퇴
+    assert result["shop_clicks_updated"] == 1
+    assert result["retired"] == 1  # 8/2: 기회 15 < 35, 쇼핑클릭 0.1 < 0.5 → 은퇴
     assert d.count_active() == 0
     assert all(h["day"] >= "2026-05-04" for h in d.get_history(bad))
     assert d.get_top_results(bad, "2026-01-15") == []
@@ -144,7 +150,8 @@ def test_blocked_crawl_marks_partial_and_exit(tmp_path, monkeypatch):
                         lambda *a, **k: {"locked": False, "new_keywords": 0,
                                          "snapshotted": 1, "errors": [],
                                          "partial": False, "crawl_stopped": "blocked",
-                                         "retired": 0, "demand_updated": 0})
+                                         "retired": 0, "demand_updated": 0,
+                                         "shop_clicks_updated": 0})
     with pytest.raises(SystemExit) as exc:
         collect.main()
     assert exc.value.code == 1

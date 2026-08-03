@@ -57,7 +57,8 @@ def create_app(cfg):
     @app.get("/keywords")
     def list_keywords(sort: str = "opportunity", sort_dir: str = "desc",
                       category: str = "", commercial_min: float = 0,
-                      q: str = "", discovered_within: int = 0,
+                      click_min: float = 0, q: str = "",
+                      discovered_within: int = 0,
                       preset: str = "", show_inactive: int = 0,
                       page: int = 1, page_size: int = 50):
         page = max(page, 1)
@@ -67,14 +68,15 @@ def create_app(cfg):
             discovered_since = (
                 config_mod.today_kst() - timedelta(days=discovered_within)
             ).isoformat()
-        # v3: 유망 프리셋 — UX §8 "유망" 버튼 (기회≥70 & 상업성≥60 & 수요지수≥0.01)
+        # v4: 유망 프리셋 — 기회≥70 & 쇼핑클릭≥0.5 & 수요지수≥0.01 (쇼핑 검색 API 종료 대체)
         opportunity_min, demand_min = 0.0, 0.0
         if preset == "promising":
-            opportunity_min, commercial_min, demand_min = 70.0, 60.0, 0.01
+            opportunity_min, click_min, demand_min = 70.0, 0.5, 0.01
         filters = dict(category=category, commercial_min=commercial_min, q=q,
                        discovered_since=discovered_since,
                        active=None if show_inactive else 1,
-                       opportunity_min=opportunity_min, demand_min=demand_min)
+                       opportunity_min=opportunity_min, demand_min=demand_min,
+                       click_min=click_min)
         items = run_db(lambda d: d.query_keywords(
             sort=sort, sort_dir=sort_dir, limit=page_size,
             offset=(page - 1) * page_size, **filters))
