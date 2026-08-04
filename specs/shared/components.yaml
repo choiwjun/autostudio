@@ -1,0 +1,44 @@
+version: "2.0"
+
+# 공통 컴포넌트 — 기존 대시보드에서 재사용되는 요소
+
+components:
+  - id: modal_header
+    type: detail
+    position: header
+    function: 모달 상단 바 (제목 + 닫기 X 버튼)
+    events:
+      - on: click:close
+        do: 모달 닫고 이전 화면으로 복귀
+
+  - id: header
+    type: navigation
+    position: header
+    function: 상단 헤더 (기존 대시보드 — 변경 없음)
+
+  - id: filter_bar
+    type: navigation
+    position: main
+    function: 정렬·프리셋·분야 필터 (기존 v6 — 변경 없음)
+
+# 공통 타입
+
+types:
+  Draft:
+    id: integer
+    keyword_id: integer
+    title: string
+    first_paragraph: string
+    body: string
+    image_url: string
+    status: string
+    created_at: string
+    updated_at: string
+
+  Outline:
+    id: integer
+    keyword_id: integer
+    keyword: string
+    day: string
+    structure: object
+    source: string

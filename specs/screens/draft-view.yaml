@@ -1,0 +1,83 @@
+version: "2.0"
+
+screen:
+  name: 초안 보기
+  route: /drafts/:id (모달 표시)
+  layout: full-width
+  auth: true
+
+data_requirements:
+  - resource: drafts
+    needs: [id, keyword_id, keyword, title, first_paragraph, body, image_url, status, created_at, updated_at]
+    filters:
+      id: "?id"
+
+components:
+  - id: draft_title
+    type: detail
+    position: main
+    function: 생성된 초안 제목 표시
+    data_source:
+      resource: drafts
+
+  - id: draft_first_paragraph
+    type: detail
+    position: main
+    function: 첫문단 표시 (즉답 구조)
+    data_source:
+      resource: drafts
+
+  - id: draft_body
+    type: detail
+    position: main
+    function: 본문 표시 (질문형 소제목 포함)
+    data_source:
+      resource: drafts
+
+  - id: image_preview
+    type: card
+    position: main
+    function: 생성된 블로그 이미지 미리보기 (미생성 시 플레이스홀더)
+    data_source:
+      resource: drafts
+    events:
+      - on: click:generate_image
+        do: POST /drafts/{id}/image 호출, 생성 중 스피너 표시
+
+  - id: copy_button
+    type: card
+    position: main
+    function: 초안 전체 복사 버튼 (사용자가 네이버 블로그에 붙여넣기)
+    data_source:
+      resource: drafts
+    events:
+      - on: click:copy
+        do: 초안 텍스트 클립보드 복사, "복사됨!" 피드백
+
+connections:
+  navigations:
+    - from: copy_button
+      to: external (네이버 블로그 편집기)
+
+  shared_components:
+    - modal_header
+
+tests:
+  - name: 초안 로드
+    when: 초안 생성 완료 후 화면 진입
+    then:
+      - 제목·첫문단·본문 표시
+      - 질문형 소제목 포함 확인
+
+  - name: 이미지 생성
+    when: 이미지 생성 버튼 클릭
+    then:
+      - 생성 중 스피너 표시
+      - 완료 시 image_url 미리보기 표시
+      - 키 미발급 시 안내 메시지 (텍스트 초안은 유지)
+
+  - name: 초안 복사
+    when: 복사 버튼 클릭
+    then:
+      - 전체 초안 클립보드 복사
+      - "복사됨!" 피드백 표시

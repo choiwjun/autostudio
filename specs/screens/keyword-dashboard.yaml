@@ -1,0 +1,69 @@
+version: "2.0"
+
+screen:
+  name: 키워드 대시보드 (글 생성 진입점 추가)
+  route: /
+  layout: dashboard
+  auth: false
+
+data_requirements:
+  - resource: keywords
+    needs: [id, keyword, category, opportunity, commercial, demand_idx, day]
+    filters:
+      sort: "?sort"
+      preset: "?preset"
+      category: "?category"
+
+  - resource: outlines
+    needs: [id, keyword_id, structure, day]
+    filters:
+      keyword_id: "?keyword_id"
+
+components:
+  - id: keyword_table
+    type: list
+    position: main
+    function: 키워드 목록 표시 (기존 v6 정렬·프리셋 유지)
+    data_source:
+      resource: keywords
+    events:
+      - on: click:generate
+        do: 해당 키워드의 글 생성 모달(상위글 골격 확인) 열기
+
+  - id: generate_button
+    type: card
+    position: main
+    function: 키워드 행의 "글 생성" 버튼 — 상위글 골격 분석 트리거
+    data_source:
+      resource: outlines
+    events:
+      - on: click:generate
+        do: POST /outlines/{keyword_id} 실행 후 골격 모달 표시
+
+connections:
+  navigations:
+    - from: generate_button
+      to: outline-modal (screen-03)
+
+  shared_components:
+    - header
+    - filter_bar
+
+tests:
+  - name: 키워드 목록 로드
+    when: 페이지 접속
+    then:
+      - 키워드 목록 표시 (기존 정렬 기준)
+      - 각 행에 글 생성 버튼 표시
+
+  - name: 글 생성 버튼 클릭
+    when: 키워드 행의 글 생성 버튼 클릭
+    then:
+      - POST /outlines/{keyword_id} 호출
+      - 상위글 골격 모달 표시
+
+  - name: 골격 미존재 키워드
+    when: 스냅샷 없는 키워드에서 글 생성 클릭
+    then:
+      - "아직 데이터가 쌓이는 중" 안내 표시
+      - 생성 차단 (버튼 비활성)

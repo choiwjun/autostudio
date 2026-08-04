@@ -1,0 +1,36 @@
+version: "2.0"
+
+# 화면 목록 인덱스 — specs/screens/ 아래 각 화면 명세의 진입점
+
+screens:
+  - id: screen-01
+    name: 키워드 대시보드
+    file: keyword-dashboard.yaml
+    route: /
+
+  - id: screen-02
+    name: 초안 보기
+    file: draft-view.yaml
+    route: /drafts/:id
+
+  - id: screen-03
+    name: 상위글 골격 확인
+    file: outline-modal.yaml
+    route: modal
+
+navigation:
+  - from: screen-01
+    to: screen-03
+    trigger: generate_button
+
+  - from: screen-03
+    to: screen-02
+    trigger: create_draft_button
+
+  - from: screen-02
+    to: external
+    trigger: copy_button
+
+  - from: screen-03
+    to: screen-01
+    trigger: modal_close

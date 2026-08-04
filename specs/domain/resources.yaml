@@ -1,0 +1,67 @@
+# 도메인 리소스 정의
+
+> 작성일: 2026-08-04 · 버전: v1
+> 콘텐츠 자동화(글 생성) 기능에 필요한 리소스. 기존 키워드 대시보드 리소스(keywords 등)는 기존 API가 제공하므로 여기서는 신규 리소스 중심으로 정의한다.
+
+version: "2.0"
+
+resources:
+  # 신규: 상위글 골격 분석 리소스
+  - name: outlines
+    description: 키워드별 상위글 골격 분석 결과 (질문형 소제목·비교·수치 구조)
+    fields:
+      id: integer
+      keyword_id: integer
+      keyword: string
+      day: string
+      structure: object
+      source: string
+    operations:
+      - name: get_by_keyword
+        method: GET
+        path: /outlines/{keyword_id}
+        note: 해당 키워드의 최신 골격 조회. 없으면 404
+      - name: analyze
+        method: POST
+        path: /outlines/{keyword_id}
+        note: 상위글 골격 분석 실행 (블로그 검색 API description 캡처). 인증 필요
+
+  # 신규: 글 초안 리소스
+  - name: drafts
+    description: 생성된 글 초안 (제목·첫문단·본문·이미지 URL)
+    fields:
+      id: integer
+      keyword_id: integer
+      keyword: string
+      title: string
+      first_paragraph: string
+      body: string
+      image_url: string
+      status: string
+      created_at: string
+      updated_at: string
+    operations:
+      - name: create
+        method: POST
+        path: /drafts
+        note: 키워드로 초안 생성 (골격 기반). 인증 필요
+      - name: get
+        method: GET
+        path: /drafts/{id}
+        note: 초안 단건 조회
+      - name: generate_image
+        method: POST
+        path: /drafts/{id}/image
+        note: 이미지 생성 (qwen API). 인증 필요. 키 미발급 시 401류 오류 반환
+
+  # 기존 리소스 참조 (변경 없음, 화면 needs에만 사용)
+  - name: keywords
+    description: 키워드 목록 (기존 대시보드 API)
+    fields:
+      id: integer
+      keyword: string
+      category: string
+      opportunity: number
+      commercial: number
+      demand_idx: number
+      day: string

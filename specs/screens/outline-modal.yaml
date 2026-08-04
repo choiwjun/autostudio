@@ -1,0 +1,71 @@
+version: "2.0"
+
+screen:
+  name: 상위글 골격 확인 (모달)
+  route: modal (outline-modal)
+  layout: full-width
+  auth: true
+
+data_requirements:
+  - resource: outlines
+    needs: [id, keyword_id, keyword, structure, day, source]
+    filters:
+      keyword_id: "?keyword_id"
+
+  - resource: drafts
+    needs: [id, keyword_id, title, first_paragraph, body, image_url]
+    filters:
+      keyword_id: "?keyword_id"
+
+components:
+  - id: outline_structure
+    type: detail
+    position: main
+    function: 상위글 골격 구조 표시 (질문형 소제목·비교·수치 태그 목록)
+    data_source:
+      resource: outlines
+
+  - id: outline_meta
+    type: detail
+    position: main
+    function: 골격 분석일·데이터 출처 표시
+    data_source:
+      resource: outlines
+
+  - id: create_draft_button
+    type: card
+    position: main
+    function: "초안 생성" 버튼 — 초안 생성 트리거
+    data_source:
+      resource: drafts
+    events:
+      - on: click:create
+        do: POST /drafts {keyword_id} 호출, 생성 완료 후 초안 보기 화면으로 전환
+
+connections:
+  navigations:
+    - from: create_draft_button
+      to: draft-view (screen-02)
+
+  shared_components:
+    - modal_header
+
+tests:
+  - name: 골격 표시
+    when: 글 생성 버튼 클릭 후 모달 진입
+    then:
+      - 상위글 골격 구조 표시 (소제목·비교·수치)
+      - 분석일·출처 표시
+
+  - name: 초안 생성
+    when: 초안 생성 버튼 클릭
+    then:
+      - POST /drafts 호출
+      - 생성 중 스피너 표시
+      - 완료 시 초안 보기 화면으로 전환
+
+  - name: 생성 실패
+    when: 초안 생성 API 오류
+    then:
+      - 오류 메시지 표시
+      - 골격 모달 유지 (재시도 가능)
