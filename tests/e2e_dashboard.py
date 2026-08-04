@@ -31,6 +31,8 @@ def main():
         th.click()
         page.wait_for_timeout(200)
         assert page.locator("th[aria-sort='descending']").count() == 1
+        # v7: 글 생성 버튼 + 모달 마크업 존재 확인 (데이터 없으면 버튼 미노출 — 셀렉터 존재만 검증)
+        assert page.locator("th:has-text('글')").count() == 1
         b.close()
 
 

@@ -7,10 +7,9 @@ from draft_generator import (
 
 
 def _runner(ok=True):
-    def run(prompt):
+    def run(prompt, timeout=90):
         if not ok:
             raise DraftGenerationError("opencode not found")
-        assert "keyword" not in prompt or True
         return ('{"title": "제목", "first_paragraph": "첫문단", '
                 '"body": "## 소제목\\n본문"}')
     return run

@@ -2,6 +2,7 @@
 # 상위글 골격(outline)을 프롬프트에 넣고 opencode CLI(deepseek-v4-flash)를
 # 비대화형으로 1회 실행해 제목·첫문단·본문을 받아온다.
 import json
+import os
 import subprocess
 
 SYSTEM_PROMPT = (
@@ -37,13 +38,23 @@ class DraftGenerationError(Exception):
     pass
 
 
-def _run_opencode(prompt, timeout=55):
+def _run_opencode(prompt, timeout=90):
     # GitHub Actions/Vercel 서버리스에서 opencode CLI 실행. 로컬 검증: "1+1"→"2"
+    # --format json: 진행 로그가 stdout에 섞이지 않게 raw JSON 이벤트로 받는다
+    # Windows: npm .cmd/.ps1 래퍼는 인자 전달이 깨지므로 실제 exe를 직접 호출
+    cmd = ["opencode", "run", "-m", "opencode-go/deepseek-v4-flash",
+           "--format", "json", prompt]
     try:
-        proc = subprocess.run(
-            ["opencode", "run", "-m", "opencode-go/deepseek-v4-flash", prompt],
-            capture_output=True, text=True, timeout=timeout,
-        )
+        run_kw = dict(capture_output=True, text=True, timeout=timeout,
+                      encoding="utf-8", errors="replace")
+        if os.name == "nt":
+            exe = _find_opencode_exe()
+            if not exe:
+                raise DraftGenerationError("opencode exe not found")
+            cmd[0] = exe
+            proc = subprocess.run(cmd, **run_kw)
+        else:
+            proc = subprocess.run(cmd, **run_kw)
     except FileNotFoundError as e:
         raise DraftGenerationError("opencode CLI not found") from e
     except subprocess.TimeoutExpired as e:
@@ -51,7 +62,42 @@ def _run_opencode(prompt, timeout=55):
     if proc.returncode != 0:
         raise DraftGenerationError(
             f"opencode failed rc={proc.returncode}: {proc.stderr[-300:]}")
-    return proc.stdout
+    return _extract_result(proc.stdout)
+
+
+def _find_opencode_exe():
+    import shutil
+    wrapper = shutil.which("opencode")
+    if not wrapper:
+        return None
+    d = os.path.dirname(wrapper)
+    candidates = [
+        os.path.join(d, "node_modules", "opencode-ai", "bin", "opencode.exe"),
+        os.path.join(d, "opencode.exe"),
+        os.path.join(d, "opencode.cmd"),
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    return wrapper
+
+
+def _extract_result(stdout):
+    # --format json 이벤트 스트림에서 최종 result 텍스트를 추출
+    texts = []
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if ev.get("type") == "text":
+            part = ev.get("part", {})
+            if part.get("type") == "text" and part.get("text"):
+                texts.append(part["text"])
+    return "".join(texts) if texts else stdout
 
 
 def parse_draft(raw):
@@ -81,5 +127,5 @@ def generate_draft(keyword, structure, runner=None):
     prompt = USER_PROMPT_TEMPLATE.format(
         keyword=keyword, structure=structure_text)
     run = runner or _run_opencode
-    raw = run(prompt)
+    raw = run(prompt, timeout=90)
     return parse_draft(raw)
