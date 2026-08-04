@@ -50,3 +50,21 @@ def test_analyze_keyword_captures_top_bloggers():
     assert result["top_bloggers"][1] == ("일반1", 5)
     assert result["top_bloggers"][2] == ("일반2", 3)
     assert len(result["top_bloggers"]) == 3
+
+
+def test_analyze_keyword_captures_descriptions():
+    # v7: 상위글 골격 분석 원자료 — description 캡처 (기존에 버리던 필드)
+    items = [
+        {"postdate": "20260801", "bloggername": "a",
+         "description": "어떤 제품을 골라야 할까요? 추천 비교"},
+        {"postdate": "20260801", "bloggername": "b", "description": "가격 3만원대 비교"},
+        {"postdate": "20260801", "bloggername": "c"},  # description 없음 → 제외
+    ]
+
+    class FakeClient:
+        def search_blog(self, query, sort="sim", display=100, start=1):
+            return {"total": 3, "items": items}
+
+    result = analyze_keyword(FakeClient(), "에어프라이어", TODAY)
+    assert len(result["top_descriptions"]) == 2
+    assert "어떤 제품을 골라야 할까요" in result["top_descriptions"][0]

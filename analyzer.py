@@ -33,6 +33,11 @@ def analyze_keyword(client, keyword, today):
         {b: bloggers.count(b) for b in set(bloggers)}.items(),
         key=lambda kv: (-kv[1], kv[0]),
     )[:5]
+    # v7: 상위글 골격 분석 원자료 — 검색 API description 캡처 (기존에 버리던 필드).
+    #     질문형/비교/수치 구조 추출은 outline.py에서 담당
+    top_descriptions = [
+        item.get("description", "") for item in items[:20] if item.get("description")
+    ]
 
     return {
         "total_sim": int(blog_sim.get("total", 0)),
@@ -40,4 +45,5 @@ def analyze_keyword(client, keyword, today):
         "fresh_ratio": compute_fresh_ratio(post_dates, today),
         "top_post_dates": post_dates,
         "top_bloggers": top_bloggers,
+        "top_descriptions": top_descriptions,
     }
