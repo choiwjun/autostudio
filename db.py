@@ -70,6 +70,27 @@ CREATE TABLE IF NOT EXISTS collection_runs (
 -- v3: 실행 잠금 원자화 — running 행은 1개만 존재 (동시 INSERT 경합 차단)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_collection_runs_running
     ON collection_runs(status) WHERE status = 'running';
+-- v7: 콘텐츠 자동화 — 상위글 골격 분석 결과 (질문형 소제목·비교·수치 구조 JSON)
+CREATE TABLE IF NOT EXISTS outlines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    keyword_id INTEGER NOT NULL REFERENCES keywords(id),
+    day TEXT NOT NULL,
+    structure TEXT NOT NULL DEFAULT '{}',
+    source TEXT NOT NULL DEFAULT 'naver_blog_search',
+    UNIQUE(keyword_id, day)
+);
+-- v7: 콘텐츠 자동화 — 생성된 글 초안 (제목·첫문단·본문·이미지 URL)
+CREATE TABLE IF NOT EXISTS drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    keyword_id INTEGER NOT NULL REFERENCES keywords(id),
+    title TEXT NOT NULL,
+    first_paragraph TEXT NOT NULL,
+    body TEXT NOT NULL,
+    image_url TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'draft',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT ''
+);
 """,
     "postgres": """
 CREATE TABLE IF NOT EXISTS seed_keywords (
@@ -130,6 +151,27 @@ CREATE TABLE IF NOT EXISTS collection_runs (
 -- v3: 실행 잠금 원자화 — running 행은 1개만 존재 (동시 INSERT 경합 차단)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_collection_runs_running
     ON collection_runs(status) WHERE status = 'running';
+-- v7: 콘텐츠 자동화 — 상위글 골격 분석 결과 (질문형 소제목·비교·수치 구조 JSON)
+CREATE TABLE IF NOT EXISTS outlines (
+    id SERIAL PRIMARY KEY,
+    keyword_id INTEGER NOT NULL REFERENCES keywords(id),
+    day TEXT NOT NULL,
+    structure TEXT NOT NULL DEFAULT '{}',
+    source TEXT NOT NULL DEFAULT 'naver_blog_search',
+    UNIQUE(keyword_id, day)
+);
+-- v7: 콘텐츠 자동화 — 생성된 글 초안 (제목·첫문단·본문·이미지 URL)
+CREATE TABLE IF NOT EXISTS drafts (
+    id SERIAL PRIMARY KEY,
+    keyword_id INTEGER NOT NULL REFERENCES keywords(id),
+    title TEXT NOT NULL,
+    first_paragraph TEXT NOT NULL,
+    body TEXT NOT NULL,
+    image_url TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'draft',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT ''
+);
 """,
 }
 
@@ -595,6 +637,65 @@ LIMIT ? OFFSET ?"""
             (), fetch=True,
         )
         return sorted(r["c"] for r in rows)
+
+    # ---------- v7: 상위글 골격 (outlines) ----------
+
+    def upsert_outline(self, keyword_id, day, structure, source="naver_blog_search"):
+        self._q(
+            "INSERT INTO outlines (keyword_id, day, structure, source) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(keyword_id, day) DO UPDATE SET structure = excluded.structure, "
+            "source = excluded.source",
+            "INSERT INTO outlines (keyword_id, day, structure, source) VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (keyword_id, day) DO UPDATE SET structure = EXCLUDED.structure, "
+            "source = EXCLUDED.source",
+            (keyword_id, day, structure, source),
+        )
+
+    def get_outline(self, keyword_id):
+        rows = self._qd(
+            "SELECT * FROM outlines WHERE keyword_id = ? ORDER BY day DESC, id DESC LIMIT 1",
+            (keyword_id,), fetch=True,
+        )
+        return rows[0] if rows else None
+
+    def list_outlines(self, keyword_id):
+        return self._qd(
+            "SELECT * FROM outlines WHERE keyword_id = ? ORDER BY day DESC, id DESC",
+            (keyword_id,), fetch=True,
+        )
+
+    # ---------- v7: 글 초안 (drafts) ----------
+
+    def insert_draft(self, keyword_id, title, first_paragraph, body,
+                     image_url="", status="draft", created_at=""):
+        self._q(
+            "INSERT INTO drafts (keyword_id, title, first_paragraph, body, image_url, "
+            "status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO drafts (keyword_id, title, first_paragraph, body, image_url, "
+            "status, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            (keyword_id, title, first_paragraph, body, image_url, status,
+             created_at, created_at),
+        )
+        rows = self._qd("SELECT id FROM drafts ORDER BY id DESC LIMIT 1", (), fetch=True)
+        return rows[0]["id"]
+
+    def get_draft(self, draft_id):
+        rows = self._qd(
+            "SELECT * FROM drafts WHERE id = ?", (draft_id,), fetch=True
+        )
+        return rows[0] if rows else None
+
+    def update_draft_image(self, draft_id, image_url, updated_at=""):
+        self._qd(
+            "UPDATE drafts SET image_url = ?, updated_at = ? WHERE id = ?",
+            (image_url, updated_at, draft_id),
+        )
+
+    def list_drafts_by_keyword(self, keyword_id):
+        return self._qd(
+            "SELECT * FROM drafts WHERE keyword_id = ? ORDER BY id DESC",
+            (keyword_id,), fetch=True,
+        )
 
     def close(self):
         if self.conn:

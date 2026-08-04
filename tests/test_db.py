@@ -248,3 +248,61 @@ def test_query_sort_dir_and_thresholds(tmp_path):
     assert [r["keyword"] for r in d.query_keywords(
         opportunity_min=70, click_min=0.5, demand_min=0.01)] == []
     assert [r["keyword"] for r in d.query_keywords(click_min=0.5)] == ["에어프라이어"]
+
+
+def test_init_creates_v7_tables(tmp_path):
+    # v7: 콘텐츠 자동화 테이블 생성 확인
+    d = make_db(tmp_path)
+    rows = d.conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    ).fetchall()
+    names = {r[0] for r in rows}
+    assert {"drafts", "outlines"} <= names
+    d.close()
+
+
+def test_outline_upsert_and_get(tmp_path):
+    # v7: 같은 날 재분석은 갱신, 최신 1건 조회
+    d = make_db(tmp_path)
+    kid = d.upsert_keyword("에어프라이어", day="2026-08-01")
+    d.upsert_outline(kid, "2026-08-03", '{"headings":["질문A"]}')
+    d.upsert_outline(kid, "2026-08-04", '{"headings":["질문B"]}')
+    latest = d.get_outline(kid)
+    assert latest["day"] == "2026-08-04"
+    assert "질문B" in latest["structure"]
+    # 같은 keyword_id+day는 갱신 (행 수 불변)
+    d.upsert_outline(kid, "2026-08-04", '{"headings":["질문C"]}')
+    assert len(d.list_outlines(kid)) == 2
+    assert "질문C" in d.get_outline(kid)["structure"]
+    d.close()
+
+
+def test_draft_insert_and_get(tmp_path):
+    # v7: 초안 생성 → 단건 조회, image_url 갱신
+    d = make_db(tmp_path)
+    kid = d.upsert_keyword("에어프라이어", day="2026-08-01")
+    did = d.insert_draft(
+        kid, "제목", "첫문단", "본문",
+        created_at="2026-08-04T08:00:00+09:00")
+    draft = d.get_draft(did)
+    assert draft["title"] == "제목"
+    assert draft["first_paragraph"] == "첫문단"
+    assert draft["status"] == "draft"
+    assert draft["created_at"] == "2026-08-04T08:00:00+09:00"
+    assert draft["updated_at"] == "2026-08-04T08:00:00+09:00"
+    d.update_draft_image(did, "https://img.example.com/a.png",
+                         "2026-08-04T08:05:00+09:00")
+    assert d.get_draft(did)["image_url"] == "https://img.example.com/a.png"
+    d.close()
+
+
+def test_draft_list_by_keyword(tmp_path):
+    # v7: 키워드별 초안 목록 (최신순)
+    d = make_db(tmp_path)
+    kid = d.upsert_keyword("에어프라이어", day="2026-08-01")
+    d.insert_draft(kid, "첫번째", "p1", "b1", created_at="2026-08-04T08:00:00+09:00")
+    d.insert_draft(kid, "두번째", "p2", "b2", created_at="2026-08-04T09:00:00+09:00")
+    drafts = d.list_drafts_by_keyword(kid)
+    assert len(drafts) == 2
+    assert drafts[0]["title"] == "두번째"
+    d.close()
