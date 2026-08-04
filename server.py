@@ -23,6 +23,10 @@ class CollectIn(BaseModel):
     trigger: str = "manual"  # "schedule" = cron-job.org 대체 스케줄러 (전 구간, v3)
 
 
+class DraftIn(BaseModel):
+    keyword_id: int
+
+
 def create_app(cfg):
     env = cfg.get("env", "development")
     # v3: fail-closed — 프로덕션에서 토큰 미설정 시 기동 거부 (스펙 §7).
@@ -153,6 +157,53 @@ def create_app(cfg):
     @app.get("/categories")
     def categories():
         return run_db(lambda d: d.list_categories())
+
+    @app.get("/outlines/{keyword_id}")
+    def get_outline(keyword_id: int):
+        outline = run_db(lambda d: d.get_outline(keyword_id))
+        if not outline:
+            raise HTTPException(status_code=404, detail="outline not found")
+        return outline
+
+    @app.post("/outlines/{keyword_id}", dependencies=[Depends(require_token)])
+    def analyze_outline(keyword_id: int):
+        # v7: 상위글 골격 분석 — 블로그 검색 API description 캡처 → structure JSON 저장
+        kw = run_db(lambda d: d.get_keyword(keyword_id))
+        if not kw:
+            raise HTTPException(status_code=404, detail="not found")
+        import analyzer
+        import outline as outline_mod
+        from naver_client import NaverClient
+        client = NaverClient(cfg.get("client_id", ""), cfg.get("client_secret", ""))
+        snap = analyzer.analyze_keyword(client, kw["keyword"], config_mod.today_kst())
+        structure = outline_mod.build_outline_structure(snap["top_descriptions"])
+        day = config_mod.today_kst().isoformat()
+        run_db(lambda d: d.upsert_outline(keyword_id, day, structure))
+        return run_db(lambda d: d.get_outline(keyword_id))
+
+    @app.post("/drafts", dependencies=[Depends(require_token)])
+    def create_draft(body: DraftIn):
+        # v7: 글 초안 생성 — 골격 기반 opencode CLI 실행 (deepseek-v4-flash)
+        import draft_generator
+        kw = run_db(lambda d: d.get_keyword(body.keyword_id))
+        if not kw:
+            raise HTTPException(status_code=404, detail="not found")
+        outline = run_db(lambda d: d.get_outline(body.keyword_id))
+        structure = (outline["structure"] if outline
+                     else '{"questions": [], "comparisons": [], "facts": []}')
+        draft = draft_generator.generate_draft(kw["keyword"], structure)
+        created_at = config_mod.now_kst_iso()
+        draft_id = run_db(lambda d: d.insert_draft(
+            body.keyword_id, draft["title"], draft["first_paragraph"],
+            draft["body"], created_at=created_at))
+        return run_db(lambda d: d.get_draft(draft_id))
+
+    @app.get("/drafts/{draft_id}")
+    def get_draft(draft_id: int):
+        draft = run_db(lambda d: d.get_draft(draft_id))
+        if not draft:
+            raise HTTPException(status_code=404, detail="not found")
+        return draft
 
     @app.get("/")
     def index():

@@ -188,3 +188,52 @@ def test_categories(tmp_path):
     client = TestClient(make_app(tmp_path))
     assert "가전" in client.get("/categories").json()
     assert "요리" in client.get("/categories").json()  # v3: 시드 분야 포함
+
+
+def test_outline_not_found(tmp_path):
+    client = TestClient(make_app(tmp_path))
+    assert client.get("/outlines/999").status_code == 404
+
+
+def test_analyze_outline_requires_token(tmp_path):
+    # v7: development는 인증 생략 — 프로덕션에서만 401
+    prod = TestClient(make_app(tmp_path, env="production"))
+    assert prod.post("/outlines/1").status_code == 401
+
+
+def test_create_draft_requires_token_and_404(tmp_path):
+    # v7: development는 인증 생략 — 404는 골격 없는 키워드 검증
+    client = TestClient(make_app(tmp_path))
+    r = client.post("/drafts", json={"keyword_id": 999})
+    assert r.status_code == 404
+    prod = TestClient(make_app(tmp_path, env="production"))
+    assert prod.post("/drafts", json={"keyword_id": 1}).status_code == 401
+
+
+def test_create_draft_mocks_generator(tmp_path, monkeypatch):
+    # v7: opencode CLI는 Mock — generate_draft가 초안 dict 반환
+    def fake_generate(keyword, structure):
+        return {"title": "제목", "first_paragraph": "첫문단", "body": "## 소제목\n본문"}
+
+    import draft_generator
+    monkeypatch.setattr(draft_generator, "generate_draft", fake_generate)
+    client = TestClient(make_app(tmp_path))
+    r = client.post("/drafts", json={"keyword_id": 1})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["title"] == "제목"
+    assert body["keyword_id"] == 1
+    assert body["status"] == "draft"
+    assert body["created_at"].endswith("+09:00")
+
+
+def test_get_draft(tmp_path, monkeypatch):
+    import draft_generator
+    monkeypatch.setattr(draft_generator, "generate_draft", lambda k, s: {
+        "title": "제목", "first_paragraph": "첫문단", "body": "본문"})
+    client = TestClient(make_app(tmp_path))
+    did = client.post("/drafts", json={"keyword_id": 1}).json()["id"]
+    body = client.get(f"/drafts/{did}").json()
+    assert body["id"] == did
+    assert body["title"] == "제목"
+    assert client.get("/drafts/999").status_code == 404
