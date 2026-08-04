@@ -237,3 +237,38 @@ def test_get_draft(tmp_path, monkeypatch):
     assert body["id"] == did
     assert body["title"] == "제목"
     assert client.get("/drafts/999").status_code == 404
+
+
+def test_draft_image_no_key_returns_503(tmp_path, monkeypatch):
+    # v7: 키 미발급 → 503 + 명확한 안내, 초안 데이터는 유지
+    import draft_generator
+    import image_gen
+    monkeypatch.setattr(draft_generator, "generate_draft", lambda k, s: {
+        "title": "제목", "first_paragraph": "첫문단", "body": "본문"})
+    monkeypatch.delenv("BAILIAN_TOKEN_PLAN_API_KEY", raising=False)
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+    client = TestClient(make_app(tmp_path))
+    did = client.post("/drafts", json={"keyword_id": 1}).json()["id"]
+    r = client.post(f"/drafts/{did}/image")
+    assert r.status_code == 503
+    assert "이미지 키" in r.json()["detail"]
+    assert client.get(f"/drafts/{did}").json()["image_url"] == ""
+
+
+def test_draft_image_success_updates_url(tmp_path, monkeypatch):
+    # v7: 키 존재 + Mock runner → image_url 저장
+    import draft_generator
+    import image_gen
+    monkeypatch.setattr(draft_generator, "generate_draft", lambda k, s: {
+        "title": "제목", "first_paragraph": "첫문단", "body": "본문"})
+    monkeypatch.setenv("BAILIAN_TOKEN_PLAN_API_KEY", "test-key")
+    monkeypatch.setattr(image_gen, "_run_bl", lambda prompt: "https://img.example.com/1.png")
+    client = TestClient(make_app(tmp_path))
+    did = client.post("/drafts", json={"keyword_id": 1}).json()["id"]
+    body = client.post(f"/drafts/{did}/image").json()
+    assert body["image_url"] == "https://img.example.com/1.png"
+
+
+def test_draft_image_404(tmp_path):
+    client = TestClient(make_app(tmp_path))
+    assert client.post("/drafts/999/image").status_code == 404

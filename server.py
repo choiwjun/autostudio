@@ -205,6 +205,23 @@ def create_app(cfg):
             raise HTTPException(status_code=404, detail="not found")
         return draft
 
+    @app.post("/drafts/{draft_id}/image", dependencies=[Depends(require_token)])
+    def generate_draft_image(draft_id: int):
+        # v7: 블로그 이미지 생성 — 키 미발급 시 503(명확한 안내), 텍스트 초안은 유지
+        import image_gen
+        draft = run_db(lambda d: d.get_draft(draft_id))
+        if not draft:
+            raise HTTPException(status_code=404, detail="not found")
+        try:
+            url = image_gen.generate_image(
+                run_db(lambda d: d.get_keyword(draft["keyword_id"]))["keyword"],
+                draft["title"])
+        except image_gen.ImageGenerationError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+        run_db(lambda d: d.update_draft_image(
+            draft_id, url, config_mod.now_kst_iso()))
+        return run_db(lambda d: d.get_draft(draft_id))
+
     @app.get("/")
     def index():
         return FileResponse(os.path.join(
