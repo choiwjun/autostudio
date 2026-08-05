@@ -44,6 +44,14 @@ def compute_scores(d, keyword_id, day, stats):
     return growth, opportunity, None, ai_cite
 
 
+def _categorize_by_rules(keyword, rules):
+    """키워드 패턴 규칙으로 카테고리 결정 (첫 매치 우선). 매치 없으면 빈 문자열."""
+    for token, category in rules:
+        if token in keyword:
+            return category
+    return ""
+
+
 def _chunks(seq, n):
     for i in range(0, len(seq), n):
         yield seq[i:i + n]
@@ -93,12 +101,16 @@ def discover(d, cfg, today, now, trigger, result, budget_seconds=None):
     elif stopped == "budget":
         d.log_collection("(seed)", "blocked", "시간 예산 초과로 발굴 중단", now)
     # v3: 시드에서 직접 파생된 1차 키워드는 시드 분야 상속 (v4: 쇼핑 카테고리 소실로 시드 분야가 유일 소스)
+    # v8: 시드 상속 실패(무카테고리 시드 유래) 시 키워드 패턴 규칙으로 분류 — 에어프라이어류 다수 발굴 이슈
     seed_cat = {s["keyword"]: s["category"] for s in seeds}
+    rules = cfg.get("keyword_category_rules", [])
     kept, rejected = refine_keywords(found)
     for kw, reason in rejected:
         d.log_collection(kw, "reject", reason, now)  # v3: 사유 기록 (substring/token/...)
     for kw in kept[:remaining]:
         cat = seed_cat.get(origins.get(kw, ""), "")
+        if not cat:
+            cat = _categorize_by_rules(kw, rules)
         d.upsert_keyword(kw, category=cat, day=today)
         d.log_collection(kw, "new", "발굴", now)
     result["new_keywords"] = len(kept[:remaining])

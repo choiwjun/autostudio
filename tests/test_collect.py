@@ -23,6 +23,7 @@ def make_cfg(tmp_path):
         "env": "development", "run_lock_stale_minutes": 60,  # v3
         "shopping_insight_category": "50000000",  # v4
         "default_focus_seeds": [], "cpc_tiers": {},  # v6: 시드 자동 초기화 비활성(기존 테스트 보존)
+        "keyword_category_rules": [("에어프라이어", "요리"), ("보험", "보험")],  # v8
     }
 
 
@@ -216,4 +217,25 @@ def test_manual_discovery_respects_budget(tmp_path):
                             trigger="manual", budget_seconds=0)
     assert result["crawl_stopped"] == "budget"
     assert result["new_keywords"] == 0
+
+
+def test_rule_fallback_categorizes_seedless_keywords(tmp_path, monkeypatch):
+    # v8: 무카테고리 시드 유래(유래 불일치) 키워드는 패턴 규칙으로 분류
+    cfg = make_cfg(tmp_path)
+    d = db.Database(cfg["db_url"])
+    d.init()
+    d.add_seed("유래불일치시드", "")
+    monkeypatch.setattr(collect, "expand_keywords",
+                        lambda *a, **k: (["에어프라이어 추천 내돈내산", "무관한 키워드"],
+                                         {"에어프라이어 추천 내돈내산": "유래불일치시드",
+                                          "무관한 키워드": "유래불일치시드"}, None))
+    run_collection(cfg, client=FakeClient(), today="2026-08-01")
+    assert d.query_keywords(q="에어프라이어 추천 내돈내산")[0]["category"] == "요리"
+    assert d.query_keywords(q="무관한 키워드")[0]["category"] == ""
     d.close()
+
+
+def test_categorize_by_rules_first_match_wins():
+    # v8: 규칙은 앞 항목 우선 (첫 매치)
+    assert collect._categorize_by_rules("보험 에어프라이어", [("보험", "보험"), ("에어프라이어", "요리")]) == "보험"
+    assert collect._categorize_by_rules("매치 없음", []) == ""
