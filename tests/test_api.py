@@ -32,6 +32,9 @@ def make_app(tmp_path, env="development"):
     d.insert_daily_stats(c, "2026-08-02", {
         "total_sim": 5, "total_date": 5, "shop_category": "디지털",
         "commercial": None})
+    # v9: 초안 생성은 골격 선행 필수 — 테스트용 기본 골격 (keyword_id=1)
+    d.upsert_outline(1, "2026-08-02",
+                     '{"questions": ["에어프라이어 추천 기준은?"], "comparisons": [], "facts": []}')
     d.close()
     return create_app({"db_url": dbfile, "dashboard_token": "sekret",
                        "manual_budget_seconds": 45, "env": env})

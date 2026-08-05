@@ -79,7 +79,7 @@ def _run_llm(prompt, timeout=90):
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.7,
-        "max_tokens": 3500,
+        "max_tokens": 4000,
         "enable_thinking": False,
     }, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
@@ -157,6 +157,14 @@ def generate_draft(keyword, structure, runner=None):
     run = runner or _run_llm
     raw = run(prompt, timeout=90)
     draft = parse_draft(raw)
-    if not isinstance(structure, str):
-        draft = _append_faq_if_missing(draft, structure)
+    # v9: 구조가 str이어도 파싱해 보정 실행 — 기존 isinstance(str) 분기로 FAQ 보정이
+    #     dead code였음 (server는 항상 str을 넘김). dict이든 str이든 동일하게 보정한다.
+    struct_obj = structure
+    if isinstance(structure, str):
+        try:
+            struct_obj = json.loads(structure)
+        except json.JSONDecodeError:
+            struct_obj = None
+    if isinstance(struct_obj, dict):
+        draft = _append_faq_if_missing(draft, struct_obj)
     return draft

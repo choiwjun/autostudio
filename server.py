@@ -202,15 +202,23 @@ def create_app(cfg):
 
     @app.post("/drafts", dependencies=[Depends(require_token)])
     def create_draft(body: DraftIn):
-        # v7: 글 초안 생성 — 골격 기반 opencode CLI 실행 (deepseek-v4-flash)
+        # v7: 글 초안 생성 — 골격 기반 초안 생성 (v9: Token Plan HTTP API, opencode CLI 아님)
         import draft_generator
         kw = run_db(lambda d: d.get_keyword(body.keyword_id))
         if not kw:
             raise HTTPException(status_code=404, detail="not found")
         outline = run_db(lambda d: d.get_outline(body.keyword_id))
-        structure = (outline["structure"] if outline
-                     else '{"questions": [], "comparisons": [], "facts": []}')
-        draft = draft_generator.generate_draft(kw["keyword"], structure)
+        # v9: 골격 없이 초안 생성 금지 — 빈 구조로 진행하면 모델 상상의 글이 됨 (독창성·어뷰징 위험)
+        if not outline:
+            raise HTTPException(
+                status_code=400,
+                detail="먼저 상위글 골격 분석이 필요합니다 — '글 생성' 플로우에서 골격 분석 후 다시 시도하세요",
+            )
+        structure = outline["structure"]
+        try:
+            draft = draft_generator.generate_draft(kw["keyword"], structure)
+        except draft_generator.DraftGenerationError as e:
+            raise HTTPException(status_code=503, detail=str(e))
         created_at = config_mod.now_kst_iso()
         draft_id = run_db(lambda d: d.insert_draft(
             body.keyword_id, draft["title"], draft["first_paragraph"],
