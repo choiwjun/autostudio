@@ -1,11 +1,15 @@
-# image_gen.py — v7: 블로그 이미지 생성 모듈
-# Aliyun Bailian CLI(`bl image generate`, qwen 계열)로 대표 이미지를 생성한다.
-# API 키 미설정/무효 시 DraftGenerationError(명확한 안내)를 던져 텍스트 흐름은 유지한다.
+# image_gen.py — v8: 블로그 이미지 생성 모듈 (Token Plan HTTP API)
+# v7(2026-08-05)까지 bl CLI를 썼으나 Vercel 서버리스에 바이너리가 없어
+# 표준 라이브러리 urllib로 전환 — 로컬·GH Actions·Vercel 모두 동일 동작.
+# API 키 미설정 시 ImageGenerationError(명확한 안내)를 던져 텍스트 흐름은 유지한다.
 import json
 import os
-import subprocess
+import urllib.error
+import urllib.request
 
 IMAGE_MODEL = "wan2.7-image"
+DEFAULT_BASE_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com"
+IMAGE_TIMEOUT = 55
 
 
 class ImageGenerationError(Exception):
@@ -16,12 +20,12 @@ def _has_valid_key():
     return bool(os.getenv("BAILIAN_TOKEN_PLAN_API_KEY") or os.getenv("DASHSCOPE_API_KEY"))
 
 
-def generate_image(keyword, title, prompt=None, runner=None, timeout=55):
-    """제목 기반 이미지 프롬프트를 만들어 bl CLI로 생성, 이미지 URL을 반환한다."""
+def generate_image(keyword, title, prompt=None, runner=None, timeout=IMAGE_TIMEOUT):
+    """제목 기반 이미지 프롬프트로 이미지를 생성, 이미지 URL을 반환한다."""
     if not _has_valid_key():
         raise ImageGenerationError("이미지 키가 필요합니다 (BAILIAN_TOKEN_PLAN_API_KEY)")
     image_prompt = prompt or _build_prompt(keyword, title)
-    run = runner or _run_bl
+    run = runner or _run_http
     return run(image_prompt)
 
 
@@ -32,26 +36,42 @@ def _build_prompt(keyword, title):
     )
 
 
-def _run_bl(image_prompt):
+def _run_http(image_prompt):
+    api_key = os.getenv("BAILIAN_TOKEN_PLAN_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
+    base_url = os.getenv("BAILIAN_TOKEN_PLAN_BASE_URL", DEFAULT_BASE_URL)
+    if base_url.endswith("/compatible-mode/v1"):
+        base_url = base_url.rsplit("/compatible-mode/v1", 1)[0]
+    body = json.dumps({
+        "model": IMAGE_MODEL,
+        "input": {
+            "messages": [
+                {"role": "user", "content": [{"text": image_prompt}]}
+            ]
+        },
+        "parameters": {"size": "1024*1024", "n": 1, "watermark": False},
+    }, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base_url}/api/v1/services/aigc/multimodal-generation/generation",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
     try:
-        proc = subprocess.run(
-            ["bl", "image", "generate",
-             "--model", IMAGE_MODEL,
-             "--prompt", image_prompt,
-             "--output-format", "json"],
-            capture_output=True, text=True, timeout=timeout,
-        )
-    except FileNotFoundError as e:
-        raise ImageGenerationError("bl CLI not found") from e
-    except subprocess.TimeoutExpired as e:
-        raise ImageGenerationError(f"bl timeout ({timeout}s)") from e
-    if proc.returncode != 0:
-        raise ImageGenerationError(f"bl failed rc={proc.returncode}: {proc.stderr[-300:]}")
+        with urllib.request.urlopen(req, timeout=IMAGE_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")[:300]
+        raise ImageGenerationError(f"image API http {e.code}: {detail}") from e
+    except urllib.error.URLError as e:
+        raise ImageGenerationError(f"image API unreachable: {e.reason}") from e
+    except TimeoutError as e:
+        raise ImageGenerationError(f"image API timeout ({IMAGE_TIMEOUT}s)") from e
     try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError as e:
-        raise ImageGenerationError(f"bl output not json: {proc.stdout[:200]}") from e
-    url = data.get("url") or (data.get("output", [{}])[0].get("url") if data.get("output") else None)
-    if not url:
-        raise ImageGenerationError("bl returned no image url")
+        content = data["output"]["choices"][0]["message"]["content"]
+        url = next(c["image"] for c in content if c.get("type") == "image")
+    except (KeyError, IndexError, TypeError, StopIteration) as e:
+        raise ImageGenerationError(f"image API bad response: {str(data)[:200]}") from e
     return url

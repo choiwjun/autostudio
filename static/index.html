@@ -333,7 +333,8 @@ function setStatus(msg, warn) {
 }
 
 async function api(path, opts) {
-  const r = await fetch(path, opts);
+  const full = path.startsWith('/api') ? path : '/api' + path;
+  const r = await fetch(full, opts);
   if (r.status === 401) { setStatus('토큰이 올바르지 않습니다 — 토큰 입력 후 저장', true); throw new Error('401'); }
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();

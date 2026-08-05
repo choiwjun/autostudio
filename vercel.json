@@ -5,5 +5,6 @@
       "maxDuration": 60,
       "excludeFiles": "{tests/**,**/test_*.py,fixtures/**,data/**}"
     }
-  }
+  },
+  "rewrites": [{ "source": "/", "destination": "/api" }]
 }

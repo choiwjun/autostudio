@@ -192,10 +192,10 @@ class Database:
         "ELSE 0.5 END"
     )
     PRIORITY_SQL = (
-        "ROUND(35.0 * COALESCE(ds.ai_cite_idx, 0) "
+        "ROUND(CAST(35.0 * COALESCE(ds.ai_cite_idx, 0) "
         "+ 35.0 * CASE WHEN COALESCE(ds.demand_idx, 0) > 1 THEN 1.0 "
         "ELSE COALESCE(ds.demand_idx, 0) END "
-        f"+ 30.0 * {CPC_TIER_SQL}, 1)"
+        f"+ 30.0 * {CPC_TIER_SQL} AS NUMERIC), 1)"
     )
     SORT_COLUMNS = {
         "opportunity": "ds.opportunity",

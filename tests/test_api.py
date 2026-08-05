@@ -262,7 +262,7 @@ def test_draft_image_success_updates_url(tmp_path, monkeypatch):
     monkeypatch.setattr(draft_generator, "generate_draft", lambda k, s: {
         "title": "제목", "first_paragraph": "첫문단", "body": "본문"})
     monkeypatch.setenv("BAILIAN_TOKEN_PLAN_API_KEY", "test-key")
-    monkeypatch.setattr(image_gen, "_run_bl", lambda prompt: "https://img.example.com/1.png")
+    monkeypatch.setattr(image_gen, "_run_http", lambda prompt: "https://img.example.com/1.png")
     client = TestClient(make_app(tmp_path))
     did = client.post("/drafts", json={"keyword_id": 1}).json()["id"]
     body = client.post(f"/drafts/{did}/image").json()

@@ -35,6 +35,22 @@ def create_app(cfg):
     if env == "production" and not cfg.get("dashboard_token", ""):
         raise RuntimeError("DASHBOARD_TOKEN required in production (fail-closed)")
     app = FastAPI()
+
+    @app.middleware("http")
+    async def strip_api_prefix(request, call_next):
+        # Vercel: api/index.py는 /api/* 에만 매핑되고 최신 런타임은 rewrite된
+        # destination path(/api)로 라우팅한다. /api 프리픽스를 제거해 라우트와
+        # 매칭시킨다. 프리픽스 없는 요청(로컬)은 그대로 통과시킨다.
+        path = request.url.path
+        if path == "/api":
+            request.scope["path"] = "/"
+            request.scope["raw_path"] = b"/"
+        elif path.startswith("/api/"):
+            new_path = path[4:]
+            request.scope["path"] = new_path
+            request.scope["raw_path"] = new_path.encode()
+        return await call_next(request)
+
     state = {"db": None}
     lock = threading.Lock()
 

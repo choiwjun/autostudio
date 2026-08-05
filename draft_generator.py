@@ -1,9 +1,14 @@
-# draft_generator.py — v7: 글 초안 생성 모듈
-# 상위글 골격(outline)을 프롬프트에 넣고 opencode CLI(deepseek-v4-flash)를
-# 비대화형으로 1회 실행해 제목·첫문단·본문을 받아온다.
+# draft_generator.py — v8: 글 초안 생성 모듈 (Token Plan HTTP API)
+# 상위글 골격(outline)을 프롬프트에 넣고 Token Plan OpenAI 호환 API로 초안을 받아온다.
+# v7(2026-08-05)까지 opencode CLI를 썼으나 Vercel 서버리스에 바이너리가 없어
+# 표준 라이브러리 urllib로 전환 — 로컬·GH Actions·Vercel 모두 동일 동작.
 import json
 import os
-import subprocess
+import urllib.error
+import urllib.request
+
+DRAFT_MODEL = "qwen3.8-max-preview"
+DEFAULT_BASE_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
 
 SYSTEM_PROMPT = (
     "너는 네이버 블로그 애드포스트 글을 잘 쓰는 작가다. "
@@ -38,66 +43,45 @@ class DraftGenerationError(Exception):
     pass
 
 
-def _run_opencode(prompt, timeout=90):
-    # GitHub Actions/Vercel 서버리스에서 opencode CLI 실행. 로컬 검증: "1+1"→"2"
-    # --format json: 진행 로그가 stdout에 섞이지 않게 raw JSON 이벤트로 받는다
-    # Windows: npm .cmd/.ps1 래퍼는 인자 전달이 깨지므로 실제 exe를 직접 호출
-    cmd = ["opencode", "run", "-m", "opencode-go/deepseek-v4-flash",
-           "--format", "json", prompt]
+def _run_llm(prompt, timeout=90):
+    api_key = os.getenv("BAILIAN_TOKEN_PLAN_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
+    if not api_key:
+        raise DraftGenerationError("Token Plan API 키가 필요합니다 (BAILIAN_TOKEN_PLAN_API_KEY)")
+    base_url = os.getenv("BAILIAN_TOKEN_PLAN_BASE_URL", DEFAULT_BASE_URL)
+    body = json.dumps({
+        "model": DRAFT_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.7,
+        "max_tokens": 2500,
+        "enable_thinking": False,
+    }, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base_url}/chat/completions",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
     try:
-        run_kw = dict(capture_output=True, text=True, timeout=timeout,
-                      encoding="utf-8", errors="replace")
-        if os.name == "nt":
-            exe = _find_opencode_exe()
-            if not exe:
-                raise DraftGenerationError("opencode exe not found")
-            cmd[0] = exe
-            proc = subprocess.run(cmd, **run_kw)
-        else:
-            proc = subprocess.run(cmd, **run_kw)
-    except FileNotFoundError as e:
-        raise DraftGenerationError("opencode CLI not found") from e
-    except subprocess.TimeoutExpired as e:
-        raise DraftGenerationError(f"opencode timeout ({timeout}s)") from e
-    if proc.returncode != 0:
-        raise DraftGenerationError(
-            f"opencode failed rc={proc.returncode}: {proc.stderr[-300:]}")
-    return _extract_result(proc.stdout)
-
-
-def _find_opencode_exe():
-    import shutil
-    wrapper = shutil.which("opencode")
-    if not wrapper:
-        return None
-    d = os.path.dirname(wrapper)
-    candidates = [
-        os.path.join(d, "node_modules", "opencode-ai", "bin", "opencode.exe"),
-        os.path.join(d, "opencode.exe"),
-        os.path.join(d, "opencode.cmd"),
-    ]
-    for c in candidates:
-        if os.path.exists(c):
-            return c
-    return wrapper
-
-
-def _extract_result(stdout):
-    # --format json 이벤트 스트림에서 최종 result 텍스트를 추출
-    texts = []
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            ev = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if ev.get("type") == "text":
-            part = ev.get("part", {})
-            if part.get("type") == "text" and part.get("text"):
-                texts.append(part["text"])
-    return "".join(texts) if texts else stdout
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")[:300]
+        raise DraftGenerationError(f"draft API http {e.code}: {detail}") from e
+    except urllib.error.URLError as e:
+        raise DraftGenerationError(f"draft API unreachable: {e.reason}") from e
+    except TimeoutError as e:
+        raise DraftGenerationError(f"draft API timeout ({timeout}s)") from e
+    try:
+        content = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as e:
+        raise DraftGenerationError(f"draft API bad response: {str(data)[:200]}") from e
+    return content
 
 
 def parse_draft(raw):
@@ -126,6 +110,6 @@ def generate_draft(keyword, structure, runner=None):
         structure, ensure_ascii=False)
     prompt = USER_PROMPT_TEMPLATE.format(
         keyword=keyword, structure=structure_text)
-    run = runner or _run_opencode
+    run = runner or _run_llm
     raw = run(prompt, timeout=90)
     return parse_draft(raw)
