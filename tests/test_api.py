@@ -214,8 +214,8 @@ def test_create_draft_requires_token_and_404(tmp_path):
 
 
 def test_create_draft_mocks_generator(tmp_path, monkeypatch):
-    # v7: opencode CLI는 Mock — generate_draft가 초안 dict 반환
-    def fake_generate(keyword, structure):
+    # v7: 생성은 Mock — generate_two_pass가 (초안 dict, 검수 실패 목록) 반환
+    def fake_generate(keyword, structure, **kwargs):
         return {"title": "제목", "first_paragraph": "첫문단", "body": "## 소제목\n본문"}, []
 
     import draft_pipeline
@@ -232,7 +232,7 @@ def test_create_draft_mocks_generator(tmp_path, monkeypatch):
 
 def test_get_draft(tmp_path, monkeypatch):
     import draft_pipeline
-    monkeypatch.setattr(draft_pipeline, "generate_two_pass", lambda k, s: (
+    monkeypatch.setattr(draft_pipeline, "generate_two_pass", lambda k, s, **kw: (
         {"title": "제목", "first_paragraph": "첫문단", "body": "본문"}, []))
     client = TestClient(make_app(tmp_path))
     did = client.post("/drafts", json={"keyword_id": 1}).json()["id"]
@@ -246,7 +246,7 @@ def test_draft_image_no_key_returns_503(tmp_path, monkeypatch):
     # v7: 키 미발급 → 503 + 명확한 안내, 초안 데이터는 유지
     import draft_pipeline
     import image_gen
-    monkeypatch.setattr(draft_pipeline, "generate_two_pass", lambda k, s: (
+    monkeypatch.setattr(draft_pipeline, "generate_two_pass", lambda k, s, **kw: (
         {"title": "제목", "first_paragraph": "첫문단", "body": "본문"}, []))
     monkeypatch.delenv("BAILIAN_TOKEN_PLAN_API_KEY", raising=False)
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
@@ -262,7 +262,7 @@ def test_draft_image_success_updates_url(tmp_path, monkeypatch):
     # v7: 키 존재 + Mock runner → image_url 저장
     import draft_pipeline
     import image_gen
-    monkeypatch.setattr(draft_pipeline, "generate_two_pass", lambda k, s: (
+    monkeypatch.setattr(draft_pipeline, "generate_two_pass", lambda k, s, **kw: (
         {"title": "제목", "first_paragraph": "첫문단", "body": "본문"}, []))
     monkeypatch.setenv("BAILIAN_TOKEN_PLAN_API_KEY", "test-key")
     monkeypatch.setattr(image_gen, "_run_http", lambda prompt: "https://img.example.com/1.png")
@@ -275,3 +275,32 @@ def test_draft_image_success_updates_url(tmp_path, monkeypatch):
 def test_draft_image_404(tmp_path):
     client = TestClient(make_app(tmp_path))
     assert client.post("/drafts/999/image").status_code == 404
+
+
+def _priority_of(client, keyword):
+    items = client.get("/keywords?preset=").json()["items"]
+    return next(i["priority"] for i in items if i["keyword"] == keyword)
+
+
+def test_feedback_idempotent_boost(tmp_path, monkeypatch):
+    # v11: 같은 초안에 피드백 반복 전송 시 boost가 누적되지 않아야 함 (차액 가산)
+    import draft_pipeline
+    monkeypatch.setattr(draft_pipeline, "generate_two_pass", lambda k, s, **kw: (
+        {"title": "제목", "first_paragraph": "첫문단", "body": "본문"}, []))
+    client = TestClient(make_app(tmp_path))
+    did = client.post("/drafts", json={"keyword_id": 1}).json()["id"]
+    base = _priority_of(client, "에어프라이어")
+
+    for _ in range(2):  # 동일 점수 2회 — boost는 +10 한 번분만
+        r = client.post(f"/drafts/{did}/feedback", json={"performance_score": 80})
+        assert r.status_code == 200
+        assert r.json()["status"] == "published"
+    assert _priority_of(client, "에어프라이어") == base + 10
+
+    # 점수 하향 재입력 — +10 → -10 차액 반영
+    client.post(f"/drafts/{did}/feedback", json={"performance_score": 20})
+    assert _priority_of(client, "에어프라이어") == base - 10
+
+    # 중간 점수(30~69)는 보너스 없음 — 기존 boost 회수
+    client.post(f"/drafts/{did}/feedback", json={"performance_score": 50})
+    assert _priority_of(client, "에어프라이어") == base

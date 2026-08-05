@@ -35,6 +35,17 @@ class FeedbackIn(BaseModel):
     note: str = ""
 
 
+def boost_for_score(score):
+    """v11: 성과 점수 → priority 보너스. 피드백 재입력 시 차액만 가산해 멱등."""
+    if score is None:
+        return 0
+    if score >= 70:
+        return 10
+    if score < 30:
+        return -10
+    return 0
+
+
 def create_app(cfg):
     env = cfg.get("env", "development")
     # v3: fail-closed — 프로덕션에서 토큰 미설정 시 기동 거부 (스펙 §7).
@@ -224,9 +235,11 @@ def create_app(cfg):
             )
         structure = outline["structure"]
         try:
-            # v10: 2패스 생성(골격→섹션 확장) + 검수 6항목. 검수 미달 항목은 응답에 포함
+            # v10: 2패스 생성(골격→섹션 확장) + 검수 8항목. 검수 미달 항목은 응답에 포함.
+            # v11: 재생성 시간 예산 25초 — 1사이클이 예산을 넘기면 재생성 없이 경고만
+            # 반환 (서버리스에서 2사이클 풀 실행 시 타임아웃 리스크).
             draft, failed_checks = draft_pipeline.generate_two_pass(
-                kw["keyword"], structure)
+                kw["keyword"], structure, retry_budget_seconds=25)
         except draft_pipeline.DraftGenerationError as e:
             raise HTTPException(status_code=503, detail=str(e))
         created_at = config_mod.now_kst_iso()
@@ -288,7 +301,10 @@ def create_app(cfg):
     @app.post("/drafts/{draft_id}/feedback", dependencies=[Depends(require_token)])
     def record_draft_feedback(draft_id: int, body: FeedbackIn):
         # v10 [6]: 게시 후 성과 기록 + 키워드 점수 보정.
-        # 성과(0~100)를 해당 키워드 priority에 반영해 '잘 된 키워드 우선' 학습 루프
+        # 성과(0~100)를 해당 키워드 priority에 반영해 '잘 된 키워드 우선' 학습 루프.
+        # v11: boost는 (새 점수 보너스 - 기존 점수 보너스) 차액만 가산 — 같은 초안에
+        # 피드백을 반복 전송해도 누적되지 않는 멱등 처리. 성과 우수(>=70) 키워드는
+        # 은퇴 판정에서도 보호 (db.find_retire_candidates의 performance_boost 조건).
         draft = run_db(lambda d: d.get_draft(draft_id))
         if not draft:
             raise HTTPException(status_code=404, detail="not found")
@@ -296,14 +312,11 @@ def create_app(cfg):
         published = body.published_at or config_mod.now_kst_iso()
         run_db(lambda d: d.update_draft_performance(
             draft_id, published, score, body.note, config_mod.now_kst_iso()))
-        # 점수 보정: 성과 우수(>=70) 키워드는 은퇴 보호, 저성과(<30)는 은퇴 후보 가속.
-        # 여기선 priority 상향 보너스로 간단 반영 (다음 배치가 은퇴 판정에서 사용).
         kw = run_db(lambda d: d.get_keyword(draft["keyword_id"]))
         if kw:
-            if score >= 70:
-                run_db(lambda d: d.set_performance_boost(draft["keyword_id"], 10))
-            elif score < 30:
-                run_db(lambda d: d.set_performance_boost(draft["keyword_id"], -10))
+            delta = boost_for_score(score) - boost_for_score(draft.get("performance_score"))
+            if delta:
+                run_db(lambda d: d.set_performance_boost(draft["keyword_id"], delta))
         return run_db(lambda d: d.get_draft(draft_id))
 
     @app.get("/")

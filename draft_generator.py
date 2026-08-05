@@ -82,7 +82,8 @@ def _run_llm(prompt, timeout=90):
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.7,
-        "max_tokens": 4000,
+        # v11: 3000자+ 본문 — 한국어 토큰 비율상 4000 토큰은 본문 중간 절단 리스크
+        "max_tokens": 5500,
         "enable_thinking": False,
     }, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(

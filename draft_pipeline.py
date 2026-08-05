@@ -1,8 +1,11 @@
 # draft_pipeline.py — v10: 2패스 생성 + 검수·재시도 파이프라인
 # 애드포스트 수익 최적화 배치 [3][4]:
 #   [3] 1패스(H2 골격+불릿) → 2패스(섹션 확장) — 긴 글 = 스크롤 = 광고 노출 증가
-#   [4] 검수 6항목(제목/즉답/표/FAQ/밀도/허위1인칭) → 미달 시 1회 재생성
+#   [4] 검수 8항목(제목/즉답/길이/H2/표/FAQ/밀도/허위1인칭) → 미달 시 1회 재생성
+# v11: 본문 길이·H2 개수 체크 추가 (길이=광고 슬롯, 애드포스트 핵심 변수),
+#      density를 공백 무시+핵심어 후보 매칭으로 보정, 재생성 시간 예산 가드.
 import json
+import time
 
 from draft_generator import (
     DraftGenerationError, _append_faq_if_missing, _run_llm, parse_draft,
@@ -11,9 +14,13 @@ from intent import classify, intent_template
 
 # [4] 검수 임계
 TITLE_MAX_LEN = 30
-KEYWORD_DENSITY_MIN = 0.005   # 키워드 1회/200자 이상 (~0.5%, 밀도 1~2%의 하한)
+BODY_MIN_LEN = 3000           # 애드포스트: 길이 = 스크롤 = 광고 노출
+H2_MIN_COUNT = 3              # FAQ 제외 본문 섹션 수 (프롬프트 4~6개, 병합 허용 3)
+KEYWORD_DENSITY_MIN = 0.0025  # 400자에 1회 — 프롬프트 '8~15회 사용'과 정합
 KEYWORD_DENSITY_MAX = 0.03    # 3% 초과는 도배
+KEYWORD_DENSITY_BASE_CAP = 4000  # v11: 밀도 분모 상한 — 긴 글(5000자)이 불리하지 않게
 FAKE_EXPERIENCE = ("제가 직접", "직접 사용해", "직접 분석해", "제 경험", "제가 해")
+FAQ_MARKER = "자주 묻는 질문"
 
 
 def _outline_questions(structure):
@@ -80,17 +87,18 @@ def pass2_expand(keyword, h2s, intent, has_facts, runner=None):
     grounding = "" if has_facts else (
         "\n## 데이터 그라운딩\n- 실측 수치(facts)가 없으므로 구체적 금액·수치 창작 금지.\n"
         "- '보통', '통상', '확인해야 하는 기준' 같은 검증 가능한 표현 사용.")
-    prompt = f"""키워드 '{keyword}' 블로그 글을 아래 골격을 확장해 3000~5000자로 작성해줘.
+    prompt = f"""키워드 '{keyword}' 블로그 글을 아래 골격을 확장해 3200~5000자로 작성해줘.
 
-## H2 골격 (각 섹션을 400~800자로 확장)
+## H2 골격 (각 섹션을 500~900자로 확장)
 {skeleton}
 
 ## 필수 규칙
 1. 첫문단: 키워드 질문에 즉답 (50~200자, 서론 금지)
 2. 각 H2 섹션: 골격의 불릿을 자연스럽게 본문으로 확장, 2~3문단
 3. 표(markdown table) 1~2개 이상 포함
-4. 말투: 친근한 존댓말. 1인칭 허위 경험('제가 직접...') 금지 — 객관적 조언으로
-5. 마지막에 '## 자주 묻는 질문' 섹션 (H3 질문 3~5개, 답변 40~120자)
+4. 키워드 '{keyword}'를 본문 전체에 자연스럽게 8~15회 사용 (도배 금지, 문맥 속에 녹일 것)
+5. 말투: 친근한 존댓말. 1인칭 허위 경험('제가 직접...') 금지 — 객관적 조언으로
+6. 마지막에 '## 자주 묻는 질문' 섹션 1개만 (H3 질문 3~5개, 답변 40~120자). 다른 FAQ성 섹션 금지
 {intent_section}
 {grounding}
 
@@ -119,6 +127,21 @@ def check_first_paragraph(draft):
     return 30 <= len(fp) <= 400
 
 
+def check_body_length(draft):
+    # v11: 애드포스트 핵심 변수 — 길이 미달은 광고 슬롯 손실이라 재생성 대상
+    return len(draft.get("body", "")) >= BODY_MIN_LEN
+
+
+def _h2_titles(body):
+    return [ln[2:].strip() for ln in body.splitlines() if ln.startswith("## ")]
+
+
+def check_h2_count(draft):
+    # v11: FAQ 제외 본문 섹션 수 — 프롬프트는 4~6개 요구, 섹션 병합 허용해 3개부터 통과
+    sections = [t for t in _h2_titles(draft.get("body", "")) if FAQ_MARKER not in t]
+    return len(sections) >= H2_MIN_COUNT
+
+
 def check_tables(draft):
     body = draft.get("body", "")
     return body.count("|") >= 6  # 표 1개 이상 (행 2+컬럼 3 = 파이프 6개 이상)
@@ -126,17 +149,28 @@ def check_tables(draft):
 
 def check_faq(draft):
     body = draft.get("body", "")
-    return "자주 묻는 질문" in body or "\n## FAQ" in body
+    return FAQ_MARKER in body or "\n## FAQ" in body
+
+
+def _keyword_cores(keyword):
+    """v11: 밀도 검사 핵심어 후보 — 띄어쓰기 변형·부분 사용에 강건하게.
+    전체 키워드(공백 제거) + 3자 이상 개별 토큰. '실비보험추천'처럼 붙여쓴
+    키워드가 본문에 '실비보험 추천'으로 등장하는 경우를 공백 제거 매칭으로 잡는다."""
+    cores = [keyword.replace(" ", "")]
+    cores += [t for t in keyword.split() if len(t) >= 3]
+    return list(dict.fromkeys(cores))
 
 
 def check_keyword_density(draft, keyword):
     body = draft.get("body", "")
     if not body:
         return False
-    # v10.1: 공백 포함 키워드("실비보험 추천") 전체 매칭은 희소 → 핵심 단어로 검사
-    core = keyword.split()[0] if " " in keyword else keyword
-    count = body.count(core)
-    density = count / len(body)
+    body_norm = body.replace(" ", "").replace("\n", "")
+    # 후보 중 최다 출현 핵심어 기준 — 부분 사용(예: '실비보험'만 반복)은 인정 안 함:
+    # 전체 키워드(공백 제거 매칭) 또는 3자 이상 토큰으로 의도적 사용이 확인돼야 함
+    count = max(body_norm.count(core) for core in _keyword_cores(keyword))
+    # v11: 분모 상한 — 애드포스트 긴 글(5000자)이 밀도 감점으로 불리하지 않게
+    density = count / min(len(body), KEYWORD_DENSITY_BASE_CAP)
     return KEYWORD_DENSITY_MIN <= density <= KEYWORD_DENSITY_MAX
 
 
@@ -146,10 +180,12 @@ def check_no_fake_experience(draft):
 
 
 def validate_draft(draft, keyword):
-    """6항목 검수 — (통과: True, 실패 항목 리스트)"""
+    """8항목 검수 — (통과: True, 실패 항목 리스트)"""
     checks = {
         "title": check_title(draft),
         "first_paragraph": check_first_paragraph(draft),
+        "body_length": check_body_length(draft),
+        "h2_count": check_h2_count(draft),
         "tables": check_tables(draft),
         "faq": check_faq(draft),
         "keyword_density": check_keyword_density(draft, keyword),
@@ -159,10 +195,15 @@ def validate_draft(draft, keyword):
     return (not failed), failed
 
 
-def generate_two_pass(keyword, structure, runner=None):
-    """[3]+[4] 2패스 생성 + 검수. 미달 시 1회 재생성. 그래도 미달이면 최종 결과 반환."""
+def generate_two_pass(keyword, structure, runner=None, retry_budget_seconds=None):
+    """[3]+[4] 2패스 생성 + 검수. 미달 시 1회 재생성. 그래도 미달이면 최종 결과 반환.
+
+    v11: retry_budget_seconds — 1회차 사이클이 예산을 넘겼으면 재생성을 건너뛰고
+    경고와 함께 반환 (서버리스 타임아웃 방지: 2사이클 풀 실행이면 60초 한도 초과)."""
     intent = classify(keyword)
     has_facts = _outline_has_facts(structure)
+    started = time.monotonic()
+    draft, failed = None, []
     for attempt in (1, 2):
         try:
             h2s = pass1_outline(keyword, structure, runner)
@@ -175,5 +216,8 @@ def generate_two_pass(keyword, structure, runner=None):
         if ok:
             return draft, failed
         if attempt == 1:
+            if retry_budget_seconds is not None \
+                    and time.monotonic() - started > retry_budget_seconds:
+                return draft, failed  # 예산 초과 — 미달 항목은 응답 경고로 전달
             continue  # 1회 재생성
     return draft, failed

@@ -2,29 +2,36 @@
 import pytest
 
 from draft_pipeline import (
-    KEYWORD_DENSITY_MAX, KEYWORD_DENSITY_MIN, TITLE_MAX_LEN,
-    check_faq, check_first_paragraph, check_keyword_density,
-    check_no_fake_experience, check_tables, check_title,
-    generate_two_pass, pass1_outline, pass2_expand, validate_draft,
+    BODY_MIN_LEN, H2_MIN_COUNT, KEYWORD_DENSITY_MAX, KEYWORD_DENSITY_MIN,
+    TITLE_MAX_LEN, check_body_length, check_faq, check_first_paragraph,
+    check_h2_count, check_keyword_density, check_no_fake_experience,
+    check_tables, check_title, generate_two_pass, pass1_outline, pass2_expand,
+    validate_draft,
 )
 from draft_generator import DraftGenerationError
+
+_SECTION_TITLES = ("추천 기준", "용량 선택", "조리 방식 비교", "관리와 세척")
+
+
+def _good_body(keyword="에어프라이어"):
+    """검수 통과 본문 — 3000자+ · 비FAQ H2 4개 · 표 포함 · 밀도 임계 내."""
+    parts = []
+    for title in _SECTION_TITLES:
+        kw_sent = f"{keyword} 선택 기준을 확인합니다. " * 12
+        fill = "구매 전 확인해야 할 항목을 정리했습니다. " * 30
+        parts.append(f"## {keyword} {title}\n{kw_sent}{fill}\n")
+    table = ("| 구분 | 바스켓형 | 오븐형 |\n| --- | --- | --- |\n"
+             "| 용량 | 3~5L | 10L+ |\n| 가격 | 5~10만원 | 15만원+ |\n")
+    faq = ("## 자주 묻는 질문\n### 세척은 어떻게 하나요?\n"
+           "바스켓과 트레이를 분리해 세척하면 됩니다.\n")
+    return "\n".join(parts) + table + "\n" + faq
 
 
 def _good_draft(keyword="에어프라이어"):
     return {
         "title": "에어프라이어 추천, 어떤 게 좋을까요?",
         "first_paragraph": "에어프라이어는 바삭한 식감을 원한다면 오븐형, 간편함을 원한다면 바스켓형이 좋습니다. 조리 시간과 관리 편의성을 먼저 확인하세요.",
-        "body": (
-            "## 에어프라이어 추천 기준\n"
-            "에어프라이어 추천은 용량과 조리 방식으로 나뉩니다.\n\n"
-            "| 구분 | 바스켓형 | 오븐형 |\n"
-            "| --- | --- | --- |\n"
-            "| 용량 | 3~5L | 10L+ |\n"
-            "| 가격 | 5~10만원 | 15만원+ |\n\n"
-            "## 자주 묻는 질문\n"
-            "### 에어프라이어 세척은 어떻게 하나요?\n"
-            "바스켓과 트레이를 분리해 세척하면 됩니다."
-        ),
+        "body": _good_body(keyword),
     }
 
 
@@ -36,6 +43,21 @@ def test_check_title():
 def test_check_first_paragraph():
     assert check_first_paragraph(_good_draft())
     assert not check_first_paragraph({"first_paragraph": "짧음"})
+
+
+def test_check_body_length():
+    # v11: 애드포스트 핵심 변수 — 3000자 미만은 미달
+    assert check_body_length(_good_draft())
+    assert not check_body_length({"body": "짧은 본문"})
+    assert len(_good_body()) >= BODY_MIN_LEN
+
+
+def test_check_h2_count():
+    # v11: FAQ 제외 본문 섹션 3개 이상
+    assert check_h2_count(_good_draft())  # 비FAQ 4개
+    assert not check_h2_count({"body": "## A\n내용\n## 자주 묻는 질문\n### q\na"})
+    body = "".join(f"## 섹션{i}\n내용\n" for i in range(H2_MIN_COUNT))
+    assert check_h2_count({"body": body + "## 자주 묻는 질문\nq"})
 
 
 def test_check_tables():
@@ -54,6 +76,19 @@ def test_check_keyword_density():
     # 과도한 키워드 반복은 도배로 판정
     spam = {"body": "에어프라이어 " * 500}
     assert not check_keyword_density(spam, "에어프라이어")
+
+
+def test_check_keyword_density_spaced_variant():
+    # v11: 붙여쓴 키워드("실비보험추천")가 본문에 띄어쓰기로 등장해도 매칭
+    body = ("실비보험 추천 정보를 확인하세요. 실비보험 추천 기준을 봅니다. " * 30
+            + "보험 선택 시 확인 항목을 정리합니다. " * 100)
+    assert check_keyword_density({"body": body}, "실비보험추천")
+
+
+def test_check_keyword_density_partial_core():
+    # v11: 복합 키워드가 핵심어 일부("다이어트")로만 반복돼도 인정
+    body = "다이어트 식단을 계획합니다. " * 40 + "운동 병행이 중요합니다. " * 80
+    assert check_keyword_density({"body": body}, "다이어트 식단 추천 메뉴")
 
 
 def test_check_no_fake_experience():
@@ -96,25 +131,56 @@ def test_pass2_expand_uses_runner():
     assert "자주 묻는 질문" in draft["body"]
 
 
+_PASS1_JSON = '{"h2s": [{"title": "H2", "bullets": ["b"]}]}'
+
+
+def _pass2_json(title="좋은 제목"):
+    import json
+    return json.dumps({
+        "title": title,
+        "first_paragraph": "즉답입니다 키워드 추천 기준은 용량과 조리 방식입니다 30자 이상",
+        "body": _good_body("키워드"),
+    }, ensure_ascii=False)
+
+
 def test_generate_two_pass_retries_on_fail():
     calls = []
 
     def fake_runner(prompt, timeout=90):
-        calls.append(prompt[:5])  # pass1('키워드') vs pass2('키워드') 구분용
-        is_pass2 = "골격을 확장" in prompt
-        if not is_pass2:
-            return '{"h2s": [{"title": "H2", "bullets": ["b"]}]}'
-        if len([c for c in calls if "골격을 확장" in c]) == 1:
-            return '{"title": "' + "가" * 40 + '", "first_paragraph": "즉답", "body": "본문"}'
-        return ('{"title": "좋은 제목", '
-                '"first_paragraph": "즉답입니다 키워드 추천 기준은 용량과 조리 방식입니다 30자 이상", '
-                '"body": "## H2\\n키워드 본문 내용입니다 키워드를 활용합니다.\\n\\n'
-                '| a | b |\\n| --- | --- |\\n| 1 | 2 |\\n\\n'
-                '## 자주 묻는 질문\\n### 질문\\n답변"}')
+        calls.append(prompt)
+        if "골격을 확장" not in prompt:
+            return _PASS1_JSON
+        n_pass2 = len([c for c in calls if "골격을 확장" in c])
+        if n_pass2 == 1:
+            return ('{"title": "' + "가" * 40 + '", '
+                    '"first_paragraph": "즉답", "body": "짧음"}')  # 검수 미달
+        return _pass2_json()
 
     draft, failed = generate_two_pass("키워드", {}, runner=fake_runner)
     assert failed == []  # 재시도로 검수 통과
     assert draft["title"] == "좋은 제목"
+
+
+def test_generate_two_pass_retry_budget_skips_second_cycle(monkeypatch):
+    # v11: 1사이클이 시간 예산 초과면 재생성 없이 경고 반환 (서버리스 타임아웃 방지)
+    # Windows monotonic 해상도(~15ms)로 즉석 runner의 경과가 0이 되는 것을 가짜 시계로 회피
+    import draft_pipeline as dp_mod
+    ticks = iter(range(100, 200))
+    monkeypatch.setattr(dp_mod.time, "monotonic", lambda: next(ticks))
+    calls = []
+
+    def fake_runner(prompt, timeout=90):
+        calls.append(prompt)
+        if "골격을 확장" not in prompt:
+            return _PASS1_JSON
+        return ('{"title": "제목", "first_paragraph": "즉답입니다 30자 넘게 작성합니다", '
+                '"body": "짧아서 검수 미달"}')
+
+    draft, failed = generate_two_pass("키워드", {}, runner=fake_runner,
+                                      retry_budget_seconds=0)
+    assert len(calls) == 2  # pass1 + pass2 한 사이클만
+    assert "body_length" in failed
+    assert draft["body"].startswith("짧아서 검수 미달")  # FAQ 보정이 붙어도 원문 유지
 
 
 def test_density_bounds_are_sane():

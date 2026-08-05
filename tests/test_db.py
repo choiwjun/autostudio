@@ -224,6 +224,24 @@ def test_retire_protects_null_scores(tmp_path):
     assert [v["keyword"] for v in victims] == ["확실히저조"]
 
 
+def test_retire_protects_performance_boost(tmp_path):
+    # v11: 게시 성과 피드백 보너스(≥10) 키워드는 지표 저조에도 은퇴 보호
+    d = make_db(tmp_path)
+    boosted = d.upsert_keyword("성과확인됨", day="2026-07-01")
+    plain = d.upsert_keyword("그냥저조", day="2026-07-01")
+    d.insert_daily_stats(boosted, "2026-08-01",
+                         {"opportunity": 10.0, "shop_click_idx": 0.1})
+    d.insert_daily_stats(plain, "2026-08-01",
+                         {"opportunity": 10.0, "shop_click_idx": 0.1})
+    d.set_performance_boost(boosted, 10)
+    victims = d.find_retire_candidates("2026-07-20", "2026-07-27", 35.0, 0.5)
+    assert [v["keyword"] for v in victims] == ["그냥저조"]
+    # boost 상쇄(성과 하향 피드백)되면 다시 은퇴 후보
+    d.set_performance_boost(boosted, -20)
+    victims = d.find_retire_candidates("2026-07-20", "2026-07-27", 35.0, 0.5)
+    assert {v["keyword"] for v in victims} == {"성과확인됨", "그냥저조"}
+
+
 def test_categories_include_seed_and_keyword(tmp_path):
     # v3: /categories = shop + 키워드 + 시드 분야 통합
     d = make_db(tmp_path)

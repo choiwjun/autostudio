@@ -638,10 +638,13 @@ ORDER BY ds.opportunity DESC LIMIT ?"""
         v4: 쇼핑 검색 API 종료로 상업성은 항상 NULL이므로 은퇴는 기회점수 + 쇼핑 클릭 지수로 판정.
         최근 7일 창의 스냅샷 중 하나라도 기회/쇼핑 클릭 점수가 NULL이면 보호한다
         (미조회·분야 미매칭 키워드를 0점 취급해 오은퇴시키지 않음 — 스펙 §4.6).
-        NULL은 수집 실패일 수 있으므로 '저성과' 판정의 근거가 될 수 없다."""
+        NULL은 수집 실패일 수 있으므로 '저성과' 판정의 근거가 될 수 없다.
+        v11: 게시 성과 피드백 보너스(performance_boost ≥ 10) 키워드는 은퇴 보호 —
+        실제로 유입·체류 성과가 확인된 키워드는 지표가 일시적으로 낮아도 유지."""
         sql = """
 SELECT k.id, k.keyword FROM keywords k
 WHERE k.active = 1 AND k.first_seen <= ?
+  AND COALESCE(k.performance_boost, 0) < 10
   AND EXISTS (
     SELECT 1 FROM daily_stats ds WHERE ds.keyword_id = k.id AND ds.day >= ?
       AND ds.opportunity IS NOT NULL AND ds.shop_click_idx IS NOT NULL)
