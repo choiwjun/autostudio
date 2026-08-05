@@ -753,7 +753,11 @@ async function openDraftModal(btn) {
   try {
     await api(`/outlines/${kid}`, { method: 'POST', headers: authHeaders() });
   } catch (e) {
-    if (String(e.message) === '401') return;
+    if (String(e.message) === '401') {
+      draftStepEl.innerHTML = draftSteps('outline')
+        + draftErrorHtml('쓰기 동작에는 대시보드 토큰이 필요합니다 — 상단 "토큰" 입력란에 토큰을 넣고 "토큰 저장" 후 다시 시도하세요');
+      return;
+    }
     draftStepEl.innerHTML = draftErrorHtml('골격 분석에 실패했습니다 (네이버 API 오류일 수 있음)');
     return;
   }
@@ -778,7 +782,11 @@ async function renderOutlineStep(kid, kw) {
   try {
     outline = await api(`/outlines/${kid}`);
   } catch (e) {
-    if (String(e.message) === '401') return;
+    if (String(e.message) === '401') {
+      draftStepEl.innerHTML = draftSteps('outline')
+        + draftErrorHtml('대시보드 토큰이 필요합니다 — 상단 "토큰" 입력란에 토큰을 넣고 "토큰 저장" 후 다시 시도하세요');
+      return;
+    }
     draftStepEl.innerHTML = draftErrorHtml('골격을 불러오지 못했습니다');
     return;
   }
