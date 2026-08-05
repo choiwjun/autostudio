@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS keywords (
     keyword TEXT NOT NULL UNIQUE,
     category TEXT NOT NULL DEFAULT '',
     first_seen TEXT NOT NULL,
-    active INTEGER NOT NULL DEFAULT 1
+    active INTEGER NOT NULL DEFAULT 1,
+    performance_boost REAL NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS daily_stats (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,9 +89,13 @@ CREATE TABLE IF NOT EXISTS drafts (
     first_paragraph TEXT NOT NULL,
     body TEXT NOT NULL,
     image_url TEXT NOT NULL DEFAULT '',
+    section_images TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'draft',
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT ''
+    updated_at TEXT NOT NULL DEFAULT '',
+    published_at TEXT NOT NULL DEFAULT '',
+    performance_score REAL,
+    performance_note TEXT NOT NULL DEFAULT ''
 );
 """,
     "postgres": """
@@ -104,7 +109,8 @@ CREATE TABLE IF NOT EXISTS keywords (
     keyword TEXT NOT NULL UNIQUE,
     category TEXT NOT NULL DEFAULT '',
     first_seen TEXT NOT NULL,
-    active INTEGER NOT NULL DEFAULT 1
+    active INTEGER NOT NULL DEFAULT 1,
+    performance_boost DOUBLE PRECISION NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS daily_stats (
     id SERIAL PRIMARY KEY,
@@ -170,9 +176,13 @@ CREATE TABLE IF NOT EXISTS drafts (
     first_paragraph TEXT NOT NULL,
     body TEXT NOT NULL,
     image_url TEXT NOT NULL DEFAULT '',
+    section_images TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'draft',
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT ''
+    updated_at TEXT NOT NULL DEFAULT '',
+    published_at TEXT NOT NULL DEFAULT '',
+    performance_score DOUBLE PRECISION,
+    performance_note TEXT NOT NULL DEFAULT ''
 );
 """,
 }
@@ -202,7 +212,8 @@ class Database:
         "ROUND(CAST(35.0 * COALESCE(ds.ai_cite_idx, 0) "
         "+ 35.0 * CASE WHEN COALESCE(ds.demand_idx, 0) > 1 THEN 1.0 "
         "ELSE COALESCE(ds.demand_idx, 0) END "
-        f"+ 30.0 * {CPC_TIER_SQL} AS NUMERIC), 1)"
+        f"+ 30.0 * {CPC_TIER_SQL} "
+        "+ COALESCE(k.performance_boost, 0) AS NUMERIC), 1)"
     )
     SORT_COLUMNS = {
         "opportunity": "ds.opportunity",
@@ -307,6 +318,36 @@ LEFT JOIN daily_stats ds
                 "DOUBLE PRECISION",
                 (),
             )
+            self._q(
+                None,
+                "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS section_images "
+                "TEXT NOT NULL DEFAULT ''",
+                (),
+            )
+            self._q(
+                None,
+                "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS published_at "
+                "TEXT NOT NULL DEFAULT ''",
+                (),
+            )
+            self._q(
+                None,
+                "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS performance_score "
+                "DOUBLE PRECISION",
+                (),
+            )
+            self._q(
+                None,
+                "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS performance_note "
+                "TEXT NOT NULL DEFAULT ''",
+                (),
+            )
+            self._q(
+                None,
+                "ALTER TABLE keywords ADD COLUMN IF NOT EXISTS performance_boost "
+                "DOUBLE PRECISION NOT NULL DEFAULT 0",
+                (),
+            )
             return
         rows = self._qd(
             "SELECT name FROM pragma_table_info('daily_stats') WHERE name = 'ai_cite_idx'",
@@ -320,6 +361,26 @@ LEFT JOIN daily_stats ds
         )
         if not rows:
             self._qd("ALTER TABLE daily_stats ADD COLUMN demand_growth REAL", ())
+        rows = self._qd(
+            "SELECT name FROM pragma_table_info('drafts') WHERE name = 'section_images'",
+            (), fetch=True,
+        )
+        if not rows:
+            self._qd("ALTER TABLE drafts ADD COLUMN section_images TEXT NOT NULL DEFAULT ''", ())
+        rows = self._qd(
+            "SELECT name FROM pragma_table_info('drafts') WHERE name = 'performance_score'",
+            (), fetch=True,
+        )
+        if not rows:
+            self._qd("ALTER TABLE drafts ADD COLUMN performance_score REAL", ())
+            self._qd("ALTER TABLE drafts ADD COLUMN published_at TEXT NOT NULL DEFAULT ''", ())
+            self._qd("ALTER TABLE drafts ADD COLUMN performance_note TEXT NOT NULL DEFAULT ''", ())
+        rows = self._qd(
+            "SELECT name FROM pragma_table_info('keywords') WHERE name = 'performance_boost'",
+            (), fetch=True,
+        )
+        if not rows:
+            self._qd("ALTER TABLE keywords ADD COLUMN performance_boost REAL NOT NULL DEFAULT 0", ())
 
     # ---------- 시드 ----------
 
@@ -356,6 +417,14 @@ LEFT JOIN daily_stats ds
 
     def set_active(self, keyword_id, active):
         self._qd("UPDATE keywords SET active = ? WHERE id = ?", (active, keyword_id))
+
+    def set_performance_boost(self, keyword_id, delta):
+        # v10 [6]: 게시 성과 피드백 보너스 — priority 상향/하향 (은퇴·우선순위 보정)
+        self._qd(
+            "UPDATE keywords SET performance_boost = COALESCE(performance_boost, 0) + ? "
+            "WHERE id = ?",
+            (delta, keyword_id),
+        )
 
     def get_keyword(self, keyword_id):
         rows = self._qd("SELECT * FROM keywords WHERE id = ?", (keyword_id,), fetch=True)
@@ -717,6 +786,22 @@ LIMIT ? OFFSET ?"""
         self._qd(
             "UPDATE drafts SET image_url = ?, updated_at = ? WHERE id = ?",
             (image_url, updated_at, draft_id),
+        )
+
+    def update_draft_section_images(self, draft_id, section_images_json, updated_at=""):
+        # v10 [5]: 섹션 이미지 5~8장 (JSON 배열 문자열) — 체류·스크롤 증가
+        self._qd(
+            "UPDATE drafts SET section_images = ?, updated_at = ? WHERE id = ?",
+            (section_images_json, updated_at, draft_id),
+        )
+
+    def update_draft_performance(self, draft_id, published_at, score, note="", updated_at=""):
+        # v10 [6]: 게시 후 성과 기록 — 서치어드바이저 수동 입력 기반.
+        # score 0~100 (유입/체류 반영), note는 성과 메모.
+        self._qd(
+            "UPDATE drafts SET published_at = ?, performance_score = ?, "
+            "performance_note = ?, status = 'published', updated_at = ? WHERE id = ?",
+            (published_at, score, note, updated_at, draft_id),
         )
 
     def list_drafts_by_keyword(self, keyword_id):

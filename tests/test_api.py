@@ -216,10 +216,10 @@ def test_create_draft_requires_token_and_404(tmp_path):
 def test_create_draft_mocks_generator(tmp_path, monkeypatch):
     # v7: opencode CLI는 Mock — generate_draft가 초안 dict 반환
     def fake_generate(keyword, structure):
-        return {"title": "제목", "first_paragraph": "첫문단", "body": "## 소제목\n본문"}
+        return {"title": "제목", "first_paragraph": "첫문단", "body": "## 소제목\n본문"}, []
 
-    import draft_generator
-    monkeypatch.setattr(draft_generator, "generate_draft", fake_generate)
+    import draft_pipeline
+    monkeypatch.setattr(draft_pipeline, "generate_two_pass", fake_generate)
     client = TestClient(make_app(tmp_path))
     r = client.post("/drafts", json={"keyword_id": 1})
     assert r.status_code == 200
@@ -231,9 +231,9 @@ def test_create_draft_mocks_generator(tmp_path, monkeypatch):
 
 
 def test_get_draft(tmp_path, monkeypatch):
-    import draft_generator
-    monkeypatch.setattr(draft_generator, "generate_draft", lambda k, s: {
-        "title": "제목", "first_paragraph": "첫문단", "body": "본문"})
+    import draft_pipeline
+    monkeypatch.setattr(draft_pipeline, "generate_two_pass", lambda k, s: (
+        {"title": "제목", "first_paragraph": "첫문단", "body": "본문"}, []))
     client = TestClient(make_app(tmp_path))
     did = client.post("/drafts", json={"keyword_id": 1}).json()["id"]
     body = client.get(f"/drafts/{did}").json()
@@ -244,10 +244,10 @@ def test_get_draft(tmp_path, monkeypatch):
 
 def test_draft_image_no_key_returns_503(tmp_path, monkeypatch):
     # v7: 키 미발급 → 503 + 명확한 안내, 초안 데이터는 유지
-    import draft_generator
+    import draft_pipeline
     import image_gen
-    monkeypatch.setattr(draft_generator, "generate_draft", lambda k, s: {
-        "title": "제목", "first_paragraph": "첫문단", "body": "본문"})
+    monkeypatch.setattr(draft_pipeline, "generate_two_pass", lambda k, s: (
+        {"title": "제목", "first_paragraph": "첫문단", "body": "본문"}, []))
     monkeypatch.delenv("BAILIAN_TOKEN_PLAN_API_KEY", raising=False)
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
     client = TestClient(make_app(tmp_path))
@@ -260,10 +260,10 @@ def test_draft_image_no_key_returns_503(tmp_path, monkeypatch):
 
 def test_draft_image_success_updates_url(tmp_path, monkeypatch):
     # v7: 키 존재 + Mock runner → image_url 저장
-    import draft_generator
+    import draft_pipeline
     import image_gen
-    monkeypatch.setattr(draft_generator, "generate_draft", lambda k, s: {
-        "title": "제목", "first_paragraph": "첫문단", "body": "본문"})
+    monkeypatch.setattr(draft_pipeline, "generate_two_pass", lambda k, s: (
+        {"title": "제목", "first_paragraph": "첫문단", "body": "본문"}, []))
     monkeypatch.setenv("BAILIAN_TOKEN_PLAN_API_KEY", "test-key")
     monkeypatch.setattr(image_gen, "_run_http", lambda prompt: "https://img.example.com/1.png")
     client = TestClient(make_app(tmp_path))

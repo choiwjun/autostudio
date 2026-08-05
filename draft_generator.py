@@ -34,11 +34,14 @@ USER_PROMPT_TEMPLATE = """
 5. 말투: 친근한 존댓말, 숫자·근거 구체화
 6. 각 H2 섹션에 구체적 사례·단계·기준을 넣어 정보의 깊이를 확보
 
+{intent_section}
+
 ## 골격 데이터 사용 (최우선)
 - 아래 "상위글 골격"의 **questions 중 3~5개를 골라 그대로 H2 소제목(질문형)으로 사용**하고, 각 질문의 핵심 내용(상황·수치·기준)을 본문에 반영할 것
 - **comparisons(비교)·facts(수치)는 반드시 본문에 인용**하고, 없으면 표·사례를 직접 만들어 채울 것
 - 골격의 내용을 버리고 임의의 주제로 대체하지 말 것 — 골격은 검색 상위글에서 추출한 실제 인용 구조이므로 이를 중심으로 확장해야 함
 - 모델이 스스로 상상한 내용만으로 채우지 말고, 반드시 골격 데이터를 축으로 글을 구성할 것
+{grounding_rule}
 
 ## 네이버 D.I.A 평가 대응 (7요소)
 1. 의도 부합: 검색자가 키워드에서 원하는 정보(방법·비교·후기)에 정확히 답할 것
@@ -148,23 +151,45 @@ def _append_faq_if_missing(draft, structure):
     return draft
 
 
-def generate_draft(keyword, structure, runner=None):
-    """골격 구조를 프롬프트에 넣고 초안을 생성한다. runner는 테스트 주입용."""
+def _build_prompt(keyword, structure, intent_section, grounding_rule):
     structure_text = structure if isinstance(structure, str) else json.dumps(
         structure, ensure_ascii=False)
-    prompt = USER_PROMPT_TEMPLATE.format(
-        keyword=keyword, structure=structure_text)
-    run = runner or _run_llm
-    raw = run(prompt, timeout=90)
-    draft = parse_draft(raw)
-    # v9: 구조가 str이어도 파싱해 보정 실행 — 기존 isinstance(str) 분기로 FAQ 보정이
-    #     dead code였음 (server는 항상 str을 넘김). dict이든 str이든 동일하게 보정한다.
+    return USER_PROMPT_TEMPLATE.format(
+        keyword=keyword, structure=structure_text,
+        intent_section=intent_section, grounding_rule=grounding_rule)
+
+
+def generate_draft(keyword, structure, runner=None):
+    """골격 구조를 프롬프트에 넣고 초안을 생성한다. runner는 테스트 주입용.
+
+    v10: 의도 분류(intent.py)로 문서 템플릿 분리 + 데이터 그라운딩 규칙 주입.
+    """
+    from intent import classify, intent_template
+    intent = classify(keyword)
+    intent_section = intent_template(intent)
+
+    # v10 [2]: 데이터 그라운딩 — 골격에 facts(실측 수치)가 없으면 숫자 창작 금지
     struct_obj = structure
     if isinstance(structure, str):
         try:
             struct_obj = json.loads(structure)
         except json.JSONDecodeError:
             struct_obj = None
+    has_facts = bool(isinstance(struct_obj, dict) and struct_obj.get("facts"))
+    if has_facts:
+        grounding_rule = ""
+    else:
+        grounding_rule = (
+            "\n## 데이터 그라운딩 (실측 수치 없음)\n"
+            "- 아래 골격에 **facts(실측 수치)가 없으므로** 구체적 금액·수치·기간을 창작하지 말 것.\n"
+            "- 대신 '보통', '통상', '확인해야 하는 기준' 같은 검증 가능한 표현으로 채울 것.\n"
+            "- 비교·수치가 필요하면 실제 조사가 필요한 항목으로만 언급 (예: '가격은 시기에 따라 다르니 최신 견적 확인')."
+        )
+
+    prompt = _build_prompt(keyword, struct_obj, intent_section, grounding_rule)
+    run = runner or _run_llm
+    raw = run(prompt, timeout=90)
+    draft = parse_draft(raw)
     if isinstance(struct_obj, dict):
         draft = _append_faq_if_missing(draft, struct_obj)
     return draft

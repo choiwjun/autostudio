@@ -1,5 +1,6 @@
 import hmac
 import os
+import re
 import threading
 from datetime import timedelta
 
@@ -25,6 +26,13 @@ class CollectIn(BaseModel):
 
 class DraftIn(BaseModel):
     keyword_id: int
+
+
+class FeedbackIn(BaseModel):
+    # v10 [6]: 게시 후 성과 피드백 — 서치어드바이저에서 확인한 유입/체류를 수동 입력
+    published_at: str = ""
+    performance_score: float  # 0~100 (유입·체류 반영)
+    note: str = ""
 
 
 def create_app(cfg):
@@ -202,8 +210,8 @@ def create_app(cfg):
 
     @app.post("/drafts", dependencies=[Depends(require_token)])
     def create_draft(body: DraftIn):
-        # v7: 글 초안 생성 — 골격 기반 초안 생성 (v9: Token Plan HTTP API, opencode CLI 아님)
-        import draft_generator
+        # v7: 글 초안 생성 — 골격 기반 (v9: Token Plan HTTP API, v10: 2패스+검수)
+        import draft_pipeline
         kw = run_db(lambda d: d.get_keyword(body.keyword_id))
         if not kw:
             raise HTTPException(status_code=404, detail="not found")
@@ -216,14 +224,19 @@ def create_app(cfg):
             )
         structure = outline["structure"]
         try:
-            draft = draft_generator.generate_draft(kw["keyword"], structure)
-        except draft_generator.DraftGenerationError as e:
+            # v10: 2패스 생성(골격→섹션 확장) + 검수 6항목. 검수 미달 항목은 응답에 포함
+            draft, failed_checks = draft_pipeline.generate_two_pass(
+                kw["keyword"], structure)
+        except draft_pipeline.DraftGenerationError as e:
             raise HTTPException(status_code=503, detail=str(e))
         created_at = config_mod.now_kst_iso()
         draft_id = run_db(lambda d: d.insert_draft(
             body.keyword_id, draft["title"], draft["first_paragraph"],
             draft["body"], created_at=created_at))
-        return run_db(lambda d: d.get_draft(draft_id))
+        result = run_db(lambda d: d.get_draft(draft_id))
+        if failed_checks:
+            result["quality_warnings"] = failed_checks
+        return result
 
     @app.get("/drafts/{draft_id}")
     def get_draft(draft_id: int):
@@ -247,6 +260,50 @@ def create_app(cfg):
             raise HTTPException(status_code=503, detail=str(e))
         run_db(lambda d: d.update_draft_image(
             draft_id, url, config_mod.now_kst_iso()))
+        return run_db(lambda d: d.get_draft(draft_id))
+
+    @app.post("/drafts/{draft_id}/section-images", dependencies=[Depends(require_token)])
+    def generate_section_images(draft_id: int):
+        # v10 [5]: 섹션 이미지 5~8장 — 본문 H2 소제목에서 주제 추출, 체류·스크롤 증가
+        import json
+        import image_gen
+        draft = run_db(lambda d: d.get_draft(draft_id))
+        if not draft:
+            raise HTTPException(status_code=404, detail="not found")
+        h2s = re.findall(r"^##\s+(.+)$", draft["body"], flags=re.M)
+        # FAQ 섹션 제외 + 길이 제한
+        sections = [h for h in h2s if "자주 묻는 질문" not in h][:8]
+        if not sections:
+            raise HTTPException(status_code=400, detail="본문에 H2 소제목이 없어 섹션 이미지를 생성할 수 없습니다")
+        try:
+            urls = image_gen.generate_section_images(
+                run_db(lambda d: d.get_keyword(draft["keyword_id"]))["keyword"],
+                draft["title"], sections)
+        except image_gen.ImageGenerationError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+        run_db(lambda d: d.update_draft_section_images(
+            draft_id, json.dumps(urls, ensure_ascii=False), config_mod.now_kst_iso()))
+        return run_db(lambda d: d.get_draft(draft_id))
+
+    @app.post("/drafts/{draft_id}/feedback", dependencies=[Depends(require_token)])
+    def record_draft_feedback(draft_id: int, body: FeedbackIn):
+        # v10 [6]: 게시 후 성과 기록 + 키워드 점수 보정.
+        # 성과(0~100)를 해당 키워드 priority에 반영해 '잘 된 키워드 우선' 학습 루프
+        draft = run_db(lambda d: d.get_draft(draft_id))
+        if not draft:
+            raise HTTPException(status_code=404, detail="not found")
+        score = max(0.0, min(100.0, body.performance_score))
+        published = body.published_at or config_mod.now_kst_iso()
+        run_db(lambda d: d.update_draft_performance(
+            draft_id, published, score, body.note, config_mod.now_kst_iso()))
+        # 점수 보정: 성과 우수(>=70) 키워드는 은퇴 보호, 저성과(<30)는 은퇴 후보 가속.
+        # 여기선 priority 상향 보너스로 간단 반영 (다음 배치가 은퇴 판정에서 사용).
+        kw = run_db(lambda d: d.get_keyword(draft["keyword_id"]))
+        if kw:
+            if score >= 70:
+                run_db(lambda d: d.set_performance_boost(draft["keyword_id"], 10))
+            elif score < 30:
+                run_db(lambda d: d.set_performance_boost(draft["keyword_id"], -10))
         return run_db(lambda d: d.get_draft(draft_id))
 
     @app.get("/")

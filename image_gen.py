@@ -29,6 +29,29 @@ def generate_image(keyword, title, prompt=None, runner=None, timeout=IMAGE_TIMEO
     return run(image_prompt)
 
 
+def generate_section_images(keyword, title, sections, runner=None, timeout=IMAGE_TIMEOUT):
+    """v10 [5]: 섹션별 이미지 5~8장 생성 — 본문 H2 소제목별 삽화 (체류·스크롤 증가).
+
+    sections: 본문에서 추출한 H2 소제목 리스트. 각 섹션 주제에 맞는 이미지를 생성해
+    URL 리스트로 반환한다. 실패 시 해당 섹션은 건너뛴다 (텍스트 흐름 유지).
+    """
+    if not _has_valid_key():
+        raise ImageGenerationError("이미지 키가 필요합니다 (BAILIAN_TOKEN_PLAN_API_KEY)")
+    run = runner or _run_http
+    urls = []
+    for sec in sections[:8]:
+        sec_text = str(sec)[:60]
+        prompt = (
+            f"네이버 블로그 본문 삽화. 주제: {keyword}. 섹션: {sec_text}. "
+            f"밝고 선명한 일러스트 스타일, 텍스트 없음, 16:9"
+        )
+        try:
+            urls.append(run(prompt))
+        except ImageGenerationError:
+            continue
+    return urls
+
+
 def _build_prompt(keyword, title):
     return (
         f"네이버 블로그 대표 이미지. 주제: {keyword}. "
