@@ -22,7 +22,23 @@ def test_demand_index_normalized_by_anchor(monkeypatch):
     monkeypatch.setattr(requests, "post", lambda *a, **k: FakeResponse(payload))
     r = fetch_demand_ratios("cid", "csec", ["에어프라이어", "무명키워드"],
                             "냉장고", "2026-07-04", "2026-08-03")
-    assert r == {"에어프라이어": 0.1, "무명키워드": 0.0}
+    # v9: 반환 구조 확장 — {"ratio": 앵커 정규화, "growth": 시계열 기울기}
+    assert r["에어프라이어"]["ratio"] == 0.1
+    assert r["에어프라이어"]["growth"] == 0.0  # 데이터 2개뿐 → 이전 기간 없음
+    assert r["무명키워드"] == {"ratio": 0.0, "growth": 0.0}
+
+
+def test_demand_growth_slope(monkeypatch):
+    # v9: 최근 7일 ratio 상승 시 growth > 0 (뜨는 키워드 신호)
+    payload = {"results": [
+        {"title": "냉장고", "data": [{"ratio": 50.0}] * 30},
+        {"title": "뜨는키워드", "data": [{"ratio": 10.0}] * 23 + [{"ratio": 20.0}] * 7},
+    ]}
+    monkeypatch.setattr(requests, "post", lambda *a, **k: FakeResponse(payload))
+    r = fetch_demand_ratios("cid", "csec", ["뜨는키워드"],
+                            "냉장고", "2026-07-04", "2026-08-03")
+    assert r["뜨는키워드"]["growth"] > 0.0
+    assert r["뜨는키워드"]["ratio"] > 0.2  # 평균 (10*23+20*7)/30 = 12.33 → /50 = 0.2467
 
 
 def test_anchor_zero_raises(monkeypatch):

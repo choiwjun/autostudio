@@ -94,11 +94,14 @@ def create_app(cfg):
                 config_mod.today_kst() - timedelta(days=discovered_within)
             ).isoformat()
         # v4: 유망 프리셋 — 기회≥70 & 쇼핑클릭≥0.5 & 수요지수≥0.01 (쇼핑 검색 API 종료 대체)
+        # v9: 실측 기반 재정의 — opp 최대 24.2, 쇼핑클릭>0은 9개(모두 여름휴가 계열,
+        #     금융·보험과 카테고리 미매칭). 쇼핑클릭 필터는 교집합 0건 유발 → 제거.
+        #     유망 = 기회≥20(성장 신호) & 수요≥0.001. 쇼핑클릭은 별도 열로만 노출.
         # v6: 기본 프리셋 'ai_pick' — AI 인용 가능성 + 수요(조회수 프록시) 기반,
         #     애드포스트 1차 목표에 맞는 '지금 써야 할 키워드' 상위 20개 중심
         opportunity_min, demand_min, ai_cite_min = 0.0, 0.0, 0.0
         if preset == "promising":
-            opportunity_min, click_min, demand_min = 70.0, 0.5, 0.01
+            opportunity_min, demand_min = 20.0, 0.001
         elif preset == "ai_pick":
             # v6: demand_idx는 데이터랩 앵커('냉장고') 대비 상대 비율 — 실측 0~0.01 분포.
             #     0.2 임계는 전 키워드 탈락을 유발해 0.001(앵커의 0.1%)로 현실화 (임계는 절대값이 아닌 상대값)

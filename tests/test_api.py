@@ -160,8 +160,8 @@ def test_sort_dir_and_promising_preset(tmp_path):
     assert [i["keyword"] for i in asc["items"]] == ["선풍기", "에어프라이어"]
     click = client.get("/keywords?preset=&sort=click").json()
     assert [i["keyword"] for i in click["items"]] == ["에어프라이어", "선풍기"]
-    # 유망 = 기회≥70 & 쇼핑클릭≥0.5 & 수요≥0.01 → 픽스처 최고 64.1 → 0건 (서버 필터 확인)
-    assert client.get("/keywords?preset=promising").json()["count"] == 0
+    # v9: 유망 = 기회≥20 & 쇼핑클릭≥0.05 & 수요≥0.001 → 픽스처 1건 통과 (실측 분포 기반 임계 현실화)
+    assert client.get("/keywords?preset=promising").json()["count"] == 1
     # v6: ai_pick 프리셋 = ai_cite≥0.6 & demand≥0.2 → 에어프라이어(0.8/0.5)만 통과
     assert client.get("/keywords?preset=ai_pick").json()["count"] == 1
 

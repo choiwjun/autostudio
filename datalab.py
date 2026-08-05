@@ -10,10 +10,13 @@ class DatalabError(Exception):
 def fetch_demand_ratios(client_id, client_secret, keywords, anchor,
                         start_date, end_date, timeout=10):
     """앵커 + 후보(최대 4개)를 한 요청으로 비교.
-    반환: {keyword: 수요지수(앵커 평균 ratio 대비)}.
-    데이터랩 ratio는 요청 내 상대값이므로 앵커로 나눠야 요청 간 비교 가능.
+    반환: {keyword: {"ratio": 수요지수, "growth": 기울기}}.
+    ratio = 앵커 평균 ratio 대비 (요청 간 비교 가능하도록 정규화).
+    growth = (최근 7일 평균 ratio - 이전 23일 평균 ratio) / 이전 23일 평균 —
+    실제 "뜨는 키워드" 신호 (30일 시계열을 평균만 쓰고 버리지 않음).
     v3: 네트워크 오류·타임아웃·잘못된 JSON도 전부 DatalabError로 변환 —
-    update_demand가 잡을 수 있는 예외 종류를 하나로 정규화 (graceful degradation, 스펙 §4.4)."""
+    update_demand가 잡을 수 있는 예외 종류를 하나로 정규화 (graceful degradation, 스펙 §4.4).
+    v9: 반환 구조가 {kw: float} → {kw: {"ratio":, "growth":}} 로 확장됨."""
     groups = [{"groupName": anchor, "keywords": [anchor]}] + [
         {"groupName": kw, "keywords": [kw]} for kw in keywords[:4]
     ]
@@ -38,11 +41,24 @@ def fetch_demand_ratios(client_id, client_secret, keywords, anchor,
         raise
     except Exception as e:
         raise DatalabError(f"datalab 요청 실패: {e}") from e
-    means = {}
+    # 데이터랙 응답은 오름차순(오래된→최근) 일별 ratio. 30일이면 최근 7일 vs 이전 23일
+    series = {}
     for group in data.get("results", []):
         vals = [p.get("ratio", 0.0) for p in group.get("data", [])]
-        means[group.get("title", "")] = (sum(vals) / len(vals)) if vals else 0.0
-    anchor_mean = means.get(anchor, 0.0)
+        series[group.get("title", "")] = vals
+    anchor_series = series.get(anchor, [])
+    anchor_mean = (sum(anchor_series) / len(anchor_series)) if anchor_series else 0.0
     if anchor_mean <= 0:
         raise DatalabError(f"앵커 '{anchor}' ratio가 0 — 앵커 교체 필요")
-    return {kw: round(means.get(kw, 0.0) / anchor_mean, 4) for kw in keywords[:4]}
+
+    def _ratio_growth(vals):
+        if not vals:
+            return {"ratio": 0.0, "growth": 0.0}
+        mean = sum(vals) / len(vals)
+        recent = vals[-7:]
+        prev = vals[:-7]
+        prev_mean = (sum(prev) / len(prev)) if prev else 0.0
+        growth = (sum(recent) / len(recent) - prev_mean) / prev_mean if prev_mean > 0 else 0.0
+        return {"ratio": round(mean / anchor_mean, 4), "growth": round(growth, 4)}
+
+    return {kw: _ratio_growth(series.get(kw, [])) for kw in keywords[:4]}

@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS daily_stats (
     demand_idx REAL,
     shop_click_idx REAL,
     ai_cite_idx REAL,
+    demand_growth REAL,
     UNIQUE(keyword_id, day)
 );
 CREATE TABLE IF NOT EXISTS top_results (
@@ -122,6 +123,7 @@ CREATE TABLE IF NOT EXISTS daily_stats (
     demand_idx DOUBLE PRECISION,
     shop_click_idx DOUBLE PRECISION,
     ai_cite_idx DOUBLE PRECISION,
+    demand_growth DOUBLE PRECISION,
     UNIQUE(keyword_id, day)
 );
 CREATE TABLE IF NOT EXISTS top_results (
@@ -178,17 +180,22 @@ CREATE TABLE IF NOT EXISTS drafts (
 _STATS_COLUMNS = (
     "total_sim", "total_date", "fresh_ratio", "shop_total", "shop_avg_price",
     "shop_category", "shop_error", "growth", "opportunity", "commercial",
-    "demand_idx", "shop_click_idx", "ai_cite_idx",
+    "demand_idx", "shop_click_idx", "ai_cite_idx", "demand_growth",
 )
 
 
 class Database:
     # v6: priority = 0.35×ai_cite_idx + 0.35×demand_idx(≤1) + 0.30×CPC등급(카테고리)
+    # v9: config.DEFAULT_CPC_TIERS와 정합 — 기존 4단계(ELSE 0.5)는 여행/맛집(0.4),
+    #     반려동물/일상/취미(0.3)를 0.5로 과평가해 priority 왜곡 (실증: 반려동물 17개)
     # SORT_COLUMNS에 쓰이는 priority 표현식 — SELECT에도 동일 alias로 노출 (server 조회용)
     CPC_TIER_SQL = (
         "CASE WHEN k.category IN ('보험','금융','재테크') THEN 1.0 "
         "WHEN k.category IN ('부동산','법률','건강','의료') THEN 0.9 "
         "WHEN k.category IN ('IT','디지털','교육','자격증') THEN 0.8 "
+        "WHEN k.category IN ('인테리어','패션','뷰티','요리') THEN 0.5 "
+        "WHEN k.category IN ('여행','맛집') THEN 0.4 "
+        "WHEN k.category IN ('반려동물','일상','취미') THEN 0.3 "
         "ELSE 0.5 END"
     )
     PRIORITY_SQL = (
@@ -202,6 +209,7 @@ class Database:
         "commercial": "ds.commercial",
         "click": "ds.shop_click_idx",  # v4: 쇼핑 클릭 지수 (쇼핑 검색 API 종료 대체)
         "demand": "ds.demand_idx",
+        "demand_growth": "ds.demand_growth",  # v9: 데이터랩 시계열 기울기
         "growth": "ds.growth",
         "ai_cite": "ds.ai_cite_idx",   # v6: AI 인용 가능성
         "priority": PRIORITY_SQL,      # v6: 종합 우선순위
@@ -293,6 +301,12 @@ LEFT JOIN daily_stats ds
                 "DOUBLE PRECISION",
                 (),
             )
+            self._q(
+                None,
+                "ALTER TABLE daily_stats ADD COLUMN IF NOT EXISTS demand_growth "
+                "DOUBLE PRECISION",
+                (),
+            )
             return
         rows = self._qd(
             "SELECT name FROM pragma_table_info('daily_stats') WHERE name = 'ai_cite_idx'",
@@ -300,6 +314,12 @@ LEFT JOIN daily_stats ds
         )
         if not rows:
             self._qd("ALTER TABLE daily_stats ADD COLUMN ai_cite_idx REAL", ())
+        rows = self._qd(
+            "SELECT name FROM pragma_table_info('daily_stats') WHERE name = 'demand_growth'",
+            (), fetch=True,
+        )
+        if not rows:
+            self._qd("ALTER TABLE daily_stats ADD COLUMN demand_growth REAL", ())
 
     # ---------- 시드 ----------
 
@@ -377,6 +397,7 @@ ORDER BY last_day, k.id"""
             stats.get("growth"), stats.get("opportunity"),
             stats.get("commercial"), stats.get("demand_idx"),
             stats.get("shop_click_idx"), stats.get("ai_cite_idx"),
+            stats.get("demand_growth"),
         )
         cols = ", ".join(("keyword_id", "day") + _STATS_COLUMNS)
         placeholders = ", ".join("?" * len(values))
@@ -414,6 +435,13 @@ ORDER BY last_day, k.id"""
         self._qd(
             "UPDATE daily_stats SET demand_idx = ? WHERE keyword_id = ? AND day = ?",
             (demand_idx, keyword_id, day),
+        )
+
+    def update_demand_growth(self, keyword_id, day, demand_growth):
+        # v9: 데이터랩 30일 시계열 기울기 — 최근 7일 vs 이전 23일 평균 ratio 변화율
+        self._qd(
+            "UPDATE daily_stats SET demand_growth = ? WHERE keyword_id = ? AND day = ?",
+            (demand_growth, keyword_id, day),
         )
 
     def update_shop_click_idx(self, keyword_id, day, shop_click_idx):

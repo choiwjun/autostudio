@@ -170,7 +170,10 @@ def update_demand(d, cfg, today, now, budget_seconds=None, started=None):
             break  # 수요 단계만 중단 — 나머지 파이프라인은 정상 (스펙 §4.4)
         for b in batch:
             if b["keyword"] in ratios:
-                d.update_demand_idx(b["id"], today, ratios[b["keyword"]])
+                # v9: ratios[kw] = {"ratio":, "growth":} — demand_idx + 시계열 기울기 저장
+                val = ratios[b["keyword"]]
+                d.update_demand_idx(b["id"], today, val["ratio"])
+                d.update_demand_growth(b["id"], today, val["growth"])
                 updated += 1
         time.sleep(0.2)
     return updated

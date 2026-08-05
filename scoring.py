@@ -1,8 +1,15 @@
 # scoring.py
 import math
 
+import config as config_mod
+
 COMPETITION_SATURATION_TOTAL = 10_000  # 1만 글이면 경쟁 포화 (스펙 §4.5)
 GROWTH_NORM_MAX = 0.05                 # 일 5% 증가에서 성장 만점 (변별력 확보)
+
+# v9: config.DEFAULT_CPC_TIERS를 단일 소스로 사용 — 중복 딕셔너리는 드리프트 발생
+#     (scoring.py에 '요리' 누락 사례). cpc_tier_score는 테스트·참조용이며
+#     실제 priority는 db.CPC_TIER_SQL(SQL)이 사용 — 두 곳을 동일 값으로 유지할 것.
+DEFAULT_CPC_TIERS = config_mod.DEFAULT_CPC_TIERS
 
 # --- v6: AI 인용 가능성 신호 ---
 # AI 브리핑은 정보형·질문형 검색에서 활성화되고 과정형 카테고리에서 본문 인용 비율이
@@ -40,14 +47,6 @@ def cpc_tier_score(category, tiers=None):
     """애드포스트 단가 등급 (0~1). tiers 미지정 시 DEFAULT_CPC_TIERS 사용."""
     tiers = tiers or DEFAULT_CPC_TIERS
     return tiers.get(category, tiers.get("", 0.5))
-
-
-DEFAULT_CPC_TIERS = {
-    "보험": 1.0, "금융": 1.0, "재테크": 1.0, "부동산": 0.9, "법률": 0.9,
-    "건강": 0.9, "의료": 0.9, "IT": 0.8, "디지털": 0.8, "교육": 0.8,
-    "자격증": 0.8, "여행": 0.4, "맛집": 0.4, "반려동물": 0.3,
-    "일상": 0.3, "취미": 0.3, "인테리어": 0.5, "패션": 0.5, "뷰티": 0.5,
-}
 
 
 def v6_priority(ai_cite, demand, cpc):
