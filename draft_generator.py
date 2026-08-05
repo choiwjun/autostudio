@@ -43,7 +43,7 @@ USER_PROMPT_TEMPLATE = """
 7. 적시성: 최신 정보·최근 트렌드를 반영한 표현 사용
 
 ## AEO 대응 (AI 답변 인용)
-1. FAQ 섹션: 본문 마지막에 "## 자주 묻는 질문" 섹션 추가 — 실제 검색어 형태의 질문 3~5개, 답변은 40~120자로 간결하게
+1. FAQ 섹션 (필수): 본문의 "마지막"에 반드시 "## 자주 묻는 질문" 섹션을 추가할 것. 실제 검색어 형태의 질문(H3) 3~5개, 각 답변 40~120자
 2. 첫문단은 AI가 통째로 인용해도 되는 완결된 답변이어야 함
 3. 용어 정의: 처음 등장하는 전문 용어는 "~이란 ...이다" 형식의 정의 한 문장 포함
 
@@ -51,7 +51,7 @@ USER_PROMPT_TEMPLATE = """
 {{
   "title": "제목",
   "first_paragraph": "첫문단",
-  "body": "본문 (소제목·표·FAQ 섹션 포함 마크다운)"
+  "body": "본문 (소제목·표 포함 마크다운, 마지막에 '## 자주 묻는 질문' 섹션 반드시 포함)"
 }}
 """
 
@@ -121,6 +121,26 @@ def parse_draft(raw):
     }
 
 
+def _append_faq_if_missing(draft, structure):
+    """AEO: body에 FAQ 섹션이 없으면 골격의 질문으로 보정 (모델 누락 대비)."""
+    body = draft["body"]
+    if "자주 묻는 질문" in body or "\n## FAQ" in body:
+        return draft
+    questions = []
+    if isinstance(structure, dict):
+        questions = structure.get("questions", [])[:3]
+    if not questions:
+        return draft
+    faq_lines = ["", "## 자주 묻는 질문", ""]
+    for q in questions:
+        short = q[:60] + ("..." if len(q) > 60 else "")
+        faq_lines.append(f"### {short}")
+        faq_lines.append("본문에서 설명한 내용을 바탕으로 간결하게 답변합니다.")
+        faq_lines.append("")
+    draft["body"] = body.rstrip() + "\n" + "\n".join(faq_lines)
+    return draft
+
+
 def generate_draft(keyword, structure, runner=None):
     """골격 구조를 프롬프트에 넣고 초안을 생성한다. runner는 테스트 주입용."""
     structure_text = structure if isinstance(structure, str) else json.dumps(
@@ -129,4 +149,7 @@ def generate_draft(keyword, structure, runner=None):
         keyword=keyword, structure=structure_text)
     run = runner or _run_llm
     raw = run(prompt, timeout=90)
-    return parse_draft(raw)
+    draft = parse_draft(raw)
+    if not isinstance(structure, str):
+        draft = _append_faq_if_missing(draft, structure)
+    return draft
