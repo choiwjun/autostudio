@@ -505,7 +505,7 @@ async function load() {
   document.getElementById('pageInfo').textContent = `${totalCount}건 · ${page}/${maxPage}페이지`;
 }
 
-function resetAndLoad() { page = 1; load(); }
+function resetAndLoad() { page = 1; load(); loadTopKpi(); }
 function resetFilters() {
   document.getElementById('category').value = '';
   document.getElementById('click').value = '';
@@ -612,13 +612,13 @@ async function refreshStatus() {
   setStatus(msg, warn);
 }
 
-// v6: KPI '상위 Priority' — 전체 1위 키워드 (프리셋 해제 상태로 조회)
+// v8: KPI '상위 Priority' — 현재 프리셋 기준 1위 (테이블과 동일 기준)
 async function loadTopKpi() {
   const el = document.getElementById('kpiTop');
   const sub = document.getElementById('kpiTopSub');
   try {
     const d = await api('/keywords?' + new URLSearchParams({
-      sort: 'priority', sort_dir: 'desc', page: 1, page_size: 1, preset: '',
+      sort: 'priority', sort_dir: 'desc', page: 1, page_size: 1, preset: preset,
     }));
     const top = d.items[0];
     if (top && top.priority !== null) {
