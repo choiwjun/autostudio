@@ -71,8 +71,16 @@ def test_cpc_tier_defaults():
 
 
 def test_v6_priority_bounds():
-    # 0.35×ai + 0.35×demand(≤1) + 0.30×cpc
+    # 0.35×ai + 0.35×demand(0.01 기준 정규화) + 0.30×cpc
     assert v6_priority(1.0, 1.0, 1.0) == 100.0
     assert v6_priority(0.0, 0.0, 0.0) == 0.0
     assert v6_priority(None, None, None) == 0.0  # NULL 보호
-    assert v6_priority(1.0, 5.0, 1.0) == 100.0   # demand 1 초과는 1로 클램프
+    assert v6_priority(1.0, 5.0, 1.0) == 100.0   # demand 상한(0.01) 초과는 1로 클램프
+
+
+def test_v6_priority_demand_normalized_v12():
+    # v12: v9 실측 demand(앵커 대비 0~0.01) 기준 정규화 — 기존 ≤1 클램프는 demand 항 무력화
+    assert v6_priority(1.0, 0.01, 1.0) == 100.0       # 실측 상한 = 만점
+    assert v6_priority(1.0, 0.005, 1.0) == 82.5       # 35×1 + 35×0.5 + 30×1
+    assert v6_priority(1.0, 0.001, 1.0) == 68.5       # 35×1 + 35×0.1 + 30×1
+    assert v6_priority(1.0, 0.0, 1.0) == 65.0

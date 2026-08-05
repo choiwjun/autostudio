@@ -49,10 +49,15 @@ def cpc_tier_score(category, tiers=None):
     return tiers.get(category, tiers.get("", 0.5))
 
 
+# v12: demand_idx는 앵커('냉장고') 대비 상대비율 — 실측 0~0.01 분포 (v9 현실화).
+#      이 상한을 기준으로 0~1 정규화해 v6 가중치(0.35)가 실제로 priority에 반영되도록 함.
+DEMAND_NORM_MAX = 0.01
+
+
 def v6_priority(ai_cite, demand, cpc):
-    """0.35×AI인용 + 0.35×조회수잠재력(demand≤1) + 0.30×CPC (0~100)."""
+    """0.35×AI인용 + 0.35×조회수잠재력(demand/0.01, ≤1) + 0.30×CPC (0~100)."""
     ai = max(0.0, min(1.0, ai_cite or 0.0))
-    dm = max(0.0, min(1.0, demand or 0.0))
+    dm = max(0.0, min(1.0, (demand or 0.0) / DEMAND_NORM_MAX))
     cp = max(0.0, min(1.0, cpc or 0.0))
     return round(35.0 * ai + 35.0 * dm + 30.0 * cp, 1)
 

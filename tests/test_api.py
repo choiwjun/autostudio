@@ -23,7 +23,7 @@ def make_app(tmp_path, env="development"):
         "total_sim": 130, "total_date": 140, "fresh_ratio": 0.5,
         "shop_total": 520, "shop_avg_price": 35000, "shop_category": "가전",
         "growth": 0.27, "opportunity": 64.1, "commercial": None,
-        "demand_idx": 0.5, "shop_click_idx": 0.9, "ai_cite_idx": 0.8})  # v6: ai_pick 프리셋 통과
+        "demand_idx": 0.005, "shop_click_idx": 0.9, "ai_cite_idx": 0.8})  # v12: demand는 v9 실측 스케일(0~0.01)
     d.insert_daily_stats(b, "2026-08-02", {
         "total_sim": 10, "total_date": 10, "fresh_ratio": 0.0,
         "shop_total": 10, "shop_avg_price": 1000, "shop_category": "가전",
@@ -48,19 +48,20 @@ def test_list_reads_precomputed_scores(tmp_path):
     assert item["keyword"] == "에어프라이어"   # 기회점수 NULL은 뒤로
     assert item["opportunity"] == 64.1        # 저장값 그대로 (조회 시 재계산 없음)
     assert item["growth"] == 0.27
-    assert item["demand_idx"] == 0.5
+    assert item["demand_idx"] == 0.005
     assert item["shop_click_idx"] == 0.9      # v4: 쇼핑 클릭 지수
     assert item["ai_cite_idx"] == 0.8         # v6: AI 인용 가능성
     assert item["days"] == 2
 
 
 def test_default_preset_is_ai_pick(tmp_path):
-    # v6: 기본 뷰 = '지금 써야 할 키워드' — ai_cite≥0.6 & demand≥0.2만 노출 (에어프라이어만 통과)
+    # v6: 기본 뷰 = '지금 써야 할 키워드' — ai_cite≥0.6 & demand≥0.001만 노출 (에어프라이어만 통과)
     client = TestClient(make_app(tmp_path))
     body = client.get("/keywords").json()
     assert body["count"] == 1
     assert body["items"][0]["keyword"] == "에어프라이어"
-    assert body["items"][0]["priority"] is not None
+    # v12: priority = 35×0.8 + 35×(0.005/0.01) + 30×0.5(가전 기본) = 28 + 17.5 + 15
+    assert body["items"][0]["priority"] == 60.5
     body2 = client.get("/keywords?sort=priority").json()
     assert body2["items"][0]["keyword"] == "에어프라이어"
 
@@ -163,9 +164,9 @@ def test_sort_dir_and_promising_preset(tmp_path):
     assert [i["keyword"] for i in asc["items"]] == ["선풍기", "에어프라이어"]
     click = client.get("/keywords?preset=&sort=click").json()
     assert [i["keyword"] for i in click["items"]] == ["에어프라이어", "선풍기"]
-    # v9: 유망 = 기회≥20 & 쇼핑클릭≥0.05 & 수요≥0.001 → 픽스처 1건 통과 (실측 분포 기반 임계 현실화)
+    # v9: 유망 = 기회≥20 & 수요≥0.001 (쇼핑클릭 필터는 교집합 0건으로 제거) → 픽스처 1건 통과
     assert client.get("/keywords?preset=promising").json()["count"] == 1
-    # v6: ai_pick 프리셋 = ai_cite≥0.6 & demand≥0.2 → 에어프라이어(0.8/0.5)만 통과
+    # v6/v12: ai_pick 프리셋 = ai_cite≥0.6 & demand≥0.001 → 에어프라이어(0.8/0.005)만 통과
     assert client.get("/keywords?preset=ai_pick").json()["count"] == 1
 
 

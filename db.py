@@ -198,6 +198,9 @@ class Database:
     # v6: priority = 0.35×ai_cite_idx + 0.35×demand_idx(≤1) + 0.30×CPC등급(카테고리)
     # v9: config.DEFAULT_CPC_TIERS와 정합 — 기존 4단계(ELSE 0.5)는 여행/맛집(0.4),
     #     반려동물/일상/취미(0.3)를 0.5로 과평가해 priority 왜곡 (실증: 반려동물 17개)
+    # v12: v9에서 demand_idx가 앵커 대비 상대비율(실측 0~0.01)로 바뀌면서 기존 ≤1 클램프는
+    #     demand 항을 사실상 무력화(최대 기여 ~0.35점) — 0.01(실측 상한) 기준 정규화로
+    #     0~1 복원. 상한 초과는 1.0으로 클램프 (scoring.v6_priority와 동일 값 유지).
     # SORT_COLUMNS에 쓰이는 priority 표현식 — SELECT에도 동일 alias로 노출 (server 조회용)
     CPC_TIER_SQL = (
         "CASE WHEN k.category IN ('보험','금융','재테크') THEN 1.0 "
@@ -210,8 +213,8 @@ class Database:
     )
     PRIORITY_SQL = (
         "ROUND(CAST(35.0 * COALESCE(ds.ai_cite_idx, 0) "
-        "+ 35.0 * CASE WHEN COALESCE(ds.demand_idx, 0) > 1 THEN 1.0 "
-        "ELSE COALESCE(ds.demand_idx, 0) END "
+        "+ 35.0 * CASE WHEN COALESCE(ds.demand_idx, 0) >= 0.01 THEN 1.0 "
+        "ELSE COALESCE(ds.demand_idx, 0) / 0.01 END "
         f"+ 30.0 * {CPC_TIER_SQL} "
         "+ COALESCE(k.performance_boost, 0) AS NUMERIC), 1)"
     )

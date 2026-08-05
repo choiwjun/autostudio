@@ -275,8 +275,9 @@
       </select>
       <select id="click" onchange="resetAndLoad()" aria-label="쇼핑클릭 필터">
         <option value="">쇼핑클릭 전체</option>
-        <option value="0.5">클릭 0.5+ (앵커 대비)</option>
-        <option value="0.2">클릭 0.2+</option>
+        <!-- v12: v9 실측(앵커 대비 상대비율, 대부분 0) 기준 — 기존 0.5+/0.2+는 교집합 0건 -->
+        <option value="0.001">클릭 0.001+ (신호 있음)</option>
+        <option value="0.01">클릭 0.01+</option>
       </select>
       <select id="discovered" onchange="resetAndLoad()" aria-label="발견기간 필터">
         <option value="">발견기간 전체</option>
@@ -407,11 +408,13 @@ async function api(path, opts) {
   return r.json();
 }
 
-// v6 권장 배지: priority>=70 'AI유망' → opportunity>=60 '애포' → demand<0.01 '수요낮음' → '보류'
+// v6 권장 배지: priority>=70 'AI유망' → opportunity>=60 '애포' → demand<0.001 '수요낮음' → '보류'
+// v12: v9 demand 실측 스케일(앵커 대비 0~0.01) 기준으로 수요낮음 임계 0.01→0.001 하향.
+//      priority는 v12부터 demand를 0.01 기준 정규화해 0~100 복원 — AI유망(≥70) 도달 가능.
 function recommend(i) {
   if (i.priority !== null && i.priority >= 70) return { label: 'AI유망', cls: 'b-gold' };
   if (i.opportunity !== null && i.opportunity >= 60) return { label: '애포', cls: 'b-green' };
-  if (i.demand_idx !== null && i.demand_idx < 0.01) return { label: '수요낮음', cls: 'b-warn' };
+  if (i.demand_idx !== null && i.demand_idx < 0.001) return { label: '수요낮음', cls: 'b-warn' };
   return { label: '보류', cls: 'b-gray' };
 }
 
@@ -488,9 +491,9 @@ async function load() {
         + '<button class="btn btn-primary" onclick="collect()">지금 수집 실행</button></td></tr>';
   }
   data.items.forEach(i => {
-    const clickVal = i.shop_click_idx === null ? '-' : i.shop_click_idx.toFixed(2);
+    const clickVal = i.shop_click_idx === null ? '-' : i.shop_click_idx.toFixed(3);
     const clickTip = '쇼핑인사이트 클릭 추이 (앵커 대비)';
-    const demand = i.demand_idx === null ? '-' : i.demand_idx.toFixed(2);
+    const demand = i.demand_idx === null ? '-' : i.demand_idx.toFixed(3);
     const aiCite = i.ai_cite_idx === null ? '-' : i.ai_cite_idx.toFixed(2);
     const growth = i.growth === null ? '-'
       : `<span class="${i.growth > 0 ? 'rise' : i.growth < 0 ? 'fall' : ''}">${i.growth > 0 ? '▲ ' : i.growth < 0 ? '▼ ' : ''}${(i.growth * 100).toFixed(1)}%</span>`;
