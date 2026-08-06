@@ -29,6 +29,8 @@ jobs:
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # v17: 콘텐츠 배치(초안·이미지 생성)용 — 미등록 시 배치는 조용히 생략
+          BAILIAN_TOKEN_PLAN_API_KEY: ${{ secrets.BAILIAN_TOKEN_PLAN_API_KEY }}
       - name: Keep-alive (스케줄 60일 자동 비활성화 방지)
         if: github.event_name == 'schedule'
         run: |

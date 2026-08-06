@@ -522,3 +522,115 @@ def test_feedback_idempotent_boost(tmp_path, monkeypatch):
     # 중간 점수(30~69)는 보너스 없음 — 기존 boost 회수
     client.post(f"/drafts/{did}/feedback", json={"performance_score": 50})
     assert _priority_of(client, "에어프라이어") == base
+
+
+# ---------- v17: 게시 파이프라인·AdPost 피드백 자동화 ----------
+
+def test_published_url_set_and_validate(tmp_path, monkeypatch):
+    client = TestClient(make_app(tmp_path))
+    did = _create_draft(client, monkeypatch)
+    assert client.post(f"/drafts/{did}/published-url",
+                       json={"url": "not a url"}).status_code == 400
+    r = client.post(f"/drafts/{did}/published-url",
+                    json={"url": "https://blog.naver.com/a/1"})
+    assert r.status_code == 200
+    assert r.json()["published_url"] == "https://blog.naver.com/a/1"
+    assert client.post("/drafts/999/published-url",
+                       json={"url": "https://x.com"}).status_code == 404
+    prod = TestClient(make_app(tmp_path, env="production"))
+    assert prod.post("/drafts/1/published-url",
+                     json={"url": "https://x.com"}).status_code == 401
+
+
+def test_export_markdown_contains_images(tmp_path, monkeypatch):
+    import json as json_mod
+    client = TestClient(make_app(tmp_path))
+    did = _create_draft(client, monkeypatch)
+    import db as db_mod
+    d = db_mod.Database(f"sqlite:///{tmp_path / 't.db'}")
+    d.update_draft_image(did, "https://cdn.example.com/m.png", "")
+    d.update_draft_section_images(
+        did, json_mod.dumps(["https://cdn.example.com/s.png"]), "")
+    d.close()
+    r = client.get(f"/drafts/{did}/export")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/markdown")
+    assert f"blog-draft-{did}.md" in r.headers["content-disposition"]
+    text = r.content.decode("utf-8")
+    assert text.startswith("# 제목")
+    assert "![대표 이미지](https://cdn.example.com/m.png)" in text
+    assert "![섹션 이미지 1](https://cdn.example.com/s.png)" in text
+    assert client.get("/drafts/999/export").status_code == 404
+
+
+def test_adpost_import_matches_by_url_and_title(tmp_path, monkeypatch):
+    client = TestClient(make_app(tmp_path))
+    did = _create_draft(client, monkeypatch)
+    client.post(f"/drafts/{did}/published-url",
+                json={"url": "https://blog.naver.com/a/1"})
+    base = _priority_of(client, "에어프라이어")
+    csv = ("게시물 제목,URL,수익(원),노출수,클릭수\n"
+           "제목,https://blog.naver.com/a/1,3000,5000,100\n"
+           "매칭 실패 글,https://blog.naver.com/a/999,100,10,1\n").encode("utf-8-sig")
+    r = client.post("/adpost/import",
+                    files={"file": ("report.csv", csv, "text/csv")})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["matched"] == 1 and body["unmatched"] == 1
+    assert body["results"][0]["draft_id"] == did
+    assert body["results"][0]["performance_score"] == 100.0
+    # 만점 성과 → boost +10이 priority에 반영
+    assert _priority_of(client, "에어프라이어") == base + 10
+    # 초안에도 지표 저장
+    draft = client.get(f"/drafts/{did}").json()
+    assert draft["adpost_revenue"] == 3000.0
+    assert draft["performance_score"] == 100.0
+    # 제목 매칭 경로 (URL 미등록 초안)
+    did2 = _create_draft(client, monkeypatch)
+    csv2 = "게시물 제목,수익\n제목,100\n".encode("utf-8-sig")
+    body2 = client.post("/adpost/import",
+                        files={"file": ("r.csv", csv2, "text/csv")}).json()
+    assert body2["matched"] >= 1  # 동명 초안 중 최신에 매칭
+
+
+def test_adpost_import_rejects_bad_csv(tmp_path):
+    client = TestClient(make_app(tmp_path))
+    r = client.post("/adpost/import",
+                    files={"file": ("bad.csv", b"day,views\n", "text/csv")})
+    assert r.status_code == 400
+    prod = TestClient(make_app(tmp_path, env="production"))
+    assert prod.post("/adpost/import",
+                     files={"file": ("r.csv", b"x", "text/csv")}).status_code == 401
+
+
+def test_section_images_incremental(tmp_path, monkeypatch):
+    # v17 (버그 3): 기존 이미지 이후부터 증분 생성 + 즉시 저장
+    import json as json_mod
+    client = TestClient(make_app(tmp_path))
+    did = _create_draft(client, monkeypatch,
+                        body_md="## 섹션1\n본문\n\n## 섹션2\n본문")
+    import db as db_mod
+    import image_gen
+    d = db_mod.Database(f"sqlite:///{tmp_path / 't.db'}")
+    d.update_draft_section_images(
+        did, json_mod.dumps(["https://cdn.example.com/1.png"]), "")
+    d.close()
+    monkeypatch.setenv("BAILIAN_TOKEN_PLAN_API_KEY", "test-key")
+    calls = []
+
+    def fake_run(prompt):
+        calls.append(prompt)
+        return f"https://cdn.example.com/{len(calls) + 1}.png"
+
+    monkeypatch.setattr(image_gen, "_run_http",
+                        lambda prompt, timeout=55: fake_run(prompt))
+    r = client.post(f"/drafts/{did}/section-images")
+    assert r.status_code == 200
+    urls = json_mod.loads(r.json()["section_images"])
+    assert len(urls) == 2                      # 기존 1 + 신규 1 (증분)
+    assert urls[0] == "https://cdn.example.com/1.png"
+    assert len(calls) == 1                     # 누락분만 생성
+    # 전부 있으면 무호출
+    calls.clear()
+    client.post(f"/drafts/{did}/section-images")
+    assert calls == []

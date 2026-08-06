@@ -47,20 +47,23 @@ DEFAULT_CPC_TIERS = {
 }
 
 # v8: 무카테고리 키워드 자동 분류 — 시드 카테고리 상속 실패 시 패턴으로 분류.
-# 키워드에 포함된 단어 → 카테고리. 앞 항목 우선 (첫 매치 사용).
-# v14: 실측 무카테고리 유입(맛집·여행·반려동물 계열) 규칙 증분 — 새 규칙은
-# 오탐이 없는 고신뢰 토큰만 추가하고, 매치 실패는 FALLBACK_CATEGORY('기타')로 수렴.
+# 앞 항목 우선 (첫 매치 사용). 매치 실패는 FALLBACK_CATEGORY('기타')로 수렴.
+# v17: 매치 의미 재편 — 기본은 단어 단위 정확 매치 (공백 분리 토큰 완전 일치,
+# 대소문자 무시). 기존 부분문자열 매치는 오탐이 CPC 등급을 왜곡했다:
+#   '암사동 맛집'→의료("암"), '운동화 추천'→건강("운동"), 'isa 계좌'→기타(대문자 규칙 미매칭)
+# 복합어 안의 부분 매치가 꼭 필요한 토큰만 (토큰, 카테고리, "contains")로 명시.
+# 오탐(고CPC 오분류)이 미매칭(기타 0.5)보다 수익 손실이 크므로 정밀도 우선.
 DEFAULT_KEYWORD_CATEGORY_RULES = [
     ("에어프라이어", "요리"),
-    ("에어프라이", "요리"),
     ("레시피", "요리"),
     ("요리", "요리"),
     ("반찬", "요리"),
     ("김치", "요리"),
     ("다이어트", "건강"),
+    ("운동화", "패션"),  # '운동'보다 먼저 — 운동화는 패션 (오탐 차단)
     ("운동", "건강"),
-    ("보험", "보험"),
-    ("보험료", "보험"),
+    ("보험료", "보험"),  # '보험'(contains)보다 먼저 — 첫 매치 우선
+    ("보험", "보험", "contains"),  # 실비보험·암보험·자동차보험 등 복합어 매치
     ("대출", "금융"),
     ("적금", "금융"),
     ("예금", "금융"),
@@ -143,6 +146,12 @@ def load_config(load_env=True):
         "shopping_insight_category": os.getenv("SHOPPING_INSIGHT_CATEGORY", "50000000"),
         "env": env,  # v15: 소문자 정규화값
         "run_lock_stale_minutes": int(os.getenv("RUN_LOCK_STALE_MINUTES", "60")),
+        # v17: 콘텐츠 배치 — 스케줄 수집(GH Actions)에서 초안·이미지 생성.
+        # Vercel 60초 한도 밖이라 섹션 이미지 8장 순차 생성이 안전하게 끝남.
+        "content_batch_enabled": os.getenv("CONTENT_BATCH_ENABLED", "1") == "1",
+        "content_batch_max_new": int(os.getenv("CONTENT_BATCH_MAX_NEW", "2")),
+        "content_batch_budget_seconds": int(
+            os.getenv("CONTENT_BATCH_BUDGET_SECONDS", "2400")),
         # v6: 시드 비어 있을 때 자동 초기화용 집중 시드 + 애드포스트 CPC 등급
         # v8: 무카테고리 키워드 자동 분류 규칙 (시드 상속 실패 시 폴백)
         "default_focus_seeds": DEFAULT_FOCUS_SEEDS,

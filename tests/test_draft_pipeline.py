@@ -148,7 +148,7 @@ def test_pass2_expand_uses_runner():
         return '{"title": "제목", "first_paragraph": "즉답", "body": "## H2\\n내용\\n\\n## 자주 묻는 질문\\n### 질문\\n답변"}'
 
     h2s = [{"title": "H2", "bullets": ["내용"]}]
-    draft = pass2_expand("키워드", h2s, "info", False, runner=fake_run)
+    draft = pass2_expand("키워드", h2s, "info", [], [], runner=fake_run)
     assert draft["title"] == "제목"
     assert "자주 묻는 질문" in draft["body"]
 
@@ -234,7 +234,7 @@ def test_prompts_include_publication_date_and_temporal_rules():
     pass1_outline("여름 휴가 추천", {"questions": ["언제가 좋을까요?"]},
                   runner=fake_run, current_date=current_date)
     pass2_expand("여름 휴가 추천", [{"title": "여행 시기", "bullets": ["현재 시즌"]}],
-                 "info", False, runner=fake_run, current_date=current_date)
+                 "info", [], [], runner=fake_run, current_date=current_date)
     assert all("2026-08-06" in prompt for prompt in captured)
     assert all("과거 월·계절" in prompt for prompt in captured)
 
@@ -273,12 +273,89 @@ def test_unavailable_evidence_forbids_invented_numbers():
         return '{"title":"제목","first_paragraph":"첫문단","body":"본문"}'
 
     pass2_expand("최신 정보", [{"title": "기준", "bullets": ["내용"]}],
-                 "info", False, runner=fake_run,
+                 "info", [], [], runner=fake_run,
                  current_date=date(2026, 8, 6),
                  search_evidence={"status": "unavailable", "items": []})
     assert "최신 검색 근거가 없으므로" in captured["prompt"]
     assert "검증된 수치 근거(verified_facts)가 없으므로" in captured["prompt"]
     assert "검색 스니펫의 숫자를 검증된 사실처럼" in captured["prompt"]
+
+
+def test_outline_facts_are_injected_into_prompts():
+    # v17 (버그 5·고도화 2): outline facts·comparisons가 2패스 프롬프트에 주입 —
+    # 기존은 사어 키(verified_facts)를 보느라 항상 '수치 금지' 경로였음
+    captured = []
+
+    def fake_run(prompt, timeout=120):
+        captured.append(prompt)
+        if "H2 골격을 설계" in prompt:
+            return '{"h2s":[{"title":"기준","bullets":["b"]}]}'
+        return '{"title":"제목","first_paragraph":"첫문단","body":"본문"}'
+
+    structure = {"questions": [], "facts": ["평균 3.5만원 수준"],
+                 "comparisons": ["A와 B 차이"], "headings": []}
+    pass1_outline("보험 비교", structure, runner=fake_run,
+                  current_date=date(2026, 8, 6))
+    pass2_expand("보험 비교", [{"title": "기준", "bullets": ["내용"]}],
+                 "info", ["평균 3.5만원 수준"], ["A와 B 차이"],
+                 runner=fake_run, current_date=date(2026, 8, 6))
+    assert "참고 근거" in captured[0]
+    assert "평균 3.5만원 수준" in captured[0]
+    assert "상위글 참고 수치" in captured[1]
+    assert "수치: 평균 3.5만원 수준" in captured[1]
+    assert "비교: A와 B 차이" in captured[1]
+    assert "완화 표현" in captured[1]  # 검증 전 수치라 단정 금지 지시
+
+
+def test_generate_two_pass_injects_saved_facts(monkeypatch):
+    # generate_two_pass가 structure에서 facts를 읽어 pass2까지 전달하는 종단 확인
+    import json as json_mod
+    prompts = []
+
+    def fake_runner(prompt, timeout=90):
+        prompts.append(prompt)
+        if "골격을 확장" not in prompt:
+            return _PASS1_JSON
+        return json_mod.dumps({
+            "title": "제목", "first_paragraph": "즉답입니다 30자 넘게 작성합니다",
+            "body": _good_body("키워드")}, ensure_ascii=False)
+
+    structure = json_mod.dumps({"questions": [], "facts": ["연 4.5% 금리"],
+                                "comparisons": [], "headings": []},
+                               ensure_ascii=False)
+    generate_two_pass("키워드", structure, runner=fake_runner)
+    pass2_prompt = [p for p in prompts if "골격을 확장" in p][0]
+    assert "연 4.5% 금리" in pass2_prompt
+
+
+def test_hard_budget_clamps_call_timeouts(monkeypatch):
+    # v17 (버그 4): 하드 예산이 1회차부터 LLM 타임아웃을 클램프 — runner가 받은
+    # timeout이 하드 상한을 넘지 않아야 함 (기존은 90/120초 무제한)
+    import draft_pipeline as dp_mod
+    received = []
+
+    def fake_runner(prompt, timeout=90):
+        received.append(timeout)
+        if "골격을 확장" not in prompt:
+            return _PASS1_JSON
+        return ('{"title": "제목", "first_paragraph": "즉답입니다 30자 넘게 작성합니다", '
+                '"body": "짧아서 검수 미달"}')
+
+    generate_two_pass("키워드", {}, runner=fake_runner, retry_budget_seconds=0,
+                      hard_budget_seconds=40)
+    assert received[0] <= 40  # pass1 90초 기본이 예산으로 클램프됨
+    assert all(t <= 40 for t in received)
+    assert all(t >= dp_mod.MIN_CALL_TIMEOUT for t in received)
+
+
+def test_hard_budget_exhausted_raises(monkeypatch):
+    # 예산이 첫 호출 최소치 미만이면 명확한 생성 오류 (None 반환 방치 금지)
+    from draft_pipeline import HARD_BUDGET_SECONDS  # noqa: F401
+    with pytest.raises(DraftGenerationError) as e:
+        generate_two_pass("키워드", {},
+                          runner=lambda p, timeout=90: _PASS1_JSON,
+                          hard_budget_seconds=0)
+    assert "예산" in str(e.value)
 
 
 def test_density_bounds_are_sane():

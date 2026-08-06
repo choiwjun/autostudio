@@ -212,16 +212,30 @@ def test_start_run_atomic_blocks_duplicate(tmp_path):
     assert [r["status"] for r in rows] == ["running"]
 
 
-def test_retire_protects_null_scores(tmp_path):
-    # v3/v4: 쇼핑 클릭 미조회(분야 미매칭) 키워드는 0점 취급 금지 — 은퇴 보호
+def test_retire_clickless_by_opportunity_alone(tmp_path):
+    # v17 (버그 1): 클릭 데이터가 한 번도 수집되지 않은 키워드(상위 200 슬롯 밖·
+    # 분야 미매칭)는 기회점수 단독 판정으로 은퇴 — 기존 EXISTS(클릭 비NULL)는
+    # 이들을 영구 보호해 500 상한 도달 시 발견이 영구 정지했음
     d = make_db(tmp_path)
-    d.upsert_keyword("쇼핑클릭미조회", day="2026-07-01")
-    bad = d.upsert_keyword("확실히저조", day="2026-07-01")
-    d.insert_daily_stats(d.upsert_keyword("쇼핑클릭미조회", day="2026-07-01"),
-                         "2026-08-01", {"opportunity": 10.0, "shop_click_idx": None})
-    d.insert_daily_stats(bad, "2026-08-01", {"opportunity": 10.0, "shop_click_idx": 0.1})
+    clickless = d.upsert_keyword("클릭미수집", day="2026-07-01")
+    d.insert_daily_stats(clickless, "2026-08-01",
+                         {"opportunity": 10.0, "shop_click_idx": None})
     victims = d.find_retire_candidates("2026-07-20", "2026-07-27", 35.0, 0.5)
-    assert [v["keyword"] for v in victims] == ["확실히저조"]
+    assert [v["keyword"] for v in victims] == ["클릭미수집"]
+    assert victims[0]["clickless"] == 1  # 은퇴 로그 구분용 플래그
+
+
+def test_retire_protects_recent_null_with_click_history(tmp_path):
+    # v17: 과거 클릭 이력이 있는데 최근 NULL = 수집 공백 의심 → 보호 (§4.6 유지).
+    # '수집 실패'와 '구조적 미수집'은 이력 유무로 구분된다.
+    d = make_db(tmp_path)
+    gap = d.upsert_keyword("수집공백의심", day="2026-07-01")
+    d.insert_daily_stats(gap, "2026-07-28",
+                         {"opportunity": 10.0, "shop_click_idx": 0.1})
+    d.insert_daily_stats(gap, "2026-08-01",
+                         {"opportunity": 10.0, "shop_click_idx": None})
+    victims = d.find_retire_candidates("2026-07-20", "2026-07-27", 35.0, 0.5)
+    assert victims == []
 
 
 def test_retire_protects_performance_boost(tmp_path):
@@ -493,3 +507,86 @@ def test_query_growth_min_filter(tmp_path):
     assert [r["keyword"] for r in d.query_keywords(growth_min=0.1)] == ["상승"]
     assert d.count_keywords(growth_min=0.1) == 1
     assert d.count_keywords() == 3
+
+
+# ---------- v17: 데이터랩 슬롯 순환 (고도화 5) ----------
+
+def test_datalab_targets_priority_plus_rotation(tmp_path):
+    # 상위 고정 슬롯 + 순환 슬롯(수요 갱신 오래된 순) — 전체 커버리지 확보
+    d = make_db(tmp_path)
+    a = d.upsert_keyword("기회최상", day="2026-08-01")
+    b = d.upsert_keyword("기회중간", day="2026-08-01")
+    c = d.upsert_keyword("수요오래됨", day="2026-08-01")
+    e = d.upsert_keyword("수요미갱신", day="2026-08-01")
+    d.insert_daily_stats(a, "2026-08-02", {"opportunity": 90.0})
+    d.insert_daily_stats(b, "2026-08-02", {"opportunity": 80.0})
+    d.insert_daily_stats(c, "2026-08-02", {"opportunity": 10.0, "demand_idx": 0.001})
+    d.insert_daily_stats(e, "2026-08-02", {"opportunity": 5.0})
+    # c는 08-01에 수요 갱신 이력 추가 → e(미갱신·NULL)가 순환 우선
+    d.update_demand_idx(c, "2026-08-01", 0.001)
+    targets = d.datalab_targets("2026-08-02", priority_n=2, rotate_n=2)
+    assert [t["keyword"] for t in targets] == ["기회최상", "기회중간", "수요미갱신", "수요오래됨"]
+
+
+def test_datalab_targets_excludes_unsnapshotted_and_inactive(tmp_path):
+    d = make_db(tmp_path)
+    a = d.upsert_keyword("활성스냅샷", day="2026-08-01")
+    b = d.upsert_keyword("비활성", day="2026-08-01")
+    c = d.upsert_keyword("오늘미스냅샷", day="2026-08-01")
+    d.insert_daily_stats(a, "2026-08-02", {"opportunity": 90.0})
+    d.insert_daily_stats(b, "2026-08-02", {"opportunity": 80.0})
+    d.insert_daily_stats(c, "2026-08-01", {"opportunity": 70.0})  # 어제만
+    d.set_active(b, 0)
+    targets = d.datalab_targets("2026-08-02", priority_n=5, rotate_n=5)
+    assert [t["keyword"] for t in targets] == ["활성스냅샷"]
+
+
+# ---------- v17: 콘텐츠 배치·AdPost용 초안 조회 ----------
+
+def test_list_drafts_missing_images(tmp_path):
+    import json as json_mod
+    d = make_db(tmp_path)
+    kid = d.upsert_keyword("키워드", day="2026-08-01")
+    d1 = d.insert_draft(kid, "t1", "fp", "## 섹션\n본문", created_at="n")
+    d2 = d.insert_draft(kid, "t2", "fp", "## 섹션\n본문",
+                        image_url="https://x", created_at="n")
+    d.update_draft_section_images(  # 전부 있음 — 대상 아님
+        d2, json_mod.dumps(["https://x/s.png"]), "n")
+    d3 = d.insert_draft(kid, "t3", "fp", "## 섹션\n본문",
+                        image_url="https://x", created_at="n")  # 섹션만 누락
+    d4 = d.insert_draft(kid, "t4", "fp", "H2 없는 본문", created_at="n")  # 대표만 필요
+    rows = d.list_drafts_missing_images(10)
+    assert [r["id"] for r in rows] == [d1, d3, d4]
+
+
+def test_keywords_without_drafts_priority_order(tmp_path):
+    d = make_db(tmp_path)
+    low = d.upsert_keyword("저순위", category="일상", day="2026-08-01")
+    high = d.upsert_keyword("고순위", category="보험", day="2026-08-01")
+    has_draft = d.upsert_keyword("초안있음", category="보험", day="2026-08-01")
+    for kid, opp in ((low, 5.0), (high, 5.0), (has_draft, 5.0)):
+        d.insert_daily_stats(kid, "2026-08-02",
+                             {"opportunity": opp, "ai_cite_idx": 0.5,
+                              "demand_idx": 0.005})
+    d.insert_draft(has_draft, "t", "fp", "본문", created_at="n")
+    rows = d.keywords_without_drafts(10)
+    assert [r["keyword"] for r in rows] == ["고순위", "저순위"]  # CPC 등급 순
+
+
+def test_record_adpost_metrics_updates_score_and_boost(tmp_path):
+    d = make_db(tmp_path)
+    kid = d.upsert_keyword("키워드", day="2026-08-01")
+    did = d.insert_draft(kid, "t", "fp", "본문", created_at="n")
+    d.record_adpost_metrics(did, kid, 1500.0, 2500, 50, 62.5,
+                            "2026-08-05T00:00:00+09:00", "2026-08-06T00:00:00+09:00", 0)
+    draft = d.get_draft(did)
+    assert draft["adpost_revenue"] == 1500.0
+    assert draft["adpost_impressions"] == 2500
+    assert draft["performance_score"] == 62.5
+    assert draft["published_at"] == "2026-08-05T00:00:00+09:00"  # 미게시면 기록
+    # 재기록 시 기존 published_at 유지
+    d.record_adpost_metrics(did, kid, 3000.0, 5000, 100, 100.0,
+                            "2026-08-06T00:00:00+09:00", "2026-08-06T00:00:00+09:00", 10)
+    draft = d.get_draft(did)
+    assert draft["published_at"] == "2026-08-05T00:00:00+09:00"
+    assert d.get_keyword(kid)["performance_boost"] == 10.0

@@ -4,6 +4,8 @@
 # API 키 미설정 시 ImageGenerationError(명확한 안내)를 던져 텍스트 흐름은 유지한다.
 # v15: 키 해석·HTTP·오류 정규화는 llm_client 공용 레이어 사용. timeout/title은
 # 실제로 반영되도록 연결 (기존은 선언만 되고 무시되는 사어 인자였음).
+import time
+
 import llm_client
 
 IMAGE_MODEL = "wan2.7-image"
@@ -36,25 +38,42 @@ def generate_image(keyword, title, prompt=None, runner=None, timeout=IMAGE_TIMEO
     return run(image_prompt)
 
 
-def generate_section_images(keyword, title, sections, runner=None, timeout=IMAGE_TIMEOUT):
-    """v10 [5]: 섹션별 이미지 5~8장 생성 — 본문 H2 소제목별 삽화 (체류·스크롤 증가).
+def section_image_prompt(keyword, title, section):
+    sec_text = str(section)[:60]
+    return (
+        f"네이버 블로그 본문 삽화. 주제: {keyword}. 글 제목: {title}. "
+        f"현재 섹션의 핵심 장면: {sec_text}. "
+        f"현실적인 사진 촬영 스타일. {_SINGLE_SCENE_RULES}"
+    )
 
-    sections: 본문에서 추출한 H2 소제목 리스트. 각 섹션 주제에 맞는 이미지를 생성해
-    URL 리스트로 반환한다. 실패 시 해당 섹션은 건너뛴다 (텍스트 흐름 유지).
-    """
+
+# v17: 이보다 잔여 예산이 짧으면 이미지 생성 시작 금지 — 도중에 서버리스 한도에
+# 걸려 죽으면 API 비용만 쓰고 저장은 못 한다 (버그 3).
+MIN_SECTION_IMAGE_TIMEOUT = 15
+
+
+def generate_section_images(keyword, title, sections, runner=None, timeout=IMAGE_TIMEOUT,
+                            start_index=0, budget_seconds=None):
+    """v10 [5]: 섹션별 이미지 최대 8장 생성 — 본문 H2 소제목별 삽화 (체류·스크롤 증가).
+
+    sections: 본문에서 추출한 H2 소제목 리스트. 실패한 섹션은 건너뛴다.
+    v17 증분 생성: start_index부터 생성하고 budget_seconds 초과 시 중단 —
+    호출 측이 반환분(부분 성공)을 즉시 저장하면 서버리스 중도 종료에도 비용
+    손실이 없다. 반환: 이번에 생성된 URL 리스트 (부분 성공 가능)."""
     if not llm_client.has_api_key():
         raise ImageGenerationError("이미지 키가 필요합니다 (BAILIAN_TOKEN_PLAN_API_KEY)")
-    run = runner or (lambda p: _run_http(p, timeout=timeout))
     urls = []
-    for sec in sections[:8]:
-        sec_text = str(sec)[:60]
-        prompt = (
-            f"네이버 블로그 본문 삽화. 주제: {keyword}. 글 제목: {title}. "
-            f"현재 섹션의 핵심 장면: {sec_text}. "
-            f"현실적인 사진 촬영 스타일. {_SINGLE_SCENE_RULES}"
-        )
+    started = time.monotonic()
+    for sec in sections[start_index:8]:
+        call_timeout = timeout
+        if budget_seconds is not None:
+            remaining = budget_seconds - (time.monotonic() - started)
+            if remaining < MIN_SECTION_IMAGE_TIMEOUT:
+                break
+            call_timeout = min(timeout, remaining)
+        run = runner or (lambda p, t=call_timeout: _run_http(p, timeout=t))
         try:
-            urls.append(run(prompt))
+            urls.append(run(section_image_prompt(keyword, title, sec)))
         except ImageGenerationError:
             continue
     return urls

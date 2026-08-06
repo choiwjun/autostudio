@@ -95,7 +95,11 @@ CREATE TABLE IF NOT EXISTS drafts (
     updated_at TEXT NOT NULL DEFAULT '',
     published_at TEXT NOT NULL DEFAULT '',
     performance_score REAL,
-    performance_note TEXT NOT NULL DEFAULT ''
+    performance_note TEXT NOT NULL DEFAULT '',
+    published_url TEXT NOT NULL DEFAULT '',
+    adpost_revenue REAL,
+    adpost_impressions INTEGER,
+    adpost_clicks INTEGER
 );
 """,
     "postgres": """
@@ -182,7 +186,11 @@ CREATE TABLE IF NOT EXISTS drafts (
     updated_at TEXT NOT NULL DEFAULT '',
     published_at TEXT NOT NULL DEFAULT '',
     performance_score DOUBLE PRECISION,
-    performance_note TEXT NOT NULL DEFAULT ''
+    performance_note TEXT NOT NULL DEFAULT '',
+    published_url TEXT NOT NULL DEFAULT '',
+    adpost_revenue DOUBLE PRECISION,
+    adpost_impressions INTEGER,
+    adpost_clicks INTEGER
 );
 """,
 }
@@ -349,6 +357,12 @@ LEFT JOIN daily_stats ds
          "TEXT NOT NULL DEFAULT ''"),
         ("keywords", "performance_boost", "REAL NOT NULL DEFAULT 0",
          "DOUBLE PRECISION NOT NULL DEFAULT 0"),
+        # v17: 게시 파이프라인·AdPost 피드백 — 게시 URL 매칭 + 수익 지표 원본 저장
+        ("drafts", "published_url", "TEXT NOT NULL DEFAULT ''",
+         "TEXT NOT NULL DEFAULT ''"),
+        ("drafts", "adpost_revenue", "REAL", "DOUBLE PRECISION"),
+        ("drafts", "adpost_impressions", "INTEGER", "INTEGER"),
+        ("drafts", "adpost_clicks", "INTEGER", "INTEGER"),
     )
 
     def _migrate(self):
@@ -543,6 +557,35 @@ WHERE ds.day = ? AND ds.opportunity IS NOT NULL AND k.active = 1
 ORDER BY ds.opportunity DESC LIMIT ?"""
         return self._qd(sql, (day, limit), fetch=True)
 
+    def datalab_targets(self, day, priority_n, rotate_n):
+        """v17: 데이터랩(수요·쇼핑클릭) 갱신 대상 — 고정 슬롯 + 순환 슬롯.
+        기존은 기회점수 상위 200개만 갱신해 슬롯 밖 키워드는 수요·클릭 신호가
+        영구 NULL(우선순위 왜곡 + 은퇴 판정 사각지대). 이제 상위 priority_n은
+        매일 고정 갱신하고, 나머지 rotate_n은 수요 갱신이 가장 오래된 키워드부터
+        채워 활성 전체가 며칠 주기로 골고루 갱신된다 (주간 캐시 효과 자동 발생).
+        반환: [{'id','keyword'}] — 고정 슬롯 우선, 순환 슬롯은 중복 제외."""
+        priority_rows = self.top_by_opportunity(day, priority_n)
+        if rotate_n <= 0:
+            return priority_rows
+        seen = {r["id"] for r in priority_rows}
+        # NULLS FIRST를 CASE로 표현 (SQLite/Postgres 공통)
+        sql = """
+SELECT k.id, k.keyword FROM keywords k
+WHERE k.active = 1
+  AND EXISTS (SELECT 1 FROM daily_stats ds
+              WHERE ds.keyword_id = k.id AND ds.day = ?)
+ORDER BY CASE WHEN (SELECT MAX(day) FROM daily_stats d2
+                    WHERE d2.keyword_id = k.id
+                      AND d2.demand_idx IS NOT NULL) IS NULL
+              THEN 0 ELSE 1 END,
+         (SELECT MAX(day) FROM daily_stats d2
+          WHERE d2.keyword_id = k.id AND d2.demand_idx IS NOT NULL) ASC,
+         k.id
+LIMIT ?"""
+        rows = self._qd(sql, (day, rotate_n + len(seen)), fetch=True)
+        rotate_rows = [r for r in rows if r["id"] not in seen][:rotate_n]
+        return priority_rows + rotate_rows
+
     # ---------- 상위글 발행일 ----------
 
     def insert_top_results(self, keyword_id, day, post_dates):
@@ -652,22 +695,36 @@ ORDER BY ds.opportunity DESC LIMIT ?"""
     def find_retire_candidates(self, first_seen_before, since_day, opp_lt, click_lt):
         """발견 오래됨 + 최근 스냅샷 존재 + 최근 성과 전부 저조 → 은퇴 후보.
         v4: 쇼핑 검색 API 종료로 상업성은 항상 NULL이므로 은퇴는 기회점수 + 쇼핑 클릭 지수로 판정.
-        최근 7일 창의 스냅샷 중 하나라도 기회/쇼핑 클릭 점수가 NULL이면 보호한다
-        (미조회·분야 미매칭 키워드를 0점 취급해 오은퇴시키지 않음 — 스펙 §4.6).
+        최근 7일 창의 스냅샷 중 하나라도 기회점수가 NULL이면 보호한다
+        (미조회 키워드를 0점 취급해 오은퇴시키지 않음 — 스펙 §4.6).
         NULL은 수집 실패일 수 있으므로 '저성과' 판정의 근거가 될 수 없다.
         v11: 게시 성과 피드백 보너스(performance_boost ≥ 10) 키워드는 은퇴 보호 —
-        실제로 유입·체류 성과가 확인된 키워드는 지표가 일시적으로 낮아도 유지."""
-        sql = """
-SELECT k.id, k.keyword FROM keywords k
+        실제로 유입·체류 성과가 확인된 키워드는 지표가 일시적으로 낮아도 유지.
+        v17: 쇼핑클릭 사각지대 수정 — 클릭 데이터는 상위 200 슬롯만 수집되므로
+        슬롯 밖·분야 미매칭 키워드는 클릭 이력이 영영 생기지 않는다. 기존 EXISTS는
+        클릭 비NULL을 요구해 이런 키워드가 기회점수와 무관하게 영구 은퇴 불가 →
+        500 상한 도달 시 BFS 발굴이 영구 정지했음. 이제 클릭 이력 유무로 구분:
+        - 클릭 이력 있음: 기회+클릭 둘 다 저조해야 은퇴. 최근 클릭 NULL은 수집
+          공백 의심이라 보호 (§4.6 유지)
+        - 클릭 이력 없음(구조적 부재): 기회점수 단독 판정 (부재는 수집 실패가 아님)
+        clickless 열은 은퇴 사유 로그 구분용 (collect.retire가 참조)."""
+        has_clicks = ("EXISTS (SELECT 1 FROM daily_stats h "
+                      "WHERE h.keyword_id = k.id AND h.shop_click_idx IS NOT NULL)")
+        sql = f"""
+SELECT k.id, k.keyword,
+       CASE WHEN NOT {has_clicks} THEN 1 ELSE 0 END AS clickless
+FROM keywords k
 WHERE k.active = 1 AND k.first_seen <= ?
   AND COALESCE(k.performance_boost, 0) < 10
   AND EXISTS (
     SELECT 1 FROM daily_stats ds WHERE ds.keyword_id = k.id AND ds.day >= ?
-      AND ds.opportunity IS NOT NULL AND ds.shop_click_idx IS NOT NULL)
+      AND ds.opportunity IS NOT NULL
+      AND (ds.shop_click_idx IS NOT NULL OR NOT {has_clicks}))
   AND NOT EXISTS (
     SELECT 1 FROM daily_stats ds WHERE ds.keyword_id = k.id AND ds.day >= ?
-      AND (ds.opportunity IS NULL OR ds.shop_click_idx IS NULL
-           OR ds.opportunity >= ? OR ds.shop_click_idx >= ?))
+      AND (ds.opportunity IS NULL OR ds.opportunity >= ?
+           OR ds.shop_click_idx >= ?
+           OR (ds.shop_click_idx IS NULL AND {has_clicks})))
 ORDER BY k.id"""
         return self._qd(sql, (first_seen_before, since_day, since_day, opp_lt, click_lt), fetch=True)
 
@@ -888,6 +945,105 @@ LIMIT ? OFFSET ?"""
             "SELECT * FROM drafts WHERE keyword_id = ? ORDER BY id DESC",
             (keyword_id,), fetch=True,
         )
+
+    # ---------- v17: 콘텐츠 배치 (컬렉트 잡 초안·이미지 생성) ----------
+
+    def list_drafts_missing_images(self, limit):
+        """대표 또는 섹션 이미지가 비어 있는 초안 (생성 순서대로).
+        섹션 이미지는 본문에 H2가 있어야 생성 가능 — 조건에서 같이 거른다."""
+        if self.dialect == "postgres":
+            sql = """
+SELECT * FROM drafts
+WHERE image_url = ''
+   OR (section_images = ''
+       AND (body LIKE '## %' OR body LIKE E'%\\n## %'))
+ORDER BY id LIMIT %s"""
+        else:
+            sql = """
+SELECT * FROM drafts
+WHERE image_url = ''
+   OR (section_images = ''
+       AND (body LIKE '## %' OR body LIKE '%' || char(10) || '## %'))
+ORDER BY id LIMIT ?"""
+        return self._qd(sql, (limit,), fetch=True)
+
+    def keywords_without_drafts(self, limit):
+        """초안이 없는 활성 키워드를 우선순위 순으로 — 콘텐츠 배치 신규 대상.
+        스냅샷 없는 키워드는 priority 산출이 불가하므로 뒤로 밀어낸다."""
+        sql = f"""
+SELECT k.id, k.keyword, {self.PRIORITY_SQL} AS priority
+{self._KEYWORD_BASE}
+WHERE k.active = 1
+  AND NOT EXISTS (SELECT 1 FROM drafts dr WHERE dr.keyword_id = k.id)
+ORDER BY CASE WHEN ds.day IS NULL THEN 1 ELSE 0 END, priority DESC, k.id
+LIMIT ?"""
+        return self._qd(sql, (limit,), fetch=True)
+
+    # ---------- v17: 게시·AdPost 피드백 ----------
+
+    def set_draft_published_url(self, draft_id, url, updated_at=""):
+        self._qd(
+            "UPDATE drafts SET published_url = ?, updated_at = ? WHERE id = ?",
+            (url, updated_at, draft_id),
+        )
+
+    def find_draft_by_published_url(self, url):
+        rows = self._qd(
+            "SELECT * FROM drafts WHERE published_url = ? ORDER BY id DESC LIMIT 1",
+            (url,), fetch=True,
+        )
+        return rows[0] if rows else None
+
+    def find_draft_by_title(self, title):
+        rows = self._qd(
+            "SELECT * FROM drafts WHERE title = ? ORDER BY id DESC LIMIT 1",
+            (title,), fetch=True,
+        )
+        return rows[0] if rows else None
+
+    def record_adpost_metrics(self, draft_id, keyword_id, revenue, impressions,
+                              clicks, score, published_at, updated_at, boost_delta):
+        """v17: AdPost 리포트 지표 저장 + 성과 점수·키워드 boost 반영 (단일 커밋).
+        record_draft_feedback와 동일한 트랜잭션 패턴 — 중간 실패 후 재시도의
+        차액 유실 차단. 미게시 상태였으면 published_at을 함께 기록."""
+        for attempt in (0, 1):
+            try:
+                if self.dialect == "postgres":
+                    with self.conn.cursor() as cur:
+                        cur.execute(
+                            "UPDATE drafts SET adpost_revenue = %s, adpost_impressions = %s, "
+                            "adpost_clicks = %s, performance_score = %s, "
+                            "published_at = CASE WHEN published_at = '' THEN %s "
+                            "ELSE published_at END, updated_at = %s WHERE id = %s",
+                            (revenue, impressions, clicks, score,
+                             published_at, updated_at, draft_id),
+                        )
+                        cur.execute(
+                            "UPDATE keywords SET performance_boost = "
+                            + self.BOOST_CLAMP_SQL["postgres"] + " WHERE id = %s",
+                            (boost_delta, keyword_id),
+                        )
+                        self.conn.commit()
+                else:
+                    self.conn.execute(
+                        "UPDATE drafts SET adpost_revenue = ?, adpost_impressions = ?, "
+                        "adpost_clicks = ?, performance_score = ?, "
+                        "published_at = CASE WHEN published_at = '' THEN ? "
+                        "ELSE published_at END, updated_at = ? WHERE id = ?",
+                        (revenue, impressions, clicks, score,
+                         published_at, updated_at, draft_id),
+                    )
+                    self.conn.execute(
+                        "UPDATE keywords SET performance_boost = "
+                        + self.BOOST_CLAMP_SQL["sqlite"] + " WHERE id = ?",
+                        (boost_delta, keyword_id),
+                    )
+                    self.conn.commit()
+                return
+            except CONNECTION_ERRORS:
+                if attempt == 1:
+                    raise
+                self._connect()
 
     def close(self):
         if self.conn:

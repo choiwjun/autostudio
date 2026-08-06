@@ -24,6 +24,7 @@ def make_cfg(tmp_path):
         "shopping_insight_category": "50000000",  # v4
         "default_focus_seeds": [], "cpc_tiers": {},  # v6: 시드 자동 초기화 비활성(기존 테스트 보존)
         "keyword_category_rules": [("에어프라이어", "요리"), ("보험", "보험")],  # v8
+        "content_batch_enabled": False,  # v17: 단위 테스트는 콘텐츠 배치 생략
     }
 
 
@@ -244,6 +245,83 @@ def test_categorize_by_rules_first_match_wins():
     # v8: 규칙은 앞 항목 우선 (첫 매치)
     assert collect._categorize_by_rules("보험 에어프라이어", [("보험", "보험"), ("에어프라이어", "요리")]) == "보험"
     assert collect._categorize_by_rules("매치 없음", []) == ""
+
+
+def test_categorize_rules_v17_precision(monkeypatch):
+    # v17 (버그 2): 부분문자열·대소문자 오탐 수정 — 정밀도 우선
+    import config as config_mod
+    rules = config_mod.DEFAULT_KEYWORD_CATEGORY_RULES
+    # 대소문자 무시 — 소문자 키워드가 대문자 규칙에 매치
+    assert collect._categorize_by_rules("isa 계좌 조건", rules) == "재테크"
+    assert collect._categorize_by_rules("ai 활용 방법", rules) == "IT"
+    # 부분문자열 오탐 차단
+    assert collect._categorize_by_rules("암사동 맛집", rules) == "맛집"  # '암' 아님
+    assert collect._categorize_by_rules("운동화 추천", rules) == "패션"  # '운동' 아님
+    # 복합어는 contains 명시 규칙만 허용 (실비보험 → 보험)
+    assert collect._categorize_by_rules("실비보험 추천", rules) == "보험"
+    assert collect._categorize_by_rules("보험료 계산", rules) == "보험"  # 보험료 우선 매치
+    # 단어 단위 매치 유지
+    assert collect._categorize_by_rules("다이어트 식단", rules) == "건강"
+    assert collect._categorize_by_rules("무관한 키워드", rules) == ""
+
+
+def test_discover_exception_labels_error_not_blocked(tmp_path, monkeypatch):
+    # v17 (버그 6): 예상치 못한 예외는 'error' — 'blocked'(연속 차단)과 구분
+    cfg = make_cfg(tmp_path)
+    d = db.Database(cfg["db_url"])
+    d.init()
+    d.add_seed("시드", "요리")
+
+    def boom(*a, **k):
+        raise RuntimeError("예상 못 한 예외")
+
+    monkeypatch.setattr(collect, "expand_keywords", boom)
+    result = run_collection(cfg, client=FakeClient(), today="2026-08-01")
+    assert result["crawl_stopped"] == "error"
+    assert d.get_last_runs(1)[0]["status"] == "partial"
+    d.close()
+
+
+def test_datalab_stages_survive_missing_started(tmp_path, monkeypatch):
+    # v17 (버그 6): started=None이어도 TypeError 없이 예산 검사 생략
+    cfg = make_cfg(tmp_path)
+    cfg["datalab_enabled"] = True
+    d = db.Database(cfg["db_url"])
+    d.init()
+    kid = d.upsert_keyword("키워드1", day="2026-07-31")
+    d.insert_daily_stats(kid, "2026-08-01", {"opportunity": 10.0})
+    monkeypatch.setattr(collect, "fetch_demand_ratios",
+                        lambda *a, **k: {"키워드1": {"ratio": 0.01, "growth": 0.0}})
+    assert collect.update_demand(d, cfg, "2026-08-01", "now",
+                                 budget_seconds=10, started=None) == 1
+    monkeypatch.setattr(collect, "fetch_click_ratios",
+                        lambda *a, **k: {"키워드1": None})  # 분야 미매칭
+    assert collect.update_shop_clicks(d, cfg, "2026-08-01", "now",
+                                      budget_seconds=10, started=None) == 0
+    assert d.get_latest_stats(kid)["shop_click_idx"] is None  # NULL 유지
+    d.close()
+
+
+def test_datalab_rotation_covers_beyond_top_slot(tmp_path, monkeypatch):
+    # v17 (고도화 5): 상위 고정 + 순환 슬롯 — 상위 100 밖 키워드도 갱신됨
+    cfg = make_cfg(tmp_path)
+    cfg["datalab_enabled"] = True
+    d = db.Database(cfg["db_url"])
+    d.init()
+    monkeypatch.setattr(collect, "DATALAB_PRIORITY_N", 1)
+    monkeypatch.setattr(collect, "DATALAB_ROTATE_N", 2)
+    for i, opp in enumerate((50.0, 30.0, 10.0)):
+        kid = d.upsert_keyword(f"키워드{i}", day="2026-07-31")
+        d.insert_daily_stats(kid, "2026-08-01", {"opportunity": opp})
+    seen = []
+    monkeypatch.setattr(
+        collect, "fetch_demand_ratios",
+        lambda cid, csec, kws, anchor, start, end, timeout=10:
+        seen.extend(kws) or {k: {"ratio": 0.01, "growth": 0.0} for k in kws})
+    updated = collect.update_demand(d, cfg, "2026-08-01", "now")
+    assert updated == 3                       # 상위 1 + 순환 2 = 전부 갱신
+    assert set(seen) == {"키워드0", "키워드1", "키워드2"}
+    d.close()
 
 
 def test_reject_rate_recorded_in_run_note(tmp_path, monkeypatch):

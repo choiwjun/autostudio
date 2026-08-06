@@ -9,7 +9,7 @@ from datetime import timedelta
 import config as config_mod
 import db
 import requests
-from fastapi import Body, Depends, FastAPI, Header, HTTPException
+from fastapi import Body, Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
@@ -84,6 +84,11 @@ class FeedbackIn(BaseModel):
     published_at: str = ""
     performance_score: float  # 0~100 (유입·체류 반영)
     note: str = ""
+
+
+class PublishedUrlIn(BaseModel):
+    # v17: 게시 URL 등록 — AdPost 리포트 매칭의 기준 키 (게시 파이프라인)
+    url: str
 
 
 def _unavailable_search_evidence(reference_date, searched_at):
@@ -474,9 +479,15 @@ def create_app(cfg):
             draft_id, url, config_mod.now_kst_iso()))
         return run_db(lambda d: d.get_draft(draft_id))
 
+    # v17: 요청당 섹션 이미지 시간 창 — 이미지 1장 타임아웃(55초)보다 짧아야
+    # Vercel 60초 한도 내 완료. 나머지 분량은 재호출(증분) 또는 컬렉트 배치로.
+    SECTION_IMAGE_WINDOW_SECONDS = 38
+
     @app.post("/drafts/{draft_id}/section-images", dependencies=[Depends(require_token)])
     def generate_section_images(draft_id: int):
-        # v10 [5]: 섹션 이미지 5~8장 — 본문 H2 소제목에서 주제 추출, 체류·스크롤 증가
+        # v10 [5]: 섹션 이미지 최대 8장 — 본문 H2 소제목에서 주제 추출, 체류·스크롤 증가
+        # v17: 증분 생성 — 기존은 8장×55초 순차라 60초 한도에 죽어 비용만 손실.
+        # 이제 시간 창 내에서 생성되는 즉시 저장하고, 나머지는 재호출이 이어서 생성.
         import json
         import image_gen
         draft = run_db(lambda d: d.get_draft(draft_id))
@@ -487,15 +498,28 @@ def create_app(cfg):
         sections = [h for h in h2s if "자주 묻는 질문" not in h][:8]
         if not sections:
             raise HTTPException(status_code=400, detail="본문에 H2 소제목이 없어 섹션 이미지를 생성할 수 없습니다")
+        existing = []
+        if draft.get("section_images"):
+            try:
+                parsed = json.loads(draft["section_images"])
+                if isinstance(parsed, list):
+                    existing = parsed
+            except json.JSONDecodeError:
+                existing = []
+        if len(existing) >= len(sections):
+            return run_db(lambda d: d.get_draft(draft_id))  # 전부 생성됨
         try:
-            urls = image_gen.generate_section_images(
+            new_urls = image_gen.generate_section_images(
                 run_db(lambda d: d.get_keyword(draft["keyword_id"]))["keyword"],
-                draft["title"], sections)
+                draft["title"], sections, start_index=len(existing),
+                budget_seconds=SECTION_IMAGE_WINDOW_SECONDS)
         except image_gen.ImageGenerationError as e:
             logger.warning("section image generation failed draft_id=%s: %s", draft_id, e)
             raise HTTPException(status_code=503, detail=str(e))
-        run_db(lambda d: d.update_draft_section_images(
-            draft_id, json.dumps(urls, ensure_ascii=False), config_mod.now_kst_iso()))
+        if new_urls:  # 부분 성공도 즉시 저장 — 중도 종료 손실 차단 (버그 3)
+            run_db(lambda d: d.update_draft_section_images(
+                draft_id, json.dumps(existing + new_urls, ensure_ascii=False),
+                config_mod.now_kst_iso()))
         return run_db(lambda d: d.get_draft(draft_id))
 
     @app.post("/drafts/{draft_id}/feedback", dependencies=[Depends(require_token)])
@@ -517,6 +541,73 @@ def create_app(cfg):
             draft_id, draft["keyword_id"], published, score, body.note,
             config_mod.now_kst_iso(), delta))
         return run_db(lambda d: d.get_draft(draft_id))
+
+    # ---------- v17: 게시 파이프라인 + AdPost 피드백 자동화 ----------
+
+    @app.post("/drafts/{draft_id}/published-url",
+              dependencies=[Depends(require_token)])
+    def set_published_url(draft_id: int, body: PublishedUrlIn):
+        draft = run_db(lambda d: d.get_draft(draft_id))
+        if not draft:
+            raise HTTPException(status_code=404, detail="not found")
+        url = (body.url or "").strip()
+        if not url.startswith(("http://", "https://")):
+            raise HTTPException(status_code=400, detail="올바른 URL이 아닙니다")
+        run_db(lambda d: d.set_draft_published_url(
+            draft_id, url, config_mod.now_kst_iso()))
+        return run_db(lambda d: d.get_draft(draft_id))
+
+    @app.get("/drafts/{draft_id}/export", dependencies=[Depends(require_token)])
+    def export_draft(draft_id: int):
+        # v17: 게시용 마크다운 내보내기 — 네이버 블로그는 쓰기 API가 없어
+        # 복붙이 최종 단계. 이미지 포함 완성 문서로 마찰을 최소화한다 (고도화 3)
+        import publish
+        draft = run_db(lambda d: d.get_draft(draft_id))
+        if not draft:
+            raise HTTPException(status_code=404, detail="not found")
+        markdown = publish.build_export_markdown(draft)
+        return Response(
+            content=markdown.encode("utf-8"),
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition":
+                     f'attachment; filename="blog-draft-{draft_id}.md"'})
+
+    ADPOST_IMPORT_MAX_BYTES = 5 * 1024 * 1024
+
+    @app.post("/adpost/import", dependencies=[Depends(require_token)])
+    async def import_adpost_report(file: UploadFile = File(...)):
+        # v17: AdPost 리포트 CSV → 초안 매칭 → 성과 점수·priority 자동 보정.
+        # 수동 점수 입력(FeedbackIn)의 자동화 대체 경로 (고도화 1).
+        import adpost
+        raw = await file.read()
+        if len(raw) > ADPOST_IMPORT_MAX_BYTES:
+            raise HTTPException(status_code=400, detail="CSV가 너무 큽니다 (5MB 상한)")
+        try:
+            rows = adpost.parse_adpost_csv(raw)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        now = config_mod.now_kst_iso()
+        matched, unmatched = [], 0
+        for row in rows:
+            draft = (run_db(lambda d, u=row["url"]: d.find_draft_by_published_url(u))
+                     if row["url"] else None)
+            if not draft and row["title"]:
+                draft = run_db(
+                    lambda d, t=row["title"]: d.find_draft_by_title(t))
+            if not draft:
+                unmatched += 1
+                continue
+            score = adpost.adpost_performance_score(
+                row["revenue"], row["impressions"], row["clicks"])
+            delta = (boost_for_score(score)
+                     - boost_for_score(draft.get("performance_score")))
+            run_db(lambda d, dr=draft, r=row, s=score, dl=delta: d.record_adpost_metrics(
+                dr["id"], dr["keyword_id"], r["revenue"], r["impressions"],
+                r["clicks"], s, now, now, dl))
+            matched.append({"draft_id": draft["id"], "title": draft["title"],
+                            "revenue": row["revenue"], "performance_score": score})
+        return {"matched": len(matched), "unmatched": unmatched,
+                "results": matched}
 
     @app.get("/")
     def index():

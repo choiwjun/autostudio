@@ -26,7 +26,19 @@ def test_click_index_normalized_by_anchor(monkeypatch):
     monkeypatch.setattr(requests, "post", lambda *a, **k: FakeResponse(payload))
     r = fetch_click_ratios("cid", "csec", ["에어프라이어", "무명키워드"],
                            "냉장고", "50000000", "2026-07-04", "2026-08-03")
-    assert r == {"에어프라이어": 0.1, "무명키워드": 0.0}
+    # v17: 분야 미매칭(빈 시계열)은 None — 0.0이면 진짜 저클릭과 구별 불가
+    assert r == {"에어프라이어": 0.1, "무명키워드": None}
+
+
+def test_missing_group_is_none(monkeypatch):
+    # 응답 results에 그룹 자체가 없는 키워드도 None
+    payload = {"results": [
+        {"title": "냉장고", "data": [{"ratio": 50.0}]},
+    ]}
+    monkeypatch.setattr(requests, "post", lambda *a, **k: FakeResponse(payload))
+    r = fetch_click_ratios("cid", "csec", ["없는키워드"],
+                           "냉장고", "50000000", "2026-07-04", "2026-08-03")
+    assert r == {"없는키워드": None}
 
 
 def test_anchor_zero_raises(monkeypatch):

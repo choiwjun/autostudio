@@ -913,11 +913,13 @@ async function renderDraftStep(d) {
     </div>
     <div class="draft-actions">
       <button class="btn" id="genImgBtn">대표 이미지</button>
-      <button class="btn" id="genSecImgBtn">섹션 이미지 (약 1~2분)</button>
+      <button class="btn" id="genSecImgBtn">섹션 이미지 (30초씩 이어서 생성)</button>
+      <button class="btn" id="exportBtn">마크다운 내보내기</button>
       <button class="btn btn-primary" id="copyBtn">복사</button>
     </div>`;
   document.getElementById('genImgBtn').onclick = () => generateDraftImage(d.id);
   document.getElementById('genSecImgBtn').onclick = () => generateSectionImages(d.id);
+  document.getElementById('exportBtn').onclick = () => exportDraft(d.id);
   document.getElementById('copyBtn').onclick = () => copyDraft(d);
   document.getElementById('fbBtn').onclick = () => recordFeedback(d.id);
   if (d.image_url) showDraftImage(d.id, d.image_url);
@@ -984,7 +986,7 @@ function showSectionImages(did, jsonStr) {
 
 async function generateSectionImages(did) {
   const area = document.getElementById('secImgArea');
-  area.innerHTML = '<div class="spinner"></div> 섹션 이미지 생성 중... (최대 8장, 약 1~2분)';
+  area.innerHTML = '<div class="spinner"></div> 섹션 이미지 생성 중... (생성되는 대로 저장 — 남은 분량은 재클릭)';
   try {
     const d = await api(`/drafts/${did}/section-images`, { method: 'POST', headers: authHeaders() });
     draftCurrent = d;
@@ -992,6 +994,27 @@ async function generateSectionImages(did) {
   } catch (e) {
     if (String(e.message) === '401') return;
     area.innerHTML = '<p class="warn">섹션 이미지 생성 실패 — 잠시 후 다시 시도하세요</p>';
+  }
+}
+
+// v17: 게시용 마크다운 내보내기 (이미지 포함 완성 문서)
+async function exportDraft(did) {
+  try {
+    const r = await fetch('/api' + `/drafts/${did}/export`, { headers: authHeaders() });
+    if (r.status === 401) { setStatus('토큰이 올바르지 않습니다 — 토큰 입력 후 저장', true); return; }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const blob = await r.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = `blog-draft-${did}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+    setStatus('마크다운 내보내기 완료 — 네이버 블로그에 붙여넣으세요');
+  } catch (e) {
+    setStatus('내보내기 실패: ' + e.message, true);
   }
 }
 
