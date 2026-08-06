@@ -920,22 +920,55 @@ async function renderDraftStep(d) {
   document.getElementById('genSecImgBtn').onclick = () => generateSectionImages(d.id);
   document.getElementById('copyBtn').onclick = () => copyDraft(d);
   document.getElementById('fbBtn').onclick = () => recordFeedback(d.id);
-  if (d.image_url) showDraftImage(d.image_url);
-  if (d.section_images) showSectionImages(d.section_images);
+  if (d.image_url) showDraftImage(d.id, d.image_url);
+  if (d.section_images) showSectionImages(d.id, d.section_images);
 }
 
-function imageDownloadLink(url, filename) {
-  return `<a class="btn btn-sm image-download" href="${esc(url)}" download="${esc(filename)}" target="_blank" rel="noopener">다운로드</a>`;
+// v15.1: 다운로드는 서버 프록시 경유 — 외부 CDN URL은 cross-origin이라 <a download>가
+// 무시되고 새 탭이 열림. 프록시가 attachment 헤더 + 토큰 인증을 붙여 돌려준다.
+function downloadButton(did, kind, index) {
+  return `<button type="button" class="btn btn-sm image-download"
+    onclick="downloadImage(this, ${did}, '${kind}', ${index})">다운로드</button>`;
 }
 
-function showDraftImage(url) {
+async function downloadImage(btn, did, kind, index) {
+  const path = kind === 'main'
+    ? `/drafts/${did}/image-download`
+    : `/drafts/${did}/section-images/${index}/download`;
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '다운로드 중...';
+  try {
+    const r = await fetch('/api' + path, { headers: authHeaders() });
+    if (r.status === 401) { setStatus('토큰이 올바르지 않습니다 — 토큰 입력 후 저장', true); return; }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const blob = await r.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = kind === 'main'
+      ? 'blog-representative.png' : `blog-section-${index + 1}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+    setStatus('이미지 다운로드 완료');
+  } catch (e) {
+    setStatus('이미지 다운로드 실패: ' + e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
+function showDraftImage(did, url) {
   document.getElementById('imgArea').innerHTML =
     `<img src="${esc(url)}" alt="생성 이미지" class="draft-img">`
-    + imageDownloadLink(url, 'blog-representative.png');
+    + downloadButton(did, 'main', 0);
 }
 
 // v11: 섹션 이미지 — 본문 H2별 삽화 (애드포스트 배치 [5] 체류·스크롤 증가)
-function showSectionImages(jsonStr) {
+function showSectionImages(did, jsonStr) {
   let urls = [];
   try { urls = jsonStr ? JSON.parse(jsonStr) : []; } catch (e) { urls = []; }
   const area = document.getElementById('secImgArea');
@@ -945,7 +978,7 @@ function showSectionImages(jsonStr) {
   }
   area.innerHTML = urls.map((u, i) =>
     `<img src="${esc(u)}" alt="섹션 이미지 ${i + 1}" class="draft-img">`
-    + imageDownloadLink(u, `blog-section-${i + 1}.png`)
+    + downloadButton(did, 'section', i)
   ).join('') + `<p class="dim">${urls.length}장 생성됨</p>`;
 }
 
@@ -955,7 +988,7 @@ async function generateSectionImages(did) {
   try {
     const d = await api(`/drafts/${did}/section-images`, { method: 'POST', headers: authHeaders() });
     draftCurrent = d;
-    showSectionImages(d.section_images);
+    showSectionImages(did, d.section_images);
   } catch (e) {
     if (String(e.message) === '401') return;
     area.innerHTML = '<p class="warn">섹션 이미지 생성 실패 — 잠시 후 다시 시도하세요</p>';
@@ -989,7 +1022,7 @@ async function generateDraftImage(did) {
   try {
     const d = await api(`/drafts/${did}/image`, { method: 'POST', headers: authHeaders() });
     draftCurrent = d;
-    showDraftImage(d.image_url);
+    showDraftImage(did, d.image_url);
   } catch (e) {
     if (String(e.message) === '401') return;
     if (String(e.message).startsWith('HTTP 503')) {

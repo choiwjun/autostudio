@@ -349,6 +349,111 @@ def _priority_of(client, keyword):
     return next(i["priority"] for i in items if i["keyword"] == keyword)
 
 
+# ---------- v15.1: 이미지 다운로드 프록시 ----------
+
+def _create_draft(client, monkeypatch, body_md="## 소제목\n본문"):
+    import draft_pipeline
+    monkeypatch.setattr(draft_pipeline, "generate_two_pass", lambda k, s, **kw: (
+        {"title": "제목", "first_paragraph": "첫문단", "body": body_md}, []))
+    return client.post("/drafts", json={"keyword_id": 1}).json()["id"]
+
+
+class _FakeImageResp:
+    def __init__(self, content=b"PNGDATA", status_code=200,
+                 content_type="image/png"):
+        self._content = content
+        self.status_code = status_code
+        self.headers = {"Content-Type": content_type}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def iter_content(self, chunk_size=65536):
+        return [self._content]
+
+
+def test_download_endpoints_require_token_in_production(tmp_path):
+    # v15.1: 다운로드 프록시도 읽기 API — 프로덕션에서 토큰 필수
+    client = TestClient(make_app(tmp_path, env="production"))
+    assert client.get("/drafts/1/image-download").status_code == 401
+    assert client.get("/drafts/1/section-images/0/download").status_code == 401
+    assert client.get("/drafts/1/image-download", headers=AUTH).status_code == 404
+    # (초안 없음 404 — 인증은 통과했다는 뜻)
+
+
+def test_image_download_proxy_serves_attachment(tmp_path, monkeypatch):
+    # v15.1: DB 저장 URL을 attachment로 되돌림 — 파일명 고정, content-type 유지
+    import server as server_mod
+    client = TestClient(make_app(tmp_path))
+    did = _create_draft(client, monkeypatch)
+    import image_gen
+    monkeypatch.setenv("BAILIAN_TOKEN_PLAN_API_KEY", "test-key")
+    monkeypatch.setattr(image_gen, "_run_http",
+                        lambda prompt, timeout=55: "https://cdn.example.com/img.png")
+    assert client.post(f"/drafts/{did}/image").status_code == 200
+
+    monkeypatch.setattr(server_mod.requests, "get",
+                        lambda url, **kw: _FakeImageResp(b"PNGDATA"))
+    r = client.get(f"/drafts/{did}/image-download")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/png")
+    assert 'attachment; filename="blog-representative.png"' \
+        in r.headers["content-disposition"]
+    assert r.content == b"PNGDATA"
+
+
+def test_image_download_error_paths(tmp_path, monkeypatch):
+    import db as db_mod
+    import server as server_mod
+    client = TestClient(make_app(tmp_path))
+    assert client.get("/drafts/999/image-download").status_code == 404
+    did = _create_draft(client, monkeypatch)
+    assert client.get(f"/drafts/{did}/image-download").status_code == 404  # 미생성
+    assert client.get(f"/drafts/{did}/section-images/0/download").status_code == 404
+    # HTTPS가 아닌 URL은 프록시 거부 (이미지 URL 오염 방어)
+    d = db_mod.Database(f"sqlite:///{tmp_path / 't.db'}")
+    d.update_draft_image(did, "http://insecure.example.com/x.png", "")
+    d.close()
+    assert client.get(f"/drafts/{did}/image-download").status_code == 400
+
+
+def test_image_download_rejects_non_image_upstream(tmp_path, monkeypatch):
+    # upstream이 HTML 에러 페이지를 주면 .png로 저장되지 않고 502
+    import server as server_mod
+    client = TestClient(make_app(tmp_path))
+    did = _create_draft(client, monkeypatch)
+    import image_gen
+    monkeypatch.setenv("BAILIAN_TOKEN_PLAN_API_KEY", "test-key")
+    monkeypatch.setattr(image_gen, "_run_http",
+                        lambda prompt, timeout=55: "https://cdn.example.com/img.png")
+    assert client.post(f"/drafts/{did}/image").status_code == 200
+    monkeypatch.setattr(server_mod.requests, "get",
+                        lambda url, **kw: _FakeImageResp(b"<html>", content_type="text/html"))
+    assert client.get(f"/drafts/{did}/image-download").status_code == 502
+
+
+def test_section_image_download_and_bounds(tmp_path, monkeypatch):
+    import server as server_mod
+    client = TestClient(make_app(tmp_path))
+    did = _create_draft(client, monkeypatch)
+    import image_gen
+    monkeypatch.setenv("BAILIAN_TOKEN_PLAN_API_KEY", "test-key")
+    monkeypatch.setattr(image_gen, "_run_http",
+                        lambda prompt, timeout=55: "https://cdn.example.com/sec.png")
+    assert client.post(f"/drafts/{did}/section-images").status_code == 200
+
+    monkeypatch.setattr(server_mod.requests, "get",
+                        lambda url, **kw: _FakeImageResp(b"SECDATA"))
+    r = client.get(f"/drafts/{did}/section-images/0/download")
+    assert r.status_code == 200
+    assert 'blog-section-1.png' in r.headers["content-disposition"]
+    assert r.content == b"SECDATA"
+    assert client.get(f"/drafts/{did}/section-images/5/download").status_code == 404
+
+
 def test_feedback_idempotent_boost(tmp_path, monkeypatch):
     # v11: 같은 초안에 피드백 반복 전송 시 boost가 누적되지 않아야 함 (차액 가산)
     import draft_pipeline

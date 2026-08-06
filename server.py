@@ -1,4 +1,5 @@
 import hmac
+import json
 import logging
 import os
 import re
@@ -7,11 +8,58 @@ from datetime import timedelta
 
 import config as config_mod
 import db
+import requests
 from fastapi import Body, Depends, FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 logger = logging.getLogger("server")
+
+# v15.1: 이미지 다운로드 프록시 — 외부 CDN URL은 cross-origin이라 <a download>가
+# 무시되고 브라우저가 새 탭으로 열어버림. DB 저장 URL만 서버가 받아 attachment로
+# 되돌려준다. 임의 URL 파라미터는 받지 않아 오픈 프록시/SSRF 우회 불가.
+IMAGE_DOWNLOAD_TIMEOUT = 30
+IMAGE_DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024
+IMAGE_DOWNLOAD_MAX_REDIRECTS = 3
+
+
+def _fetch_image_bytes(url):
+    """반환: (바이트, content_type). HTTPS만, 리다이렉트도 HTTPS 한정, 크기 상한
+    스트리밍 검사, 비이미지 응답 거부 — 위반은 명확한 HTTP 오류로 변환."""
+    if not url or not url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="HTTPS 이미지 URL이 아닙니다")
+    current = url
+    for _ in range(IMAGE_DOWNLOAD_MAX_REDIRECTS + 1):
+        try:
+            resp = requests.get(current, timeout=IMAGE_DOWNLOAD_TIMEOUT,
+                                stream=True, allow_redirects=False)
+        except requests.RequestException as e:
+            raise HTTPException(
+                status_code=502, detail=f"이미지 수신 실패: {e}") from e
+        if resp.status_code in (301, 302, 303, 307, 308):
+            location = resp.headers.get("Location", "")
+            if not location.startswith("https://"):
+                raise HTTPException(
+                    status_code=502, detail="HTTPS가 아닌 리다이렉트 거부")
+            current = location
+            continue
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=502, detail=f"이미지 서버 응답 {resp.status_code}")
+        content_type = resp.headers.get("Content-Type", "")
+        if not content_type.startswith("image/"):
+            raise HTTPException(
+                status_code=502, detail="이미지가 아닌 응답입니다")
+        chunks, size = [], 0
+        with resp:
+            for chunk in resp.iter_content(chunk_size=65536):
+                size += len(chunk)
+                if size > IMAGE_DOWNLOAD_MAX_BYTES:
+                    raise HTTPException(
+                        status_code=502, detail="이미지가 크기 상한을 초과했습니다")
+                chunks.append(chunk)
+        return b"".join(chunks), content_type
+    raise HTTPException(status_code=502, detail="리다이렉트 횟수 초과")
 
 
 class SeedIn(BaseModel):
@@ -307,6 +355,46 @@ def create_app(cfg):
         if not draft:
             raise HTTPException(status_code=404, detail="not found")
         return draft
+
+    # v15.1: 생성 이미지 다운로드 프록시 — DB 저장 URL만 사용(임의 URL 파라미터
+    # 없음), attachment 헤더로 브라우저 다운로드 보장. 파일명은 고정 안전 이름.
+    @app.get("/drafts/{draft_id}/image-download",
+             dependencies=[Depends(require_token)])
+    def download_draft_image(draft_id: int):
+        draft = run_db(lambda d: d.get_draft(draft_id))
+        if not draft:
+            raise HTTPException(status_code=404, detail="not found")
+        if not draft.get("image_url"):
+            raise HTTPException(
+                status_code=404, detail="대표 이미지가 아직 생성되지 않았습니다")
+        content, content_type = _fetch_image_bytes(draft["image_url"])
+        return Response(
+            content=content, media_type=content_type,
+            headers={"Content-Disposition":
+                     'attachment; filename="blog-representative.png"'})
+
+    @app.get("/drafts/{draft_id}/section-images/{image_index}/download",
+             dependencies=[Depends(require_token)])
+    def download_section_image(draft_id: int, image_index: int):
+        draft = run_db(lambda d: d.get_draft(draft_id))
+        if not draft:
+            raise HTTPException(status_code=404, detail="not found")
+        urls = []
+        if draft.get("section_images"):
+            try:
+                parsed = json.loads(draft["section_images"])
+                if isinstance(parsed, list):
+                    urls = parsed
+            except json.JSONDecodeError:
+                pass
+        if not (0 <= image_index < len(urls)):
+            raise HTTPException(
+                status_code=404, detail="해당 순서의 섹션 이미지가 없습니다")
+        content, content_type = _fetch_image_bytes(urls[image_index])
+        return Response(
+            content=content, media_type=content_type,
+            headers={"Content-Disposition":
+                     f'attachment; filename="blog-section-{image_index + 1}.png"'})
 
     @app.post("/drafts/{draft_id}/image", dependencies=[Depends(require_token)])
     def generate_draft_image(draft_id: int):
