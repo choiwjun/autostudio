@@ -48,10 +48,28 @@ def test_load_config_with_env(monkeypatch):
 
 def test_load_config_env_and_stale(monkeypatch):
     monkeypatch.setenv("ENV", "production")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@localhost:5432/db")
     monkeypatch.setenv("RUN_LOCK_STALE_MINUTES", "45")
     cfg = config.load_config(load_env=False)
     assert cfg["env"] == "production"
     assert cfg["run_lock_stale_minutes"] == 45
+
+
+def test_env_normalized_to_lowercase(monkeypatch):
+    # v15: 'Production' 변형이 fail-closed·인증 분기를 우회하던 문제 차단
+    monkeypatch.setenv("ENV", "  Production ")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@localhost:5432/db")
+    cfg = config.load_config(load_env=False)
+    assert cfg["env"] == "production"
+
+
+def test_production_without_database_url_fails_closed(monkeypatch):
+    # v15: 비개발 환경에서 DATABASE_URL 미설정 시 sqlite 조용한 폴백 금지
+    import pytest
+    monkeypatch.setenv("ENV", "production")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    with pytest.raises(RuntimeError):
+        config.load_config(load_env=False)
 
 
 def test_kst_helpers():

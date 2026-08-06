@@ -1,4 +1,5 @@
 import hmac
+import logging
 import os
 import re
 import threading
@@ -9,6 +10,8 @@ import db
 from fastapi import Body, Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+
+logger = logging.getLogger("server")
 
 
 class SeedIn(BaseModel):
@@ -75,12 +78,17 @@ def resolve_thresholds(d):
 
 
 def create_app(cfg):
-    env = cfg.get("env", "development")
+    # v15: env 소문자 정규화 — 'Production' 같은 대소문자 변형이 fail-closed와
+    # require_token 분기를 모두 우회하던 문제 차단
+    env = (cfg.get("env") or "development").strip().lower()
     # v3: fail-closed — 프로덕션에서 토큰 미설정 시 기동 거부 (스펙 §7).
     # v2는 토큰이 비면 인증을 생략해 설정 실수가 무인증 쓰기 API로 이어졌음.
+    # v15: 'development'가 아닌 모든 값(prod/Production/오타 포함)은 프로덕션 취급 —
+    # 토큰 없으면 기동 자체가 거부되므로 require_token의 빈 토큰 통과 경로도 소멸.
     # 로컬 개발(ENV 미설정/development)만 인증 생략 허용
-    if env == "production" and not cfg.get("dashboard_token", ""):
-        raise RuntimeError("DASHBOARD_TOKEN required in production (fail-closed)")
+    if env != "development" and not cfg.get("dashboard_token", ""):
+        raise RuntimeError(
+            "DASHBOARD_TOKEN required when ENV is not 'development' (fail-closed)")
     app = FastAPI()
 
     @app.middleware("http")
@@ -122,11 +130,15 @@ def create_app(cfg):
         # 개발 편의를 위해 쓰기 API가 401을 내지 않도록 한다 (프로덕션만 강제).
         if env == "development":
             return
+        # v15: 빈 토큰 통과 경로 제거 — 기동 시 fail-closed로 비개발 환경의 빈 토큰은
+        # 이미 거부됐으므로 여기선 토큰이 반드시 존재. 없으면(설정 오류) 전부 401.
         token = cfg.get("dashboard_token", "")
-        if token and not hmac.compare_digest(authorization, f"Bearer {token}"):
+        if not token or not hmac.compare_digest(authorization, f"Bearer {token}"):
             raise HTTPException(status_code=401, detail="invalid token")
 
-    @app.get("/keywords")
+    # v15: 읽기 API도 인증 — 키워드·성과 데이터는 수익 전략 자산이라 공개 금지.
+    # (개발 환경은 require_token이 생략하므로 로컬 동작 불변)
+    @app.get("/keywords", dependencies=[Depends(require_token)])
     def list_keywords(sort: str = "priority", sort_dir: str = "desc",
                       category: str = "", commercial_min: float = 0,
                       click_min: float = 0, q: str = "",
@@ -171,7 +183,7 @@ def create_app(cfg):
         return {"items": items, "count": total, "page": page, "page_size": page_size,
                 "thresholds": thresholds, "threshold_source": threshold_source}
 
-    @app.get("/keywords/{keyword_id}")
+    @app.get("/keywords/{keyword_id}", dependencies=[Depends(require_token)])
     def keyword_detail(keyword_id: int):
         kw = run_db(lambda d: d.get_keyword(keyword_id))
         if not kw:
@@ -187,7 +199,7 @@ def create_app(cfg):
         run_db(lambda d: d.set_active(keyword_id, 1 if body.active else 0))
         return {"ok": True}
 
-    @app.get("/seeds")
+    @app.get("/seeds", dependencies=[Depends(require_token)])
     def list_seeds():
         return run_db(lambda d: d.list_seeds())
 
@@ -214,7 +226,7 @@ def create_app(cfg):
             cfg, trigger="manual",
             budget_seconds=cfg.get("manual_budget_seconds", 45))
 
-    @app.get("/status")
+    @app.get("/status", dependencies=[Depends(require_token)])
     def status():
         runs = run_db(lambda d: d.get_last_runs(5))
         # v3: partial/failed는 성공 수집으로 집계하지 않음 (UX §5.2 경고 기준)
@@ -227,11 +239,11 @@ def create_app(cfg):
             "last_success": last_success,
         }
 
-    @app.get("/categories")
+    @app.get("/categories", dependencies=[Depends(require_token)])
     def categories():
         return run_db(lambda d: d.list_categories())
 
-    @app.get("/outlines/{keyword_id}")
+    @app.get("/outlines/{keyword_id}", dependencies=[Depends(require_token)])
     def get_outline(keyword_id: int):
         outline = run_db(lambda d: d.get_outline(keyword_id))
         if not outline:
@@ -276,6 +288,9 @@ def create_app(cfg):
             draft, failed_checks = draft_pipeline.generate_two_pass(
                 kw["keyword"], structure, retry_budget_seconds=25)
         except draft_pipeline.DraftGenerationError as e:
+            # v15: 구조화 로그 — 배포 환경에서 초안 실패 원인을 추적할 수 있게
+            logger.warning("draft generation failed kw_id=%s kw=%s: %s",
+                           body.keyword_id, kw["keyword"], e)
             raise HTTPException(status_code=503, detail=str(e))
         created_at = config_mod.now_kst_iso()
         draft_id = run_db(lambda d: d.insert_draft(
@@ -286,7 +301,7 @@ def create_app(cfg):
             result["quality_warnings"] = failed_checks
         return result
 
-    @app.get("/drafts/{draft_id}")
+    @app.get("/drafts/{draft_id}", dependencies=[Depends(require_token)])
     def get_draft(draft_id: int):
         draft = run_db(lambda d: d.get_draft(draft_id))
         if not draft:
@@ -305,6 +320,7 @@ def create_app(cfg):
                 run_db(lambda d: d.get_keyword(draft["keyword_id"]))["keyword"],
                 draft["title"])
         except image_gen.ImageGenerationError as e:
+            logger.warning("image generation failed draft_id=%s: %s", draft_id, e)
             raise HTTPException(status_code=503, detail=str(e))
         run_db(lambda d: d.update_draft_image(
             draft_id, url, config_mod.now_kst_iso()))
@@ -328,6 +344,7 @@ def create_app(cfg):
                 run_db(lambda d: d.get_keyword(draft["keyword_id"]))["keyword"],
                 draft["title"], sections)
         except image_gen.ImageGenerationError as e:
+            logger.warning("section image generation failed draft_id=%s: %s", draft_id, e)
             raise HTTPException(status_code=503, detail=str(e))
         run_db(lambda d: d.update_draft_section_images(
             draft_id, json.dumps(urls, ensure_ascii=False), config_mod.now_kst_iso()))

@@ -1,56 +1,107 @@
-﻿# ?ㅼ씠踰?釉붾줈洹??ㅼ썙????쒕낫??
+﻿# AutoStudio — 네이버 블로그 애드포스트 키워드 발굴 + 초안 생성 파이프라인
 
-?ㅼ씠踰?釉붾줈洹??좊뱶?ъ뒪???쇳븨而ㅻ꽖?? ?섏씡???꾪븳 ?ㅼ썙??諛쒓뎬 + 寃쎌웳???곸뾽???섏슂 遺꾩꽍 ?꾧뎄.
-濡쒖뺄 PC ?놁씠 ?대씪?곕뱶(Supabase + Vercel + GitHub Actions)?먯꽌 ?ㅽ뻾?⑸땲?? ??鍮꾩슜 0??
+네이버 블로그 애드포스트 수익화를 위한 **키워드 발굴 + AI 초안 생성 자동화 플랫폼**.
+로컬 PC 없이 GitHub(Supabase + Vercel + GitHub Actions)에서 동작하며 로컬 부담은 0입니다.
 
-## ?꾪궎?띿쿂
+## 파이프라인
 
-- **DB**: Supabase Postgres (臾대즺 500MB, Supavisor ???寃쎌쑀)
-- **??쒕낫??API**: Vercel Hobby (FastAPI ASGI, 臾대즺)
-- **留ㅼ씪 ?섏쭛**: GitHub Actions cron (留ㅼ씪 07:17 KST, 臾대즺)
-- 湲곗? ?쒓컙?: 紐⑤뱺 ?좎쭨 ?ㅻ뒗 KST (?щ꼫/?쒕쾭由ъ뒪??UTC? 臾닿?)
+```
+자동완성 크롤링(발굴) → 정제(refine) → 네이버 API 스냅샷 → 점수화
+→ 데이터랩 수요/쇼핑클릭 → 은퇴 판정 → 2패스 LLM 초안(검수 8항목) → 이미지 → 대시보드
+```
 
-## ?ㅼ튂 (媛쒕컻 ?섍꼍)
+- **발굴** — 시드 키워드를 네이버 자동완성으로 BFS 확장, 블랙리스트/길이/노이즈/브랜드 정제.
+  노이즈는 확장 단계에서 경유지로도 배제(팬아웃 차단), 거부율은 실행 note에 기록.
+- **점수화** — 수집 시 사전계산 (조회 시 재계산 금지)
+  - `ai_cite_idx`: 질문형 패턴 + 최신성 + 카테고리 가중 (AI 브리핑 인용 가능성)
+  - `opportunity`: 40×최신성 + 30×증감률(일 5% 만점) + 30×(1−경쟁 포화, 1만 글 포화)
+  - `demand_idx`·`demand_growth`: 데이터랩 앵커('냉장고') 정규화 + 30일 시계열 기울기
+  - `priority` = 30×AI인용 + 25×수요 + 15×성장 + 30×CPC등급 (+ 성과 boost, [-20,20] 클램프)
+- **자가보정 임계 (v14)** — 프리셋/배지/은퇴 임계가 하드코딩 절대값 대신 활성 키워드
+  최신 스냅샷의 백분위(프리셋 P50/P75, 은퇴 P25)를 조회 시마다 계산해 데이터 분포를
+  따라감. 표본 < 20 또는 P50=0이면 절대값 폴백. `/keywords` 응답의 `thresholds` 필드로 노출.
+- **초안 생성** — 1패스(H2 골격) → 2패스(섹션 확장) → 검수 8항목(제목/즉답/길이/H2/표/FAQ/
+  키워드 밀도/허위경험) → 미달 시 실측 수치 피드백을 주입해 1회 재생성. 서버리스 예산 가드.
 
-1. `python -m venv .venv`
-2. `.venv\Scripts\pip install -r requirements.txt`
-3. `.env.example` ??`.env` 蹂듭궗 ???ㅼ젙 (媛쒕컻? SQLite 湲곕낯媛?洹몃?濡?
-4. ??쒕낫???ㅽ뻾: `.venv\Scripts\python -m uvicorn server:app --port 8000` ??http://localhost:8000
-5. ?쒕뱶?ㅼ썙?쒕뒗 ??쒕낫?쒖뿉??異붽? (濡쒖뺄? `DASHBOARD_TOKEN` 誘몄꽕?????몄쬆 ?앸왂)
-6. ?섏쭛: `.venv\Scripts\python collect.py`
+## 로컬 실행
 
-## ?대씪?곕뱶 諛고룷
+```bash
+python -m venv .venv
+.venv\Scripts\pip install -r requirements-dev.txt   # 프로덕션만이면 requirements.txt
+# .env.example을 .env로 복사해 설정 (개발은 SQLite 기본값으로 충분)
+.venv\Scripts\python -m uvicorn server:app --port 8000   # http://localhost:8000
+.venv\Scripts\python collect.py                          # 수집 배치 1회
+python -m pytest tests -q                                # 테스트
+```
 
-1. GitHub ?덊룷 ?앹꽦 ???몄떆 (private 沅뚯옣)
-2. Supabase ?꾨줈?앺듃 ?앹꽦 ??**????곌껐 臾몄옄??* ?ъ슜
-   - GitHub Secrets `DATABASE_URL` = Session pooler (?ы듃 5432)
-   - Vercel Env `DATABASE_URL` = Transaction pooler (?ы듃 6543)
-   - `db.<ref>.supabase.co` 吏곴껐 二쇱냼 湲덉? (IPv6 ?꾩슜 ??Actions/Vercel?먯꽌 ?곌껐 ?ㅽ뙣)
+키워드 추가·수집 트리거는 대시보드에서 합니다. 쓰기(수집/시드/초안)는 프로덕션에서
+`DASHBOARD_TOKEN` 필수 — 로컬 개발(`ENV` 미설정)만 인증 생략. **v15부터 읽기 API도
+인증 대상**이라 프로덕션 대시보드는 토큰 입력 후 사용 가능합니다.
+
+## 배포 체크리스트
+
+1. GitHub 저장소는 **private** 유지
+2. Supabase 프로젝트 생성 — **무료 플랜 활성화** 필요
+   - GitHub Secrets `DATABASE_URL` = Session pooler (포트 5432)
+   - Vercel Env `DATABASE_URL` = Transaction pooler (포트 6543)
+   - `db.<ref>.supabase.co` 호스트만 사용 (IPv6 주소는 Actions/Vercel에서 연결 실패)
 3. GitHub Secrets: `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`, `DATABASE_URL`
-4. `npx vercel --prod` 諛고룷, Vercel Env??`DASHBOARD_TOKEN` ?ы븿 ?깅줉
-5. 留ㅼ씪 07:17 ?먮룞 ?섏쭛: `.github/workflows/daily-collect.yml`
+4. `npx vercel --prod` 배포, Vercel Env에 `DASHBOARD_TOKEN`, `ENV=production`,
+   `BAILIAN_TOKEN_PLAN_API_KEY` 설정
+5. 매일 07:17 KST 자동 수집: `.github/workflows/daily-collect.yml`
+6. PR/푸시 테스트: `.github/workflows/ci.yml`
 
-## ?먯닔 ?ㅻ챸
+## 환경변수
 
-- 湲고쉶?먯닔 = 40횞?곸쐞湲?좎꽑??+ 30횞?깆옣?뺢퇋????5% 留뚯젏) + 30횞(1?믨꼍?곷룄(1留?湲 ?ы솕))
-  ??理쒖냼 2?쇱튂 ?곗씠???꾩슂
-- ?곸뾽??= ?쇳븨 ?곹뭹 ?샕룰?寃⑸? 湲곕컲 0~100
-- ?섏슂吏??= ?곗씠?곕옪 ?듭빱(湲곕낯 "?됱옣怨?) ?鍮??곷? ?섏슂 ??湲고쉶?먯닔 ?곸쐞 200媛쒕쭔 留ㅼ씪 ?뺤쬆
-- ?꾨줉???좏샇?대?濡??덈? 湲곗????꾨떂 ???먯떆媛믨낵 ?④퍡 ?먮떒
+| 이름 | 설명 |
+|---|---|
+| `DATABASE_URL` | Postgres 접속 문자열. **비개발 환경 필수** (미설정 시 기동 거부, fail-closed) |
+| `NAVER_CLIENT_ID` / `NAVER_CLIENT_SECRET` | 네이버 검색/데이터랩 API 키 |
+| `BAILIAN_TOKEN_PLAN_API_KEY` | 초안·이미지 생성 LLM 키 (Token Plan) |
+| `BAILIAN_TOKEN_PLAN_BASE_URL` | LLM 엔드포인트 오버라이드 (선택) |
+| `DASHBOARD_TOKEN` | 대시보드 API 토큰. **비개발 환경 필수** (읽기·쓰기 전부 인증) |
+| `ENV` | `development`(기본, 인증 생략) / 그 외 값은 전부 프로덕션 취급 (소문자 정규화) |
+| `DATALAB_ANCHOR` | 수요지수 정규화 앵커 키워드 (기본 `냉장고`) |
+| `ACTIVE_KEYWORD_CAP` / `DAILY_NEW_KEYWORD_CAP` | 활성 키워드 총량(기본 500) / 일일 신규 상한(0=무제한) |
 
-## ?ㅼ썙???섎챸二쇨린
+## 설계 제약
 
-- ?쒖꽦 珥앸웾 罹?200媛?(`ACTIVE_KEYWORD_CAP`) ??API 荑쇳꽣쨌Actions 遺꾨웾????罹?湲곗??쇰줈 ?곗젙??(?ㅼ륫 ?ㅼ썙?쒕떦 ~10珥? 1,000媛쒕뒗 60遺???꾩븘??珥덇낵)
-- 諛쒓껄 14???꾩뿉????깃낵(湲고쉶 < 35, ?곸뾽??< 30)硫??먮룞 ???
-- ??쒕낫??"?쒖쇅" 踰꾪듉?쇰줈 ?섎룞 ?쒖쇅/蹂듭썝
-- 蹂댁〈: ?ㅻ깄??90?? ?곸쐞湲 諛쒗뻾??30?? 濡쒓렇 180??
+- 활성 키워드 상한 500개(`ACTIVE_KEYWORD_CAP`) — API 할당·Actions 예산·Supabase 무료
+  한도를 고려한 계수 (예산 60초당 ~10개 스냅샷 순환)
+- 발견 14일 이상 + 최근 7일 성과가 백분위 하위권(기회점수 P25) & 쇼핑클릭 < 0.5면 자동 은퇴
+  (성과 boost ≥ 10 키워드는 보호, NULL 점수는 수집 실패로 간주해 보호)
+- 날짜 키는 전부 KST (러너/서버리스는 UTC라 오염 방지)
+- 보존: daily_stats 90일, top_results 30일, collection_log 180일
+- 외부 API(네이버/데이터랩/쇼핑인사이트/LLM)는 429·5xx·네트워크 오류 시 지수 백오프 재시도
 
-## ?댁쁺 二쇱쓽?ы빆
+## 주요 설계 결정
 
-- **?곌린 ?숈옉(?쒕뱶/?섏쭛/?쒖쇅)? `DASHBOARD_TOKEN` ?꾩슂** ????쒕낫???곗륫 ?곷떒???낅젰쨌??? **?꾨줈?뺤뀡(`ENV=production`)?먯꽌???좏겙 誘몄꽕?????쒕쾭媛 湲곕룞?섏? ?딆쓬(fail-closed)** ??濡쒖뺄 媛쒕컻留??몄쬆 ?앸왂
-- ?먮룞?꾩꽦? 鍮꾧났???붾뱶?ъ씤????李⑤떒 ???먮룞 以묐떒쨌濡쒓렇 湲곕줉 + exit 1(?ㅽ뙣 硫붿씪). 李⑤떒 ??cron-job.org(臾대즺)媛 `/collect`瑜?`{"trigger":"schedule"}`濡??몄텧???꾩껜 ?뚯씠?꾨씪?몄쓣 ?泥?
-- ?섎룞 ?섏쭛 踰꾪듉? ?쒓컙 ?덉궛(45珥? ???쇰? 媛깆떊????諛쒓뎬쨌媛쒕퀎 ?몄텧源뚯? ?덉궛 ?곸슜. ?꾩껜 ?섏쭛? ?ㅼ?以꾨윭 ?대떦
-- GitHub Actions ?ㅼ?以꾩? ?덊룷 60??臾댄솢?????먮룞 鍮꾪솢?깊솕 ???뚰겕?뚮줈?곌? keep-alive 而ㅻ컠?쇰줈 ?먯껜 諛⑹?
-- Supabase 臾대즺??7??臾댄솢?????쇱떆?뺤? ??**??쒕낫?쒖뿉???섎룞 蹂듦뎄** ?꾩슂. /status??"留덉?留??깃났 ?섏쭛" 寃쎄퀬? Actions ?ㅽ뙣 硫붿씪??臾댁떆?섏? 留?寃?
-- ?쒗겕由우? GitHub Secrets/Vercel Env?먮쭔 蹂닿?, ?덊룷 而ㅻ컠 湲덉?
+- **쓰기 작업(시드/수집/은퇴)은 `DASHBOARD_TOKEN` 필수** — 프로덕션(`ENV≠development`)에서는
+  토큰 미설정 시 기동 자체를 거부 (fail-closed). 읽기 API도 v15부터 동일 토큰 요구.
+- 수집 실패는 조용히 성공 처리 금지 — 상태(partial/failed) 기록 + exit 1(실패 메일).
+  대체 스케줄러(cron-job.org)가 `/collect`에 `{"trigger":"schedule"}`로 호출하면 전체
+  파이프라인(발굴·수요·쇼핑클릭·은퇴·보존) 실행.
+- 수동 수집 버튼은 시간 예산(45초) 내 스냅샷만 — 전체 수집은 스케줄러 담당.
+- GitHub Actions 비활성화 방지: 50일 미커밋 시 keep-alive 빈 커밋.
+- Supabase 무료 한도(7일) 대응: 미사용 시 정지되므로 `/status`의 '마지막 성공 수집'과
+  Actions 실패 메일을 주기적으로 확인.
+- 키는 GitHub Secrets/Vercel Env에만 저장, 커밋 금지 (`.env*`는 gitignore 대상,
+  `.env.example`만 예외)
 
+## 구조
+
+| 모듈 | 역할 |
+|---|---|
+| `collect.py` | 배치 오케스트레이션 (발굴→스냅샷→수요→쇼핑클릭→은퇴→보존, 실행 잠금·예산) |
+| `autocomplete.py` / `refine.py` | 자동완성 BFS 확장 / 노이즈 정제 |
+| `analyzer.py` / `outline.py` | 블로그 검색 신호 추출 / 상위글 골격 구조화 |
+| `scoring.py` / `db.py` | 점수 공식 / 저장소(SQLite↔Postgres 이중 SQL, 백분위, priority SQL) |
+| `draft_pipeline.py` / `draft_generator.py` / `image_gen.py` | 2패스 초안 + 검수 / LLM 호출 / 이미지 |
+| `llm_client.py` | LLM 공통 레이어 (키 해석·펜스 제거·오류 정규화) |
+| `datalab.py` / `shopping_insight.py` / `naver_client.py` | 외부 API (재시도·오류 정규화) |
+| `server.py` / `static/` | FastAPI + 대시보드 SPA |
+
+## 설계 문서
+
+`docs/superpowers/specs/` — 대시보드 설계·UX, v14 추출·추천필터링 개선고도화(데이터 기반
+자가보정 임계) 등.

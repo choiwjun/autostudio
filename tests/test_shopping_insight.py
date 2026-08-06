@@ -2,6 +2,7 @@
 # v4: 쇼핑인사이트(검색 클릭 추이) — 쇼핑 검색 API 종료 대체 상업 신호
 import requests
 
+import datalab
 from datalab import DatalabError
 from shopping_insight import fetch_click_ratios
 
@@ -40,6 +41,8 @@ def test_anchor_zero_raises(monkeypatch):
 
 
 def test_http_error_raises(monkeypatch):
+    # v15: 429는 재시도 후 소진 시 실패 (슬립 모킹)
+    monkeypatch.setattr(datalab.time, "sleep", lambda s: None)
     monkeypatch.setattr(requests, "post",
                         lambda *a, **k: FakeResponse({}, status_code=429))
     try:
@@ -51,6 +54,8 @@ def test_http_error_raises(monkeypatch):
 
 
 def test_connection_error_becomes_datalab_error(monkeypatch):
+    monkeypatch.setattr(datalab.time, "sleep", lambda s: None)
+
     def boom(*a, **k):
         raise requests.ConnectionError("down")
 

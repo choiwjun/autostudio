@@ -38,3 +38,9 @@ def test_info_patterns_with_spaces():
     # 공백 유지 매칭 — '하는 법' 등 \s* 허용 패턴
     assert classify("청소 하는 법") == Intent.INFO
     assert classify("보험 추천 방법") == Intent.INFO
+
+
+def test_daehaeseo_is_not_compare():
+    # v15: '대해서'는 비교 신호가 아님 — "실비보험에 대해서"는 정보형
+    assert classify("실비보험에 대해서") == Intent.INFO
+    assert classify("연말정산에 대해서 알려주세요") == Intent.INFO

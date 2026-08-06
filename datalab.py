@@ -1,10 +1,35 @@
+import time
+
 import requests
 
 DATALAB_URL = "https://openapi.naver.com/v1/datalab/search"
+RETRY_STATUSES = (429, 500, 502, 503, 504)
+RETRIES = 3
 
 
 class DatalabError(Exception):
     pass
+
+
+def post_with_retry(url, payload, headers, timeout=10):
+    """v15: 429/5xx·네트워크 오류는 지수 백오프로 재시도 — 기존 1회성 호출은
+    429 한 번에 수요/쇼핑 단계 전체가 중단됐음. 반환: Response 또는 DatalabError."""
+    last_msg = ""
+    for attempt in range(RETRIES):
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
+        except requests.RequestException as e:
+            last_msg = f"network: {e}"
+            if attempt < RETRIES - 1:
+                time.sleep(0.5 * (2 ** attempt))
+                continue
+            raise DatalabError(f"네트워크 오류: {e}") from e
+        if resp.status_code in RETRY_STATUSES and attempt < RETRIES - 1:
+            last_msg = f"HTTP {resp.status_code}"
+            time.sleep(0.5 * (2 ** attempt))
+            continue
+        return resp
+    raise DatalabError(f"재시도 소진: {last_msg}")
 
 
 def fetch_demand_ratios(client_id, client_secret, keywords, anchor,
@@ -21,13 +46,13 @@ def fetch_demand_ratios(client_id, client_secret, keywords, anchor,
         {"groupName": kw, "keywords": [kw]} for kw in keywords[:4]
     ]
     try:
-        resp = requests.post(
+        resp = post_with_retry(
             DATALAB_URL,
-            json={
+            {
                 "startDate": start_date, "endDate": end_date,
                 "timeUnit": "date", "keywordGroups": groups,
             },
-            headers={
+            {
                 "X-Naver-Client-Id": client_id,
                 "X-Naver-Client-Secret": client_secret,
                 "Content-Type": "application/json",

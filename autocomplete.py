@@ -121,6 +121,8 @@ def expand_keywords(seeds, url, known=frozenset(), max_new=100, max_depth=2,
                 if sug not in known and len(new_found) < max_new:
                     new_found.append(sug)
         queue = next_queue
-    if requests_made > 0 and successes == 0:
+    # v15: 중단 사유 보존 — 예산 소진('budget')으로 멈춘 실행이 성공 0건이라는 이유로
+    # 'blocked'로 덮어써 차단으로 오보고되던 문제 (차단은 성공 0회 AND 예산 중단 아님)
+    if stopped is None and requests_made > 0 and successes == 0:
         stopped = "blocked"  # 전면 실패도 차단으로 간주 (성공 0회)
     return new_found, origins, stopped

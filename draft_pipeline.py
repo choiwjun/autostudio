@@ -11,13 +11,21 @@ from draft_generator import (
     DraftGenerationError, _append_faq_if_missing, _run_llm, parse_draft,
 )
 from intent import classify, intent_template
+from llm_client import strip_code_fence
 
-# [4] 검수 임계
+# ---------- [4] 검수 임계 + 프롬프트 지시 (단일 소스) ----------
+# v15: 프롬프트가 요구하는 범위와 검수 임계를 한 곳에서 관리 — 분리돼 있으면
+# '프롬프트 50~200자 vs 검수 30~400자'식 드리프트로 억울한 검수 실패가 생긴다.
+# 검수 임계는 모델 융통성을 위해 프롬프트 범위보다 느슨하게 둔다.
 TITLE_MAX_LEN = 30
-BODY_MIN_LEN = 3000           # 애드포스트: 길이 = 스크롤 = 광고 노출
-H2_MIN_COUNT = 3              # FAQ 제외 본문 섹션 수 (프롬프트 4~6개, 병합 허용 3)
-KEYWORD_DENSITY_MIN = 0.0025  # 400자에 1회 — 프롬프트 '10~15회 사용'과 정합
-# (v14.1: 기존 '8~15회'는 하한 8~9회 때 밀도 0.002로 검수 하한 미달 — 하한을 10회로 정렬)
+BODY_PROMPT_MIN, BODY_PROMPT_MAX = 3200, 5000  # 프롬프트 요구 길이
+BODY_MIN_LEN = 3000           # 애드포스트: 길이 = 스크롤 = 광고 노출 (검수 하한)
+H2_PROMPT_MIN, H2_PROMPT_MAX = 4, 6            # 프롬프트 요구 H2 수
+H2_MIN_COUNT = 3              # 검수 하한 — FAQ 제외, 섹션 병합 허용
+FIRST_PARA_PROMPT_MIN, FIRST_PARA_PROMPT_MAX = 50, 200
+FIRST_PARA_QC_MIN, FIRST_PARA_QC_MAX = 30, 400
+KEYWORD_USE_MIN, KEYWORD_USE_MAX = 10, 15      # 프롬프트 지시 + 검수 피드백 목표
+KEYWORD_DENSITY_MIN = 0.0025  # 400자에 1회 — KEYWORD_USE 하한(10회)/4000자와 정합
 KEYWORD_DENSITY_MAX = 0.03    # 3% 초과는 도배
 KEYWORD_DENSITY_BASE_CAP = 4000  # v11: 밀도 분모 상한 — 긴 글(5000자)이 불리하지 않게
 FAKE_EXPERIENCE = ("제가 직접", "직접 사용해", "직접 분석해", "제 경험", "제가 해")
@@ -54,7 +62,7 @@ def pass1_outline(keyword, structure, runner=None):
 {q_text}
 
 ## 요구사항
-1. H2 소제목 4~6개 (질문형 또는 정보형, 30자 이내)
+1. H2 소제목 {H2_PROMPT_MIN}~{H2_PROMPT_MAX}개 (질문형 또는 정보형, 30자 이내)
 2. 각 H2 아래에 2~4개 핵심 불릿 (섹션에서 다룰 내용 요약)
 3. 마지막 H2는 '자주 묻는 질문'
 
@@ -64,18 +72,17 @@ def pass1_outline(keyword, structure, runner=None):
 }}
 """
     raw = (runner or _run_llm)(prompt, timeout=90)
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.startswith("json"):
-            text = text[4:]
+    text = strip_code_fence(raw)  # v15: 공용 펜스 제거 (대문자 ```JSON 포함)
     try:
         data = json.loads(text)
     except json.JSONDecodeError as e:
         raise DraftGenerationError(f"pass1 not json: {text[:200]}") from e
     h2s = data.get("h2s", [])
-    if not h2s:
-        raise DraftGenerationError("pass1 empty h2s")
+    # v15: 스키마 검증 — title 없는 h2가 pass2에서 KeyError를 내 재시도 경로를
+    # 우회하고 500으로 직행하던 문제를 진입점에서 차단 (DraftGenerationError는 재시도됨)
+    if not h2s or not all(
+            isinstance(h, dict) and str(h.get("title") or "").strip() for h in h2s):
+        raise DraftGenerationError("pass1 malformed h2s")
     return h2s
 
 
@@ -90,16 +97,16 @@ def pass2_expand(keyword, h2s, intent, has_facts, runner=None, density_feedback=
     grounding = "" if has_facts else (
         "\n## 데이터 그라운딩\n- 실측 수치(facts)가 없으므로 구체적 금액·수치 창작 금지.\n"
         "- '보통', '통상', '확인해야 하는 기준' 같은 검증 가능한 표현 사용.")
-    prompt = f"""키워드 '{keyword}' 블로그 글을 아래 골격을 확장해 3200~5000자로 작성해줘.
+    prompt = f"""키워드 '{keyword}' 블로그 글을 아래 골격을 확장해 {BODY_PROMPT_MIN}~{BODY_PROMPT_MAX}자로 작성해줘.
 
 ## H2 골격 (각 섹션을 500~900자로 확장)
 {skeleton}
 
 ## 필수 규칙
-1. 첫문단: 키워드 질문에 즉답 (50~200자, 서론 금지)
+1. 첫문단: 키워드 질문에 즉답 ({FIRST_PARA_PROMPT_MIN}~{FIRST_PARA_PROMPT_MAX}자, 서론 금지)
 2. 각 H2 섹션: 골격의 불릿을 자연스럽게 본문으로 확장, 2~3문단
 3. 표(markdown table) 1~2개 이상 포함
-4. 키워드 '{keyword}'를 본문 전체에 자연스럽게 10~15회 사용 (도배 금지, 문맥 속에 녹일 것)
+4. 키워드 '{keyword}'를 본문 전체에 자연스럽게 {KEYWORD_USE_MIN}~{KEYWORD_USE_MAX}회 사용 (도배 금지, 문맥 속에 녹일 것)
 5. 말투: 친근한 존댓말. 1인칭 허위 경험('제가 직접...') 금지 — 객관적 조언으로
 6. 마지막에 '## 자주 묻는 질문' 섹션 1개만 (H3 질문 3~5개, 답변 40~120자). 다른 FAQ성 섹션 금지
 {intent_section}
@@ -127,7 +134,7 @@ def check_title(draft):
 
 def check_first_paragraph(draft):
     fp = draft.get("first_paragraph", "")
-    return 30 <= len(fp) <= 400
+    return FIRST_PARA_QC_MIN <= len(fp) <= FIRST_PARA_QC_MAX
 
 
 def check_body_length(draft):
@@ -250,12 +257,22 @@ def generate_two_pass(keyword, structure, runner=None, retry_budget_seconds=None
                 # 예산 초과 — 미달 항목은 실측 상세와 함께 응답 경고로 전달
                 return draft, _enrich_failed(failed, draft, keyword)
             if "keyword_density" in failed:
+                # v15: 미달/초과 분기 — 기존은 항상 '높이라' 지시해 도배(초과)인
+                # 초안을 재생성할수록 더 악화시키던 문제
                 count, density = keyword_density_stats(draft, keyword)
+                band = (f"밀도 {KEYWORD_DENSITY_MIN:.2%}~{KEYWORD_DENSITY_MAX:.0%}, "
+                        f"{KEYWORD_USE_MIN}~{KEYWORD_USE_MAX}회")
+                if density < KEYWORD_DENSITY_MIN:
+                    action = (
+                        f"각 섹션·FAQ 답변에 문맥 속 자연스러운 언급을 추가해 "
+                        f"{KEYWORD_USE_MIN}~{KEYWORD_USE_MAX}회로 높일 것.")
+                else:
+                    action = (
+                        f"반복된 언급을 자연스러운 표현으로 교체·삭제해 "
+                        f"{KEYWORD_USE_MAX}회 이하로 낮출 것 (도배는 검색 품질 저하).")
                 density_feedback = (
                     f"\n## 검수 피드백 (이번 작성분에 반드시 반영)\n"
-                    f"- 키워드 '{keyword}'가 본문에 {count}회·밀도 {density:.2%}로 "
-                    f"검수 하한({KEYWORD_DENSITY_MIN:.2%}) 미달.\n"
-                    f"- 각 섹션·FAQ 답변에 문맥 속 자연스러운 언급을 추가해 "
-                    f"10~15회(밀도 {KEYWORD_DENSITY_MIN:.2%}~{KEYWORD_DENSITY_MAX:.0%})로 높일 것.\n")
+                    f"- 키워드 '{keyword}'가 본문에 {count}회·밀도 {density:.2%} — "
+                    f"허용 밴드({band}) 밖.\n- {action}\n")
             continue  # 1회 재생성
     return draft, _enrich_failed(failed, draft, keyword)

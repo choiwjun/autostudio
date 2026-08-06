@@ -1,18 +1,10 @@
 # tests/test_draft_generator.py
 import pytest
 
-from draft_generator import (
-    DraftGenerationError, generate_draft, parse_draft,
-)
+from draft_generator import DraftGenerationError, parse_draft
 
-
-def _runner(ok=True):
-    def run(prompt, timeout=90):
-        if not ok:
-            raise DraftGenerationError("opencode not found")
-        return ('{"title": "제목", "first_paragraph": "첫문단", '
-                '"body": "## 소제목\\n본문"}')
-    return run
+# v15: v8 단일패스 generate_draft는 프로덕션 미사용 사어 코드라 제거됨 —
+# 초안 생성 진입점은 draft_pipeline.generate_two_pass 유일.
 
 
 def test_parse_draft_json():
@@ -25,6 +17,14 @@ def test_parse_draft_strips_codeblock():
     assert parse_draft(raw)["title"] == "t"
 
 
+def test_parse_draft_strips_uppercase_codeblock():
+    # v15: 공용 펜스 제거 — 대문자 ```JSON도 처리 (기존 소문자 전용 매칭 누락)
+    raw = '```JSON\n{"title": "t", "first_paragraph": "p", "body": "b"}\n```'
+    assert parse_draft(raw)["title"] == "t"
+    raw2 = '```\n{"title": "t2", "first_paragraph": "p", "body": "b"}\n```'
+    assert parse_draft(raw2)["title"] == "t2"
+
+
 def test_parse_draft_missing_field():
     with pytest.raises(DraftGenerationError):
         parse_draft('{"title": "t"}')
@@ -33,22 +33,6 @@ def test_parse_draft_missing_field():
 def test_parse_draft_not_json():
     with pytest.raises(DraftGenerationError):
         parse_draft("그냥 텍스트")
-
-
-def test_generate_draft_uses_runner():
-    d = generate_draft("에어프라이어", {"questions": ["어떤 걸?"]}, runner=_runner())
-    assert d["title"] == "제목"
-    assert d["body"].startswith("##")
-
-
-def test_generate_draft_runner_error_propagates():
-    with pytest.raises(DraftGenerationError):
-        generate_draft("에어프라이어", {}, runner=_runner(ok=False))
-
-
-def test_generate_draft_accepts_str_structure():
-    d = generate_draft("에어프라이어", '{"questions": []}', runner=_runner())
-    assert d["title"]
 
 
 def test_faq_appended_when_missing():

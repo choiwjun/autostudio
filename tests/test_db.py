@@ -441,6 +441,46 @@ def test_priority_sql_matches_v6_priority(tmp_path):
     d.close()
 
 
+def test_migrate_repairs_legacy_schema(tmp_path):
+    # v15: 구버전(컬럼 누락) DB에서도 init()이 누락 컬럼만 보완 —
+    # shop_click_idx는 마이그레이션 대상에서 빠져 insert가 깨지던 것의 회귀 방지.
+    # 중간 충돌로 일부만 추가된 DB(묶음 ALTER 실패 시나리오)도 개별 가드로 복구.
+    import sqlite3
+    dbfile = tmp_path / "legacy.db"
+    conn = sqlite3.connect(dbfile)
+    conn.execute(
+        "CREATE TABLE daily_stats (id INTEGER PRIMARY KEY, keyword_id INTEGER, "
+        "day TEXT, total_sim INTEGER)")
+    conn.execute(
+        "CREATE TABLE keywords (id INTEGER PRIMARY KEY, keyword TEXT UNIQUE, "
+        "category TEXT DEFAULT '', first_seen TEXT, active INTEGER DEFAULT 1)")
+    conn.commit()
+    conn.close()
+    d = Database(f"sqlite:///{dbfile}")
+    d.init()
+    stat_cols = {r[1] for r in d.conn.execute("PRAGMA table_info(daily_stats)")}
+    assert {"shop_click_idx", "ai_cite_idx", "demand_growth"} <= stat_cols
+    kw_cols = {r[1] for r in d.conn.execute("PRAGMA table_info(keywords)")}
+    assert "performance_boost" in kw_cols
+    # 재실행 멱등 — 이미 있는 컬럼에 duplicate column으로 깨지면 안 됨
+    d.init()
+    d.close()
+
+
+def test_priority_sql_clamps_out_of_range_inputs(tmp_path):
+    # v15: 오염 데이터(범위 초과)에도 Python↔SQL 정합 — 양쪽 다 클램프
+    import scoring
+    d = make_db(tmp_path)
+    kid = d.upsert_keyword("오염 데이터", category="보험", day="2026-08-01")
+    d.insert_daily_stats(kid, "2026-08-02", {
+        "ai_cite_idx": 1.5, "demand_idx": -0.5, "demand_growth": 9.0})
+    rows = {r["keyword"]: r["priority"] for r in d.query_keywords()}
+    expected = scoring.v6_priority(1.5, -0.5, 1.0, 9.0)
+    assert expected == 75.0          # 30×1 + 25×0 + 15×1 + 30×1 (전부 클램프)
+    assert rows["오염 데이터"] == expected
+    d.close()
+
+
 def test_query_growth_min_filter(tmp_path):
     # v14: 상승 프리셋용 demand_growth 하한 필터 (NULL은 자동 제외)
     d = make_db(tmp_path)

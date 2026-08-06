@@ -72,3 +72,12 @@ def test_hashtag_stripped_before_split():
     out = extract_outline(descs)
     assert any("어떻게 하나요?" in q for q in out["questions"])
     assert not any("#" in q for q in out["questions"])
+
+
+def test_decimal_point_not_split_as_sentence():
+    # v15: '3.5만원'의 소수점이 문장 경계로 오인돼 '3.'/'5만원'으로 쪼개지면
+    # facts에 왜곡 수치가 주입됨 — 숫자 사이 마침표는 절단 금지
+    descs = ["월 보험료는 3.5만원 수준이며 보장 범위를 확인해야 합니다."]
+    out = extract_outline(descs)
+    assert any("3.5만원" in f for f in out["facts"])
+    assert not any(f.startswith("5만원") for f in out["facts"])

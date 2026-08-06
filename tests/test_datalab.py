@@ -1,5 +1,6 @@
 import requests
 
+import datalab
 from datalab import DatalabError, fetch_demand_ratios
 
 
@@ -68,6 +69,8 @@ def test_anchor_zero_raises(monkeypatch):
 
 
 def test_http_error_raises(monkeypatch):
+    # v15: 429는 재시도 대상 — 소진 후에도 실패여야 함 (슬립 모킹으로 즉시 소진)
+    monkeypatch.setattr(datalab.time, "sleep", lambda s: None)
     monkeypatch.setattr(requests, "post",
                         lambda *a, **k: FakeResponse({}, status_code=429))
     try:
@@ -78,9 +81,33 @@ def test_http_error_raises(monkeypatch):
         assert "429" in str(e)
 
 
+def test_retry_then_success(monkeypatch):
+    # v15: 429 두 번 뒤 성공 — 재시도로 단계 중단 없이 복구
+    monkeypatch.setattr(datalab.time, "sleep", lambda s: None)
+    calls = {"n": 0}
+    payload = {"results": [
+        {"title": "냉장고", "data": [{"ratio": 50.0}]},
+        {"title": "키워드", "data": [{"ratio": 5.0}]},
+    ]}
+
+    def flaky_post(*a, **k):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return FakeResponse({}, status_code=429)
+        return FakeResponse(payload)
+
+    monkeypatch.setattr(requests, "post", flaky_post)
+    r = fetch_demand_ratios("cid", "csec", ["키워드"], "냉장고",
+                            "2026-07-04", "2026-08-03")
+    assert calls["n"] == 3
+    assert r["키워드"]["ratio"] == 0.1
+
+
 def test_connection_error_becomes_datalab_error(monkeypatch):
     # v3: 네트워크 오류도 DatalabError로 정규화 — 안 하면 update_demand의
     # except DatalabError가 못 잡아 전체 실행이 failed로 처리됨 (스펙 §4.4)
+    monkeypatch.setattr(datalab.time, "sleep", lambda s: None)
+
     def boom(*a, **k):
         raise requests.ConnectionError("down")
 

@@ -221,8 +221,13 @@ class Database:
         "ELSE ds.demand_growth / 0.05 END"
     )
     PRIORITY_SQL = (
-        "ROUND(CAST(30.0 * COALESCE(ds.ai_cite_idx, 0) "
+        # v15: ai_cite도 [0,1] 클램프 — scoring.v6_priority의 max/min과 동일 수식.
+        # (ai_cite_idx는 구조상 ≤1이지만 오염 데이터에도 정합 유지)
+        "ROUND(CAST(30.0 * CASE WHEN COALESCE(ds.ai_cite_idx, 0) >= 1.0 THEN 1.0 "
+        "WHEN COALESCE(ds.ai_cite_idx, 0) <= 0.0 THEN 0.0 "
+        "ELSE COALESCE(ds.ai_cite_idx, 0) END "
         "+ 25.0 * CASE WHEN COALESCE(ds.demand_idx, 0) >= 0.01 THEN 1.0 "
+        "WHEN COALESCE(ds.demand_idx, 0) <= 0.0 THEN 0.0 "
         "ELSE COALESCE(ds.demand_idx, 0) / 0.01 END "
         f"+ 15.0 * {GROWTH_NORM_SQL} "
         f"+ 30.0 * {CPC_TIER_SQL} "
@@ -327,86 +332,45 @@ LEFT JOIN daily_stats ds
                     raise
                 self._connect()
 
+    # v15: 마이그레이션 컬럼 목록 — (테이블, 컬럼, sqlite 선언, pg 선언).
+    # 전부 개별 가드: 마이그레이션 중간 충돌로 일부만 추가된 DB에서도 다음 init이
+    # 누락분만 마저 추가 (기존 묶음 ALTER는 duplicate column 한 건에 init 전체 실패).
+    # shop_click_idx는 기존 마이그레이션에서 누락돼 구버전 DB가 insert 시 깨지던 것 보완.
+    _MIGRATE_COLUMNS = (
+        ("daily_stats", "ai_cite_idx", "REAL", "DOUBLE PRECISION"),
+        ("daily_stats", "demand_growth", "REAL", "DOUBLE PRECISION"),
+        ("daily_stats", "shop_click_idx", "REAL", "DOUBLE PRECISION"),
+        ("drafts", "section_images", "TEXT NOT NULL DEFAULT ''",
+         "TEXT NOT NULL DEFAULT ''"),
+        ("drafts", "published_at", "TEXT NOT NULL DEFAULT ''",
+         "TEXT NOT NULL DEFAULT ''"),
+        ("drafts", "performance_score", "REAL", "DOUBLE PRECISION"),
+        ("drafts", "performance_note", "TEXT NOT NULL DEFAULT ''",
+         "TEXT NOT NULL DEFAULT ''"),
+        ("keywords", "performance_boost", "REAL NOT NULL DEFAULT 0",
+         "DOUBLE PRECISION NOT NULL DEFAULT 0"),
+    )
+
     def _migrate(self):
         # v6: 기존 DB(스키마 변경 전 생성)에 신규 컬럼 추가 — CREATE TABLE IF NOT EXISTS는
         # 이미 존재하는 테이블에는 컬럼을 추가하지 않으므로 명시적 ALTER 필요.
         # (SQLite: PRAGMA 검사, Postgres: ADD COLUMN IF NOT EXISTS 네이티브)
-        if self.dialect == "postgres":
-            self._q(
-                None,
-                "ALTER TABLE daily_stats ADD COLUMN IF NOT EXISTS ai_cite_idx "
-                "DOUBLE PRECISION",
-                (),
-            )
-            self._q(
-                None,
-                "ALTER TABLE daily_stats ADD COLUMN IF NOT EXISTS demand_growth "
-                "DOUBLE PRECISION",
-                (),
-            )
-            self._q(
-                None,
-                "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS section_images "
-                "TEXT NOT NULL DEFAULT ''",
-                (),
-            )
-            self._q(
-                None,
-                "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS published_at "
-                "TEXT NOT NULL DEFAULT ''",
-                (),
-            )
-            self._q(
-                None,
-                "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS performance_score "
-                "DOUBLE PRECISION",
-                (),
-            )
-            self._q(
-                None,
-                "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS performance_note "
-                "TEXT NOT NULL DEFAULT ''",
-                (),
-            )
-            self._q(
-                None,
-                "ALTER TABLE keywords ADD COLUMN IF NOT EXISTS performance_boost "
-                "DOUBLE PRECISION NOT NULL DEFAULT 0",
-                (),
-            )
-            return
-        rows = self._qd(
-            "SELECT name FROM pragma_table_info('daily_stats') WHERE name = 'ai_cite_idx'",
-            (), fetch=True,
-        )
-        if not rows:
-            self._qd("ALTER TABLE daily_stats ADD COLUMN ai_cite_idx REAL", ())
-        rows = self._qd(
-            "SELECT name FROM pragma_table_info('daily_stats') WHERE name = 'demand_growth'",
-            (), fetch=True,
-        )
-        if not rows:
-            self._qd("ALTER TABLE daily_stats ADD COLUMN demand_growth REAL", ())
-        rows = self._qd(
-            "SELECT name FROM pragma_table_info('drafts') WHERE name = 'section_images'",
-            (), fetch=True,
-        )
-        if not rows:
-            self._qd("ALTER TABLE drafts ADD COLUMN section_images TEXT NOT NULL DEFAULT ''", ())
-        rows = self._qd(
-            "SELECT name FROM pragma_table_info('drafts') WHERE name = 'performance_score'",
-            (), fetch=True,
-        )
-        if not rows:
-            self._qd("ALTER TABLE drafts ADD COLUMN performance_score REAL", ())
-            self._qd("ALTER TABLE drafts ADD COLUMN published_at TEXT NOT NULL DEFAULT ''", ())
-            self._qd("ALTER TABLE drafts ADD COLUMN performance_note TEXT NOT NULL DEFAULT ''", ())
-        rows = self._qd(
-            "SELECT name FROM pragma_table_info('keywords') WHERE name = 'performance_boost'",
-            (), fetch=True,
-        )
-        if not rows:
-            self._qd("ALTER TABLE keywords ADD COLUMN performance_boost REAL NOT NULL DEFAULT 0", ())
+        for table, col, sqlite_decl, pg_decl in self._MIGRATE_COLUMNS:
+            if self.dialect == "postgres":
+                self._q(
+                    None,
+                    f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {pg_decl}",
+                    (),
+                )
+            else:
+                rows = self._qd(
+                    f"SELECT name FROM pragma_table_info('{table}') "
+                    f"WHERE name = '{col}'",
+                    (), fetch=True,
+                )
+                if not rows:
+                    self._qd(
+                        f"ALTER TABLE {table} ADD COLUMN {col} {sqlite_decl}", ())
 
     # ---------- 시드 ----------
 
@@ -830,16 +794,33 @@ LIMIT ? OFFSET ?"""
 
     def insert_draft(self, keyword_id, title, first_paragraph, body,
                      image_url="", status="draft", created_at=""):
-        self._q(
+        # v15: id는 RETURNING/lastrowid로 취득 — 기존 'INSERT 후 ORDER BY id DESC
+        # LIMIT 1 재읽기'는 다중 인스턴스에서 그 사이 끼어든 타 실행의 초안 ID를
+        # 반환할 수 있는 레이스였음
+        values = (keyword_id, title, first_paragraph, body, image_url, status,
+                  created_at, created_at)
+        if self.dialect == "postgres":
+            for attempt in (0, 1):
+                try:
+                    with self.conn.cursor() as cur:
+                        cur.execute(
+                            "INSERT INTO drafts (keyword_id, title, first_paragraph, "
+                            "body, image_url, status, created_at, updated_at) "
+                            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                            values)
+                        draft_id = cur.fetchone()["id"]
+                        self.conn.commit()
+                    return draft_id
+                except CONNECTION_ERRORS:
+                    if attempt == 1:
+                        raise
+                    self._connect()
+        cur = self.conn.execute(
             "INSERT INTO drafts (keyword_id, title, first_paragraph, body, image_url, "
             "status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            "INSERT INTO drafts (keyword_id, title, first_paragraph, body, image_url, "
-            "status, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-            (keyword_id, title, first_paragraph, body, image_url, status,
-             created_at, created_at),
-        )
-        rows = self._qd("SELECT id FROM drafts ORDER BY id DESC LIMIT 1", (), fetch=True)
-        return rows[0]["id"]
+            values)
+        self.conn.commit()
+        return cur.lastrowid
 
     def get_draft(self, draft_id):
         rows = self._qd(

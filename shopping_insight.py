@@ -7,7 +7,8 @@ import requests
 
 SHOPPING_INSIGHT_URL = "https://openapi.naver.com/v1/datalab/shopping/category/keywords"
 
-from datalab import DatalabError  # noqa: E402  (오류 정규화 재사용 — graceful degradation)
+# 오류 정규화 + 재시도 재사용 — graceful degradation (수요 단계와 동일 복원력)
+from datalab import DatalabError, post_with_retry  # noqa: E402
 
 
 def fetch_click_ratios(client_id, client_secret, keywords, anchor, category,
@@ -20,15 +21,15 @@ def fetch_click_ratios(client_id, client_secret, keywords, anchor, category,
         {"name": kw, "param": [kw]} for kw in keywords[:4]
     ]
     try:
-        resp = requests.post(
+        resp = post_with_retry(
             SHOPPING_INSIGHT_URL,
-            json={
+            {
                 "startDate": start_date, "endDate": end_date,
                 "timeUnit": "date", "category": category,
                 "keyword": groups,
                 "device": "", "gender": "", "ages": [],
             },
-            headers={
+            {
                 "X-Naver-Client-Id": client_id,
                 "X-Naver-Client-Secret": client_secret,
                 "Content-Type": "application/json",

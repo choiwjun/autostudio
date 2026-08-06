@@ -1,0 +1,4 @@
+# 개발·테스트 전용 — 프로덕션(Vercel) 빌드는 requirements.txt만 설치
+-r requirements.txt
+pytest==8.3.4
+httpx==0.28.1

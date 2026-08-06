@@ -254,6 +254,61 @@ def test_generate_two_pass_density_feedback_in_retry():
     assert "10~15회" in retry_prompt      # 목표량 명시
 
 
+def _over_density_body(keyword="에어프라이어"):
+    """keyword_density 초과(도배) 본문 — 재생성 피드백 방향 분기 검증용."""
+    parts = []
+    for title in _SECTION_TITLES:
+        kw_sent = f"{keyword} " * 60
+        fill = "구매 전 확인해야 할 항목을 정리했습니다. " * 30
+        parts.append(f"## {title}\n{kw_sent}{fill}\n")
+    table = ("| 구분 | 바스켓형 | 오븐형 |\n| --- | --- | --- |\n"
+             "| 용량 | 3~5L | 10L+ |\n| 가격 | 5~10만원 | 15만원+ |\n")
+    faq = ("## 자주 묻는 질문\n### 세척은 어떻게 하나요?\n"
+           "바스켓과 트레이를 분리해 세척하면 됩니다.\n")
+    return "\n".join(parts) + table + "\n" + faq
+
+
+def test_generate_two_pass_density_feedback_over_direction():
+    # v15: 밀도 초과(도배)면 '낮출 것' 지시 — 기존은 항상 '높일 것'이라
+    # 재생성할수록 도배가 악화되던 문제
+    import json as json_mod
+    calls = []
+
+    def fake_runner(prompt, timeout=90):
+        calls.append(prompt)
+        if "골격을 확장" not in prompt:
+            return _PASS1_JSON
+        n_pass2 = len([c for c in calls if "골격을 확장" in c])
+        if n_pass2 == 1:
+            return json_mod.dumps({
+                "title": "에어프라이어 추천 기준 정리",
+                "first_paragraph": "에어프라이어는 용량과 조리 방식을 먼저 확인해야 합니다. 관리 편의성도 중요합니다.",
+                "body": _over_density_body(),
+            }, ensure_ascii=False)
+        return json_mod.dumps({
+            "title": "에어프라이어 추천 기준 정리",
+            "first_paragraph": "에어프라이어는 용량과 조리 방식을 먼저 확인해야 합니다. 관리 편의성도 중요합니다.",
+            "body": _good_body("에어프라이어"),
+        }, ensure_ascii=False)
+
+    draft, failed = generate_two_pass("에어프라이어", {}, runner=fake_runner)
+    assert failed == []
+    retry_prompt = [c for c in calls if "골격을 확장" in c][1]
+    assert "검수 피드백" in retry_prompt
+    assert "낮출 것" in retry_prompt
+
+
+def test_pass1_malformed_h2_raises_generation_error():
+    # v15: title 없는 h2 → pass2 KeyError가 재시도 경로를 우회해 500 직행하던
+    # 문제를 DraftGenerationError로 정규화 (재시도 대상)
+    with pytest.raises(DraftGenerationError):
+        pass1_outline("키워드", {}, runner=lambda p, timeout=90:
+                      '{"h2s": [{"bullets": ["b"]}]}')
+    with pytest.raises(DraftGenerationError):
+        pass1_outline("키워드", {}, runner=lambda p, timeout=90:
+                      '{"h2s": [{"title": ""}]}')
+
+
 def test_density_warning_includes_measured_count(monkeypatch):
     # v14.1: 재생성 생략(예산 초과) 경로에서도 경고에 실측 수치 포함
     import json as json_mod

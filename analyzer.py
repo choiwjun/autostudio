@@ -7,15 +7,16 @@ def compute_fresh_ratio(post_dates, today, window_days=7):
     if not post_dates:
         return 0.0
     cutoff = today - timedelta(days=window_days)
-    fresh = 0
+    fresh = parsed = 0
     for pd in post_dates:
         try:
             d = date(int(pd[:4]), int(pd[4:6]), int(pd[6:8]))
         except (ValueError, IndexError):
-            continue
-        if d > cutoff:
+            continue  # v15: 파싱 불가 날짜는 분모에서 제외 — fresh_ratio 과소 왜곡 방지
+        parsed += 1
+        if d >= cutoff:  # v15: 정확히 window_days일 전 글도 fresh (기존 > 는 오프바이원)
             fresh += 1
-    return fresh / len(post_dates)
+    return fresh / parsed if parsed else 0.0
 
 
 def analyze_keyword(client, keyword, today):

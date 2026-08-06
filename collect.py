@@ -1,5 +1,6 @@
 # collect.py
 import json
+import logging
 import sys
 import time
 from datetime import date, datetime, timedelta
@@ -30,6 +31,9 @@ TOP_RESULTS_RETENTION_DAYS = 30
 LOG_RETENTION_DAYS = 180
 DATALAB_TOP_N = 200
 DATALAB_WINDOW_DAYS = 30
+DATALAB_TIMEOUT = 10   # 수요·쇼핑 단계 기본 호출 타임아웃 (초)
+
+logger = logging.getLogger("collect")
 
 
 def compute_scores(d, keyword_id, day, stats):
@@ -173,10 +177,17 @@ def update_demand(d, cfg, today, now, budget_seconds=None, started=None):
         if budget_seconds is not None and time.monotonic() - started >= budget_seconds:
             d.log_collection("(datalab)", "partial", "시간 예산 초과로 수요 단계 중단", now)
             break
+        # v15: 잔여 예산 기반 호출 타임아웃 축소 — 스냅샷 단계만 적용되던 오버슛
+        # 가드가 수요 단계에도 적용 (요청 자체는 재시도 복원력 보유)
+        timeout = DATALAB_TIMEOUT
+        if budget_seconds is not None:
+            remaining = budget_seconds - (time.monotonic() - started)
+            timeout = max(2.0, min(DATALAB_TIMEOUT, remaining / 2))
         try:
             ratios = fetch_demand_ratios(
                 cfg["client_id"], cfg["client_secret"],
-                [b["keyword"] for b in batch], cfg["datalab_anchor"], start, today)
+                [b["keyword"] for b in batch], cfg["datalab_anchor"], start, today,
+                timeout=timeout)
         except DatalabError as e:
             d.log_collection("(datalab)", "error", str(e), now)
             break  # 수요 단계만 중단 — 나머지 파이프라인은 정상 (스펙 §4.4)
@@ -205,11 +216,15 @@ def update_shop_clicks(d, cfg, today, now, budget_seconds=None, started=None):
             d.log_collection("(shopping)", "partial",
                              "시간 예산 초과로 쇼핑 클릭 단계 중단", now)
             break
+        timeout = DATALAB_TIMEOUT  # v15: 예산 기반 타임아웃 (수요 단계와 동일)
+        if budget_seconds is not None:
+            remaining = budget_seconds - (time.monotonic() - started)
+            timeout = max(2.0, min(DATALAB_TIMEOUT, remaining / 2))
         try:
             ratios = fetch_click_ratios(
                 cfg["client_id"], cfg["client_secret"],
                 [b["keyword"] for b in batch], cfg["datalab_anchor"],
-                category, start, today)
+                category, start, today, timeout=timeout)
         except DatalabError as e:
             d.log_collection("(shopping)", "error", str(e), now)
             break  # 쇼핑 클릭 단계만 중단 — 나머지 파이프라인은 정상 (스펙 §4.4)
@@ -303,16 +318,21 @@ def run_collection(cfg, client=None, today=None, trigger="schedule",
 
 
 def main():
+    # v15: print → 구조화 로그 (관측성 공백 해소 시작점)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s")
     cfg = config_mod.load_config()
     result = run_collection(cfg, trigger="schedule")
     if result.get("locked"):
-        print("이미 수집이 실행 중입니다 — 종료")
+        logger.info("이미 수집이 실행 중입니다 — 종료")
         raise SystemExit(0)
-    print(f"완료: 신규 {result['new_keywords']}개, 스냅샷 {result['snapshotted']}개, "
-          f"수요갱신 {result['demand_updated']}개, 쇼핑클릭 {result['shop_clicks_updated']}개, "
-          f"은퇴 {result['retired']}개, 오류 {len(result['errors'])}개"
-          + (f" — 발굴 중단({result.get('crawl_stopped')})"
-             if result.get("crawl_stopped") else ""))
+    logger.info(
+        "완료: 신규 %d개, 스냅샷 %d개, 수요갱신 %d개, 쇼핑클릭 %d개, 은퇴 %d개, 오류 %d개%s",
+        result["new_keywords"], result["snapshotted"], result["demand_updated"],
+        result["shop_clicks_updated"], result["retired"], len(result["errors"]),
+        f" — 발굴 중단({result.get('crawl_stopped')})"
+        if result.get("crawl_stopped") else "")
     # v3: 자동완성 차단은 스냅샷 성공 여부와 무관하게 exit 1 — 차단을 조기에 인지해야
     # 대체 스케줄러(cron-job.org)로 전환할 수 있음 (스펙 §5)
     if result.get("crawl_stopped") == "blocked":

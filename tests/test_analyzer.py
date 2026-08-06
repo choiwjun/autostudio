@@ -1,5 +1,5 @@
 # tests/test_analyzer.py
-from datetime import date
+from datetime import date, timedelta
 
 from analyzer import analyze_keyword, compute_fresh_ratio
 
@@ -13,6 +13,26 @@ def test_compute_fresh_ratio():
 
 def test_compute_fresh_ratio_all_old():
     assert compute_fresh_ratio(["20200101"] * 20, TODAY) == 0.0
+
+
+def test_compute_fresh_ratio_unparseable_excluded_from_denominator():
+    # v15: 파싱 실패 건은 분모에서 제외 — fresh_ratio 과소 왜곡 방지
+    # 8/1 신선 8건 + 오래됨 4건 + 파싱 불가 8건 → 8/12 (기존식은 8/20)
+    post_dates = ["20260801"] * 8 + ["20200101"] * 4 + ["", "bad", "2026"] * 4
+    assert len(post_dates) == 24
+    assert compute_fresh_ratio(post_dates, TODAY) == 8 / 12
+
+
+def test_compute_fresh_ratio_boundary_inclusive():
+    # v15: 정확히 window_days(7일) 전 글도 fresh — 기존 '>' 비교 오프바이원 수정
+    exact = (TODAY - timedelta(days=7)).strftime("%Y%m%d")
+    assert compute_fresh_ratio([exact], TODAY) == 1.0
+    older = (TODAY - timedelta(days=8)).strftime("%Y%m%d")
+    assert compute_fresh_ratio([older], TODAY) == 0.0
+
+
+def test_compute_fresh_ratio_all_unparseable():
+    assert compute_fresh_ratio(["", "xx"], TODAY) == 0.0
 
 
 def test_analyze_keyword_combines_sources():

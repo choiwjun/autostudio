@@ -183,6 +183,23 @@ def test_production_without_token_fails_closed(tmp_path):
                     "manual_budget_seconds": 45})
 
 
+def test_env_case_variant_also_fails_closed(tmp_path):
+    # v15: 'Production' 대소문자 변형으로 fail-closed를 우회하던 경로 차단
+    import pytest
+    with pytest.raises(RuntimeError):
+        create_app({"db_url": f"sqlite:///{tmp_path / 't.db'}",
+                    "dashboard_token": "", "env": "Production",
+                    "manual_budget_seconds": 45})
+
+
+def test_production_reads_require_token(tmp_path):
+    # v15: 읽기 API도 인증 — 수익 전략 데이터(키워드·성과) 공개 금지
+    client = TestClient(make_app(tmp_path, env="production"))
+    for path in ("/keywords", "/keywords/1", "/seeds", "/status", "/categories"):
+        assert client.get(path).status_code == 401, path
+        assert client.get(path, headers=AUTH).status_code == 200, path
+
+
 def test_status(tmp_path):
     client = TestClient(make_app(tmp_path))
     body = client.get("/status").json()
@@ -270,7 +287,9 @@ def test_draft_image_success_updates_url(tmp_path, monkeypatch):
     monkeypatch.setattr(draft_pipeline, "generate_two_pass", lambda k, s, **kw: (
         {"title": "제목", "first_paragraph": "첫문단", "body": "본문"}, []))
     monkeypatch.setenv("BAILIAN_TOKEN_PLAN_API_KEY", "test-key")
-    monkeypatch.setattr(image_gen, "_run_http", lambda prompt: "https://img.example.com/1.png")
+    # v15: image_gen이 timeout을 실제로 전달 — 목도 시그니처 정합 필요
+    monkeypatch.setattr(image_gen, "_run_http",
+                        lambda prompt, timeout=55: "https://img.example.com/1.png")
     client = TestClient(make_app(tmp_path))
     did = client.post("/drafts", json={"keyword_id": 1}).json()["id"]
     body = client.post(f"/drafts/{did}/image").json()

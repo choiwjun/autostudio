@@ -114,10 +114,20 @@ def load_config(load_env=True):
     if load_env:
         load_dotenv()          # .env (있으면)
         load_dotenv(".env.local")  # 로컬 시크릿 (gitignore 대상, 우선 순위는 .env가 높음)
+    # v15: env 소문자 정규화 — 'Production' 변형이 fail-closed를 우회하던 문제 차단
+    env = os.getenv("ENV", "development").strip().lower()
+    # v15: DATABASE_URL fail-closed — 비개발 환경에서 미설정 시 sqlite로 조용히
+    # 폴백되면 서버리스/GH Actions에서 데이터가 무소음 유실됨. 개발만 로컬 sqlite 허용.
+    db_url = os.getenv("DATABASE_URL", "")
+    if not db_url:
+        if env != "development":
+            raise RuntimeError(
+                "DATABASE_URL required when ENV is not 'development' (fail-closed)")
+        db_url = "sqlite:///data/keywords.db"
     return {
         "client_id": os.getenv("NAVER_CLIENT_ID", ""),
         "client_secret": os.getenv("NAVER_CLIENT_SECRET", ""),
-        "db_url": os.getenv("DATABASE_URL", "sqlite:///data/keywords.db"),
+        "db_url": db_url,
         # 0 = 일일 신규 제한 없음. ACTIVE_KEYWORD_CAP은 별도 안전 상한.
         "daily_new_keyword_cap": int(os.getenv("DAILY_NEW_KEYWORD_CAP", "0")),
         "active_keyword_cap": int(os.getenv("ACTIVE_KEYWORD_CAP", "500")),
@@ -131,7 +141,7 @@ def load_config(load_env=True):
         "datalab_enabled": os.getenv("DATALAB_ENABLED", "1") == "1",
         "datalab_anchor": os.getenv("DATALAB_ANCHOR", "냉장고"),
         "shopping_insight_category": os.getenv("SHOPPING_INSIGHT_CATEGORY", "50000000"),
-        "env": os.getenv("ENV", "development"),
+        "env": env,  # v15: 소문자 정규화값
         "run_lock_stale_minutes": int(os.getenv("RUN_LOCK_STALE_MINUTES", "60")),
         # v6: 시드 비어 있을 때 자동 초기화용 집중 시드 + 애드포스트 CPC 등급
         # v8: 무카테고리 키워드 자동 분류 규칙 (시드 상속 실패 시 폴백)
