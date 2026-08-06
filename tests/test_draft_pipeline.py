@@ -185,3 +185,72 @@ def test_generate_two_pass_retry_budget_skips_second_cycle(monkeypatch):
 
 def test_density_bounds_are_sane():
     assert 0 < KEYWORD_DENSITY_MIN < KEYWORD_DENSITY_MAX
+
+
+# ---------- v14.1: 밀도 피드백 재생성 + 상세 경고 ----------
+
+def _low_density_body(keyword="에어프라이어"):
+    """검수 중 keyword_density만 미달 — 4회 언급(밀도 ~0.12%)·나머지 항목 통과."""
+    parts = []
+    for title in _SECTION_TITLES:
+        kw_sent = f"{keyword} 선택 기준을 확인합니다. "
+        fill = "구매 전 확인해야 할 항목을 정리했습니다. " * 40
+        parts.append(f"## {title}\n{kw_sent}{fill}\n")
+    table = ("| 구분 | 바스켓형 | 오븐형 |\n| --- | --- | --- |\n"
+             "| 용량 | 3~5L | 10L+ |\n| 가격 | 5~10만원 | 15만원+ |\n")
+    faq = ("## 자주 묻는 질문\n### 세척은 어떻게 하나요?\n"
+           "바스켓과 트레이를 분리해 세척하면 됩니다.\n")
+    return "\n".join(parts) + table + "\n" + faq
+
+
+def test_generate_two_pass_density_feedback_in_retry():
+    # v14.1: 1차 밀도 미달 → 재생성 프롬프트에 실측 횟수·목표량 주입 (맹재시도 제거)
+    import json as json_mod
+    calls = []
+
+    def fake_runner(prompt, timeout=90):
+        calls.append(prompt)
+        if "골격을 확장" not in prompt:
+            return _PASS1_JSON
+        n_pass2 = len([c for c in calls if "골격을 확장" in c])
+        if n_pass2 == 1:
+            return json_mod.dumps({
+                "title": "에어프라이어 추천 기준 정리",
+                "first_paragraph": "에어프라이어는 용량과 조리 방식을 먼저 확인해야 합니다. 관리 편의성도 중요합니다.",
+                "body": _low_density_body(),
+            }, ensure_ascii=False)
+        return json_mod.dumps({
+            "title": "에어프라이어 추천 기준 정리",
+            "first_paragraph": "에어프라이어는 용량과 조리 방식을 먼저 확인해야 합니다. 관리 편의성도 중요합니다.",
+            "body": _good_body("에어프라이어"),
+        }, ensure_ascii=False)
+
+    draft, failed = generate_two_pass("에어프라이어", {}, runner=fake_runner)
+    assert failed == []
+    retry_prompt = [c for c in calls if "골격을 확장" in c][1]
+    assert "검수 피드백" in retry_prompt
+    assert "4회" in retry_prompt          # 1차 실측 횟수 주입
+    assert "10~15회" in retry_prompt      # 목표량 명시
+
+
+def test_density_warning_includes_measured_count(monkeypatch):
+    # v14.1: 재생성 생략(예산 초과) 경로에서도 경고에 실측 수치 포함
+    import json as json_mod
+    import draft_pipeline as dp_mod
+    ticks = iter(range(100, 200))
+    monkeypatch.setattr(dp_mod.time, "monotonic", lambda: next(ticks))
+
+    def fake_runner(prompt, timeout=90):
+        if "골격을 확장" not in prompt:
+            return _PASS1_JSON
+        return json_mod.dumps({
+            "title": "에어프라이어 추천 기준 정리",
+            "first_paragraph": "에어프라이어는 용량과 조리 방식을 먼저 확인해야 합니다. 관리 편의성도 중요합니다.",
+            "body": _low_density_body(),
+        }, ensure_ascii=False)
+
+    draft, failed = generate_two_pass("에어프라이어", {}, runner=fake_runner,
+                                      retry_budget_seconds=0)
+    assert len(failed) == 1
+    assert failed[0].startswith("keyword_density ('에어프라이어' 4회·밀도")
+    assert "허용 0.25%~3%" in failed[0]
