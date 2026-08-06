@@ -16,7 +16,8 @@ from intent import classify, intent_template
 TITLE_MAX_LEN = 30
 BODY_MIN_LEN = 3000           # 애드포스트: 길이 = 스크롤 = 광고 노출
 H2_MIN_COUNT = 3              # FAQ 제외 본문 섹션 수 (프롬프트 4~6개, 병합 허용 3)
-KEYWORD_DENSITY_MIN = 0.0025  # 400자에 1회 — 프롬프트 '8~15회 사용'과 정합
+KEYWORD_DENSITY_MIN = 0.0025  # 400자에 1회 — 프롬프트 '10~15회 사용'과 정합
+# (v14.1: 기존 '8~15회'는 하한 8~9회 때 밀도 0.002로 검수 하한 미달 — 하한을 10회로 정렬)
 KEYWORD_DENSITY_MAX = 0.03    # 3% 초과는 도배
 KEYWORD_DENSITY_BASE_CAP = 4000  # v11: 밀도 분모 상한 — 긴 글(5000자)이 불리하지 않게
 FAKE_EXPERIENCE = ("제가 직접", "직접 사용해", "직접 분석해", "제 경험", "제가 해")
@@ -96,7 +97,7 @@ def pass2_expand(keyword, h2s, intent, has_facts, runner=None):
 1. 첫문단: 키워드 질문에 즉답 (50~200자, 서론 금지)
 2. 각 H2 섹션: 골격의 불릿을 자연스럽게 본문으로 확장, 2~3문단
 3. 표(markdown table) 1~2개 이상 포함
-4. 키워드 '{keyword}'를 본문 전체에 자연스럽게 8~15회 사용 (도배 금지, 문맥 속에 녹일 것)
+4. 키워드 '{keyword}'를 본문 전체에 자연스럽게 10~15회 사용 (도배 금지, 문맥 속에 녹일 것)
 5. 말투: 친근한 존댓말. 1인칭 허위 경험('제가 직접...') 금지 — 객관적 조언으로
 6. 마지막에 '## 자주 묻는 질문' 섹션 1개만 (H3 질문 3~5개, 답변 40~120자). 다른 FAQ성 섹션 금지
 {intent_section}
