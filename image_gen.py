@@ -7,8 +7,18 @@
 import llm_client
 
 IMAGE_MODEL = "wan2.7-image"
+IMAGE_SIZE = "1280*720"
 DEFAULT_BASE_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com"
 IMAGE_TIMEOUT = 55
+
+_SINGLE_SCENE_RULES = (
+    "단일 장면 하나만 그릴 것, 한 장소와 한 시간대만 표현할 것, "
+    "가로형 블로그 삽화, 16:9 와이드 화면. "
+    "콜라주 금지, 여러 패널 금지, 분할 화면 금지, 격자 구성 금지, "
+    "몽타주 금지, 인포그래픽 금지, 포스터 금지, 스토리보드 금지, "
+    "테두리와 프레임 금지, 장면을 여러 개 나누어 그리지 말 것. "
+    "이미지 안에 텍스트 없음, 글자·숫자·간판·로고·워터마크를 넣지 말 것."
+)
 
 
 class ImageGenerationError(Exception):
@@ -38,7 +48,8 @@ def generate_section_images(keyword, title, sections, runner=None, timeout=IMAGE
         sec_text = str(sec)[:60]
         prompt = (
             f"네이버 블로그 본문 삽화. 주제: {keyword}. 글 제목: {title}. "
-            f"섹션: {sec_text}. 밝고 선명한 일러스트 스타일, 텍스트 없음, 16:9"
+            f"현재 섹션의 핵심 장면: {sec_text}. "
+            f"밝고 선명한 일러스트 스타일. {_SINGLE_SCENE_RULES}"
         )
         try:
             urls.append(run(prompt))
@@ -49,8 +60,8 @@ def generate_section_images(keyword, title, sections, runner=None, timeout=IMAGE
 
 def _build_prompt(keyword, title):
     return (
-        f"네이버 블로그 대표 이미지. 주제: {keyword}. "
-        f"제목: {title}. 밝고 선명한 일러스트 스타일, 텍스트 없음, 16:9"
+        f"네이버 블로그 대표 이미지. 주제: {keyword}. 제목: {title}. "
+        f"밝고 선명한 일러스트 스타일. {_SINGLE_SCENE_RULES}"
     )
 
 
@@ -68,7 +79,7 @@ def _run_http(image_prompt, timeout=IMAGE_TIMEOUT):
                     {"role": "user", "content": [{"text": image_prompt}]}
                 ]
             },
-            "parameters": {"size": "1024*1024", "n": 1, "watermark": False},
+            "parameters": {"size": IMAGE_SIZE, "n": 1, "watermark": False},
         },
         api_key, timeout, ImageGenerationError, "image API",
     )

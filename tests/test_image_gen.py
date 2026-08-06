@@ -25,6 +25,8 @@ def test_generate_uses_runner(monkeypatch):
     assert url == "https://img.example.com/1.png"
     assert "에어프라이어" in captured["prompt"]
     assert "16:9" in captured["prompt"]
+    assert "콜라주 금지" in captured["prompt"]
+    assert "분할 화면 금지" in captured["prompt"]
 
 
 def test_build_prompt_contains_topic():

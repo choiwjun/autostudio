@@ -202,7 +202,8 @@
   .tags li { background: rgba(52,211,153,.12); color: #6ee7b7; font-size: 12px; padding: 3px 10px;
     border-radius: 999px; border: 1px solid rgba(52,211,153,.2); }
   .draft-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
-  .draft-img { max-width: 100%; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 6px; }
+  .draft-img { max-width: 100%; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 6px; display: block; }
+  .image-download { display: inline-block; margin: 0 0 10px; }
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(148,163,184,.3);
     border-top-color: #34d399; border-radius: 50%; animation: spin .8s linear infinite;
     vertical-align: -2px; margin-right: 6px; }
@@ -923,9 +924,14 @@ async function renderDraftStep(d) {
   if (d.section_images) showSectionImages(d.section_images);
 }
 
+function imageDownloadLink(url, filename) {
+  return `<a class="btn btn-sm image-download" href="${esc(url)}" download="${esc(filename)}" target="_blank" rel="noopener">다운로드</a>`;
+}
+
 function showDraftImage(url) {
   document.getElementById('imgArea').innerHTML =
-    `<img src="${esc(url)}" alt="생성 이미지" class="draft-img"><p class="dim">${esc(url)}</p>`;
+    `<img src="${esc(url)}" alt="생성 이미지" class="draft-img">`
+    + imageDownloadLink(url, 'blog-representative.png');
 }
 
 // v11: 섹션 이미지 — 본문 H2별 삽화 (애드포스트 배치 [5] 체류·스크롤 증가)
@@ -937,8 +943,10 @@ function showSectionImages(jsonStr) {
     area.innerHTML = '<p class="dim">생성된 섹션 이미지가 없습니다 — 아래 버튼으로 생성하세요</p>';
     return;
   }
-  area.innerHTML = urls.map(u => `<img src="${esc(u)}" alt="섹션 이미지" class="draft-img">`).join('')
-    + `<p class="dim">${urls.length}장 생성됨</p>`;
+  area.innerHTML = urls.map((u, i) =>
+    `<img src="${esc(u)}" alt="섹션 이미지 ${i + 1}" class="draft-img">`
+    + imageDownloadLink(u, `blog-section-${i + 1}.png`)
+  ).join('') + `<p class="dim">${urls.length}장 생성됨</p>`;
 }
 
 async function generateSectionImages(did) {
