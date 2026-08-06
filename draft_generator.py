@@ -7,7 +7,7 @@ import os
 import urllib.error
 import urllib.request
 
-DRAFT_MODEL = "qwen3.8-max-preview"
+DRAFT_MODEL = "deepseek-v4-flash-0731"
 DEFAULT_BASE_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
 
 SYSTEM_PROMPT = (
