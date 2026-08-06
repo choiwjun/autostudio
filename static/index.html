@@ -411,9 +411,10 @@ async function api(path, opts) {
 // v6 권장 배지: priority>=70 'AI유망' → opportunity>=60 '애포' → demand<0.001 '수요낮음' → '보류'
 // v12: v9 demand 실측 스케일(앵커 대비 0~0.01) 기준으로 수요낮음 임계 0.01→0.001 하향.
 //      priority는 v12부터 demand를 0.01 기준 정규화해 0~100 복원 — AI유망(≥70) 도달 가능.
+// v13: v9 실측 기회점수 최대 ~25에서 애포(≥60)는 0건 유발 → 20으로 하향 (유망 프리셋과 동일 임계).
 function recommend(i) {
   if (i.priority !== null && i.priority >= 70) return { label: 'AI유망', cls: 'b-gold' };
-  if (i.opportunity !== null && i.opportunity >= 60) return { label: '애포', cls: 'b-green' };
+  if (i.opportunity !== null && i.opportunity >= 20) return { label: '애포', cls: 'b-green' };
   if (i.demand_idx !== null && i.demand_idx < 0.001) return { label: '수요낮음', cls: 'b-warn' };
   return { label: '보류', cls: 'b-gray' };
 }
