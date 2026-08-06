@@ -41,6 +41,21 @@ def test_demand_growth_slope(monkeypatch):
     assert r["뜨는키워드"]["ratio"] > 0.2  # 평균 (10*23+20*7)/30 = 12.33 → /50 = 0.2467
 
 
+def test_demand_growth_cold_start(monkeypatch):
+    # v14: 이전 23일 검색량 0 → 최근 7일 상승은 비율 계산 불가 — 최대 신호(1.0) 부여.
+    # 기존 growth 0 반환은 '진짜 뜨는 키워드'를 묻는 사각지대였음.
+    payload = {"results": [
+        {"title": "냉장고", "data": [{"ratio": 50.0}] * 30},
+        {"title": "급부상", "data": [{"ratio": 0.0}] * 23 + [{"ratio": 30.0}] * 7},
+        {"title": "무검색", "data": [{"ratio": 0.0}] * 30},
+    ]}
+    monkeypatch.setattr(requests, "post", lambda *a, **k: FakeResponse(payload))
+    r = fetch_demand_ratios("cid", "csec", ["급부상", "무검색"],
+                            "냉장고", "2026-07-04", "2026-08-03")
+    assert r["급부상"]["growth"] == 1.0
+    assert r["무검색"]["growth"] == 0.0  # 전 구간 0이면 상승 아님
+
+
 def test_anchor_zero_raises(monkeypatch):
     payload = {"results": [{"title": "냉장고", "data": []}]}
     monkeypatch.setattr(requests, "post", lambda *a, **k: FakeResponse(payload))

@@ -58,7 +58,17 @@ def fetch_demand_ratios(client_id, client_secret, keywords, anchor,
         recent = vals[-7:]
         prev = vals[:-7]
         prev_mean = (sum(prev) / len(prev)) if prev else 0.0
-        growth = (sum(recent) / len(recent) - prev_mean) / prev_mean if prev_mean > 0 else 0.0
+        recent_mean = sum(recent) / len(recent)
+        if prev_mean > 0:
+            growth = (recent_mean - prev_mean) / prev_mean
+        elif prev and recent_mean > 0:
+            # v14: 콜드스타트 사각지대 수정 — 이전 기간(23일) 검색량이 0이다가 최근
+            # 상승한 키워드(진짜 '뜨는 키워드')가 growth 0으로 묻히던 문제. 비율 계산이
+            # 불가능하므로 최대 신호(1.0) 부여 — 소비 측(성장 정규화)에서 클램프됨.
+            # 단, 시계열 자체가 8일 미만(prev 없음)이면 자료 부족 → 중립 0.
+            growth = 1.0
+        else:
+            growth = 0.0
         return {"ratio": round(mean / anchor_mean, 4), "growth": round(growth, 4)}
 
     return {kw: _ratio_growth(series.get(kw, [])) for kw in keywords[:4]}

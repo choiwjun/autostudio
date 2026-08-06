@@ -108,3 +108,28 @@ def test_expand_stops_on_budget(monkeypatch):
     assert new == []
     assert origins == {}
     assert stopped == "budget"
+
+
+def test_expand_exclude_blocks_noise_waypoints(monkeypatch):
+    # v14: exclude 판별이 True인 제안어는 수집은 물론 다음 depth 경유지에서도 제외 —
+    # 노이즈 키워드가 하위 제안어를 증폭시키던 팬아웃 차단
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    queried = []
+
+    def fake_fetch(q, url, timeout=10, retries=3):
+        queried.append(q)
+        return {
+            "시드": ["노이즈경유", "정상키워드"],
+            "노이즈경유": ["노이즈하위1", "노이즈하위2"],
+            "정상키워드": ["정상 하위"],
+        }.get(q, [])
+
+    monkeypatch.setattr(autocomplete, "fetch_suggestions", fake_fetch)
+    new, origins, stopped = expand_keywords(
+        ["시드"], url=URL, max_new=100, max_depth=2,
+        exclude=lambda w: w.startswith("노이즈"))
+    assert stopped is None
+    assert new == ["정상키워드", "정상 하위"]
+    assert "노이즈경유" not in origins          # 유래 지도에도 없음
+    assert "노이즈경유" not in queried           # 경유지 쿼리 자체를 안 함
+    assert queried == ["시드", "정상키워드"]

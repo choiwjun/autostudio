@@ -143,9 +143,13 @@
     box-shadow: 0 0 12px rgba(251,191,36,.12); }   /* AI유망 */
   .b-green { background: rgba(52,211,153,.12); color: #6ee7b7; border-color: rgba(52,211,153,.35);
     box-shadow: 0 0 12px rgba(52,211,153,.12); }   /* 애포 */
+  .b-blue { background: rgba(56,189,248,.12); color: #7dd3fc; border-color: rgba(56,189,248,.35);
+    box-shadow: 0 0 12px rgba(56,189,248,.12); }   /* 유망 (v14: 기회≥P75 & 수요≥P50) */
   .b-warn { background: rgba(251,146,60,.12); color: #fdba74; border-color: rgba(251,146,60,.35);
     box-shadow: 0 0 12px rgba(251,146,60,.12); }   /* 수요낮음 */
   .b-gray { background: rgba(148,163,184,.12); color: #cbd5e1; border-color: rgba(148,163,184,.25); }
+  /* v14: 현재 적용 중인 백분위 임계 (프리셋·배지 투명성) */
+  #thInfo { font-size: 11px; color: var(--muted); margin-left: 4px; }
 
   /* 스켈레톤 */
   .skel td { height: 40px; background: linear-gradient(90deg, rgba(148,163,184,.08) 25%, rgba(148,163,184,.16) 37%, rgba(148,163,184,.08) 63%);
@@ -289,8 +293,10 @@
       <div class="seg" role="group" aria-label="프리셋">
         <button type="button" id="presetAi" onclick="togglePreset('ai_pick')">AI픽</button>
         <button type="button" id="presetProm" onclick="togglePreset('promising')">유망</button>
+        <button type="button" id="presetRise" onclick="togglePreset('rising')">상승</button>
         <button type="button" id="presetAll" onclick="togglePreset('')">전체</button>
       </div>
+      <span id="thInfo" title="현재 적용 중인 임계 — 활성 키워드 최신 스냅샷의 백분위로 자동 보정 (표본 부족 시 절대값 폴백)"></span>
       <button class="btn" onclick="toggleSeeds()">시드키워드 관리</button>
       <div class="token-box">
         <input id="token" type="password" placeholder="토큰" aria-label="대시보드 토큰">
@@ -412,7 +418,26 @@ async function api(path, opts) {
 // v12: v9 demand 실측 스케일(앵커 대비 0~0.01) 기준으로 수요낮음 임계 0.01→0.001 하향.
 //      priority는 v12부터 demand를 0.01 기준 정규화해 0~100 복원 — AI유망(≥70) 도달 가능.
 // v13: v9 실측 기회점수 최대 ~25에서 애포(≥60)는 0건 유발 → 20으로 하향 (유망 프리셋과 동일 임계).
+// v14: 하드코딩 임계 제거 — /keywords 응답의 thresholds(백분위, 서버 계산)를 배지가
+//      그대로 사용: AI유망 = AI픽 프리셋, 유망 = 기회≥P75&수요≥P50, 애포 = 기회≥P75.
+let thresholds = null;  // 최근 /keywords 응답의 thresholds {ai_cite, demand, opportunity}
+
 function recommend(i) {
+  if (thresholds) {
+    const t = thresholds;
+    if (i.ai_cite_idx !== null && i.demand_idx !== null
+        && i.ai_cite_idx >= t.ai_cite && i.demand_idx >= t.demand)
+      return { label: 'AI유망', cls: 'b-gold' };
+    if (i.opportunity !== null && i.demand_idx !== null
+        && i.opportunity >= t.opportunity && i.demand_idx >= t.demand)
+      return { label: '유망', cls: 'b-blue' };
+    if (i.opportunity !== null && i.opportunity >= t.opportunity)
+      return { label: '애포', cls: 'b-green' };
+    if (i.demand_idx !== null && i.demand_idx < t.demand)
+      return { label: '수요낮음', cls: 'b-warn' };
+    return { label: '보류', cls: 'b-gray' };
+  }
+  // thresholds 로드 전(v13 절대값 폴백)
   if (i.priority !== null && i.priority >= 70) return { label: 'AI유망', cls: 'b-gold' };
   if (i.opportunity !== null && i.opportunity >= 20) return { label: '애포', cls: 'b-green' };
   if (i.demand_idx !== null && i.demand_idx < 0.001) return { label: '수요낮음', cls: 'b-warn' };
@@ -479,6 +504,14 @@ async function load() {
   loading = false;
   loadError = false;
   totalCount = data.count;
+  // v14: 서버가 계산한 백분위 임계 — 배지·툴팁이 동일 소스를 쓴다 (스펙 §3.2)
+  if (data.thresholds) {
+    thresholds = data.thresholds;
+    const src = data.threshold_source === 'percentile' ? '백분위'
+      : data.threshold_source === 'mixed' ? '백분위+폴백' : '절대값 폴백';
+    document.getElementById('thInfo').textContent =
+      `임계(${src}): AI인용≥${thresholds.ai_cite} 수요≥${thresholds.demand} 기회≥${thresholds.opportunity}`;
+  }
   const rows = document.getElementById('rows');
   rows.innerHTML = '';
   if (!data.items.length) {
@@ -549,6 +582,7 @@ function togglePreset(p) {
 function updatePresetBtn() {
   document.getElementById('presetAi').classList.toggle('on', preset === 'ai_pick');
   document.getElementById('presetProm').classList.toggle('on', preset === 'promising');
+  document.getElementById('presetRise').classList.toggle('on', preset === 'rising');
   document.getElementById('presetAll').classList.toggle('on', preset === '');
 }
 function onSearchInput() { clearTimeout(qTimer); qTimer = setTimeout(resetAndLoad, 300); }
@@ -626,6 +660,15 @@ async function refreshStatus() {
     lastEl.textContent = '-';
     lastSub.textContent = '수집 이력 없음';
     msg += ' · 수집 이력 없음';
+  }
+  // v14 §5: 노이즈 유입률 — 최근 실행 note(JSON) 파싱, 발굴이 있던 실행만 표시
+  if (s.last_run && s.last_run.note) {
+    try {
+      const rr = JSON.parse(s.last_run.note);
+      if (rr && typeof rr.found_raw === 'number' && rr.found_raw > 0) {
+        msg += ` · 최근 발굴 ${rr.found_raw}개 중 거부 ${rr.rejected}개 (${Math.round(rr.reject_rate * 100)}%)`;
+      }
+    } catch (e) { /* note가 거부율 JSON이 아닌 실행(잠금 회수 등) — 무시 */ }
   }
   setStatus(msg, warn);
 }

@@ -140,11 +140,15 @@ def test_schedule_run_retires_and_cleans(tmp_path, monkeypatch):
         d2.update_shop_click_idx(bad, today, 0.1)
         return 1
 
+    # v14: total_sim 포화(경쟁 만점)라 8/2 기회점수 0 — 은퇴 폴백 임계(12) 하회
+    monkeypatch.setattr(collect, "analyze_keyword", lambda client, kw, today: {
+        "total_sim": 100000, "total_date": 100, "fresh_ratio": 0.0,
+        "top_post_dates": [], "top_bloggers": [], "top_descriptions": []})
     monkeypatch.setattr(collect, "update_shop_clicks", fake_shop_clicks)
     result = run_collection(cfg, client=FakeClient(), today="2026-08-02")
     assert result["snapshotted"] == 1
     assert result["shop_clicks_updated"] == 1
-    assert result["retired"] == 1  # 8/2: 기회 15 < 35, 쇼핑클릭 0.1 < 0.5 → 은퇴
+    assert result["retired"] == 1  # 8/2: 기회 0 < 12(폴백), 쇼핑클릭 0.1 < 0.5 → 은퇴
     assert d.count_active() == 0
     assert all(h["day"] >= "2026-05-04" for h in d.get_history(bad))
     assert d.get_top_results(bad, "2026-01-15") == []
@@ -221,6 +225,7 @@ def test_manual_discovery_respects_budget(tmp_path):
 
 def test_rule_fallback_categorizes_seedless_keywords(tmp_path, monkeypatch):
     # v8: 무카테고리 시드 유래(유래 불일치) 키워드는 패턴 규칙으로 분류
+    # v14: 규칙까지 매치 실패하면 "기타" 폴백 (빈 문자열은 필터 누락·CPC 기본값 문제)
     cfg = make_cfg(tmp_path)
     d = db.Database(cfg["db_url"])
     d.init()
@@ -231,7 +236,7 @@ def test_rule_fallback_categorizes_seedless_keywords(tmp_path, monkeypatch):
                                           "무관한 키워드": "유래불일치시드"}, None))
     run_collection(cfg, client=FakeClient(), today="2026-08-01")
     assert d.query_keywords(q="에어프라이어 추천 내돈내산")[0]["category"] == "요리"
-    assert d.query_keywords(q="무관한 키워드")[0]["category"] == ""
+    assert d.query_keywords(q="무관한 키워드")[0]["category"] == "기타"
     d.close()
 
 
@@ -239,3 +244,70 @@ def test_categorize_by_rules_first_match_wins():
     # v8: 규칙은 앞 항목 우선 (첫 매치)
     assert collect._categorize_by_rules("보험 에어프라이어", [("보험", "보험"), ("에어프라이어", "요리")]) == "보험"
     assert collect._categorize_by_rules("매치 없음", []) == ""
+
+
+def test_reject_rate_recorded_in_run_note(tmp_path, monkeypatch):
+    # v14 §1.2: 거부율(거부/발굴후보)을 collection_runs.note(JSON)에 기록 —
+    # 대시보드 노이즈 유입률 노출의 원료. 발굴 없으면 note 빈 문자열.
+    import json as json_mod
+    cfg = make_cfg(tmp_path)
+    d = db.Database(cfg["db_url"])
+    d.init()
+    d.add_seed("시드", "요리")
+    monkeypatch.setattr(collect, "expand_keywords",
+                        lambda *a, **k: (["바카라 후기", "정상키워드1", "정상키워드2"],
+                                         {"바카라 후기": "시드", "정상키워드1": "시드",
+                                          "정상키워드2": "시드"}, None))
+    result = run_collection(cfg, client=FakeClient(), today="2026-08-01")
+    assert result["found_raw"] == 3
+    assert result["rejected"] == 1
+    note = json_mod.loads(d.get_last_runs(1)[0]["note"])
+    assert note["found_raw"] == 3
+    assert note["rejected"] == 1
+    assert note["reject_rate"] == round(1 / 3, 4)  # 소수 4자리 기록
+    d.close()
+
+
+def test_run_without_discovery_keeps_empty_note(tmp_path):
+    cfg = make_cfg(tmp_path)
+    d = db.Database(cfg["db_url"])
+    d.init()
+    d.upsert_keyword("키워드1", day="2026-07-31")
+    run_collection(cfg, client=FakeClient(), today="2026-08-01")
+    assert d.get_last_runs(1)[0]["note"] == ""
+    d.close()
+
+
+def test_retire_uses_percentile_threshold(tmp_path):
+    # v14: 은퇴 기회점수 임계 = 활성 최신 스냅샷 P25 (자가보정).
+    # 고정 35.0은 실측 기회점수 최대(~24)보다 높아 은퇴가 쇼핑클릭 조건으로
+    # 퇴화하던 버그 — 표본 20개+에서 P25가 실제로 적용되는지 회귀 방지.
+    cfg = make_cfg(tmp_path)
+    d = db.Database(cfg["db_url"])
+    d.init()
+    now = "2026-08-02T07:00:00+09:00"
+    for i in range(20):
+        kid = d.upsert_keyword(f"집단{i:02d}", day="2026-07-01")
+        d.insert_daily_stats(kid, "2026-08-01",
+                             {"opportunity": 20.0 + i, "shop_click_idx": 0.9})
+    victim = d.upsert_keyword("저성과", day="2026-07-01")
+    d.insert_daily_stats(victim, "2026-08-01",
+                         {"opportunity": 5.0, "shop_click_idx": 0.1})
+    # n=21 → P25 = 24.0 — 집단(클릭 0.9)은 보호되고 저성과(5.0 < 24, 클릭 0.1)만 은퇴
+    assert collect.retire(d, "2026-08-02", now) == 1
+    assert d.count_active() == 20
+    d.close()
+
+
+def test_retire_fallback_when_sample_small(tmp_path):
+    # v14: 표본 < 20이면 폴백 절대값(12.0) — 빈곤 표본에서 백분위 노이즈 방지
+    cfg = make_cfg(tmp_path)
+    d = db.Database(cfg["db_url"])
+    d.init()
+    now = "2026-08-02T07:00:00+09:00"
+    bad = d.upsert_keyword("저성과", day="2026-07-01")
+    d.insert_daily_stats(bad, "2026-08-01",
+                         {"opportunity": 10.0, "shop_click_idx": 0.1})
+    assert collect.retire(d, "2026-08-02", now) == 1  # 10.0 < 폴백 12.0
+    assert d.count_active() == 0
+    d.close()

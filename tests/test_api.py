@@ -56,14 +56,18 @@ def test_list_reads_precomputed_scores(tmp_path):
 
 def test_default_preset_is_ai_pick(tmp_path):
     # v6: 기본 뷰 = '지금 써야 할 키워드' — ai_cite≥0.6 & demand≥0.001만 노출 (에어프라이어만 통과)
+    # v14: 임계는 백분위 — 표본 2개(< 20)라 폴백 절대값(0.6/0.001) 적용 → 결과 동일
     client = TestClient(make_app(tmp_path))
     body = client.get("/keywords").json()
     assert body["count"] == 1
     assert body["items"][0]["keyword"] == "에어프라이어"
-    # v12: priority = 35×0.8 + 35×(0.005/0.01) + 30×0.5(가전 기본) = 28 + 17.5 + 15
-    assert body["items"][0]["priority"] == 60.5
+    # v14: priority = 30×0.8 + 25×(0.005/0.01) + 15×0(growth NULL) + 30×0.5(가전 기본)
+    assert body["items"][0]["priority"] == 51.5
     body2 = client.get("/keywords?sort=priority").json()
     assert body2["items"][0]["keyword"] == "에어프라이어"
+    # v14: thresholds 응답 — 폴백이어도 필드는 항상 포함 (대시보드 배지 공용 소스)
+    assert body["thresholds"] == {"ai_cite": 0.6, "demand": 0.001, "opportunity": 20.0}
+    assert body["threshold_source"] == "fallback"
 
 
 def test_paging(tmp_path):
@@ -276,6 +280,49 @@ def test_draft_image_success_updates_url(tmp_path, monkeypatch):
 def test_draft_image_404(tmp_path):
     client = TestClient(make_app(tmp_path))
     assert client.post("/drafts/999/image").status_code == 404
+
+
+def make_big_app(tmp_path, n=24):
+    # v14: 백분위 유효 표본(≥20) 픽스처 — 지표가 i에 따라 선형 증가
+    dbfile = f"sqlite:///{tmp_path / 'big.db'}"
+    d = db.Database(dbfile)
+    d.init()
+    for i in range(n):
+        kid = d.upsert_keyword(f"키워드{i:02d}", day="2026-08-01")
+        d.insert_daily_stats(kid, "2026-08-02", {
+            "total_sim": 100,
+            "ai_cite_idx": i / 100.0,
+            "demand_idx": round(i * 0.0004, 4),
+            "opportunity": float(i),
+            "demand_growth": round(-0.05 + i * 0.01, 4),
+        })
+    d.close()
+    return create_app({"db_url": dbfile, "dashboard_token": "sekret",
+                       "manual_budget_seconds": 45, "env": "development"})
+
+
+def test_percentile_presets_with_enough_sample(tmp_path):
+    # v14 §3: 표본 ≥ 20이면 백분위 임계 — ai픽 = ai_cite≥P50 & demand≥P50,
+    # 유망 = opportunity≥P75 & demand≥P50, 상승 = growth≥0.1 & demand≥P50
+    client = TestClient(make_big_app(tmp_path))
+    body = client.get("/keywords").json()
+    assert body["threshold_source"] == "percentile"
+    # n=24 → P50 idx 12, P75 idx 17
+    assert body["thresholds"]["ai_cite"] == 0.12
+    assert body["thresholds"]["demand"] == 0.0048
+    assert body["thresholds"]["opportunity"] == 17.0
+    assert body["count"] == 12                    # i ≥ 12 (ai·demand 모두 충족)
+    prom = client.get("/keywords?preset=promising").json()
+    assert prom["count"] == 7                     # i ≥ 17 (opp≥17 & demand≥0.0048)
+    rising = client.get("/keywords?preset=rising").json()
+    assert rising["count"] == 9                   # growth≥0.1 → i ≥ 15
+
+
+def test_q_escapes_like_wildcards(tmp_path):
+    # v14: 검색어의 %/_는 리터럴 — 와일드카드 전체 매치 방지
+    client = TestClient(make_app(tmp_path))
+    assert client.get("/keywords?preset=&q=%25").json()["count"] == 0
+    assert client.get("/keywords?preset=&q=%EC%84%A0%ED%92%8D").json()["count"] == 1  # '선풍'
 
 
 def _priority_of(client, keyword):

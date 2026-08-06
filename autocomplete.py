@@ -64,12 +64,15 @@ def fetch_suggestions(query, url, timeout=10, retries=3):
 
 def expand_keywords(seeds, url, known=frozenset(), max_new=100, max_depth=2,
                     max_requests=300, delay=0.3, max_consecutive_failures=5,
-                    budget_seconds=None):
+                    budget_seconds=None, exclude=None):
     """BFS 확장. known(DB 기존 키워드)은 신규 상한에 계수하지 않되 경유지로 사용.
     반환: (신규 키워드, origins {키워드: 유래 키워드}, 중단 사유 None|'blocked'|'budget')
     v3: budget_seconds(수동 실행 잔여 예산) — 요청 전에 검사하고 잔여 예산 기반으로
     호출 타임아웃을 축소한다. 예산 소진은 'budget', 차단은 'blocked'로 구분 (스펙 §4.9).
-    origins는 시드 분야 전파(1차 키워드 → 시드 category)의 전제."""
+    origins는 시드 분야 전파(1차 키워드 → 시드 category)의 전제.
+    v14: exclude(판별 함수)가 True인 제안어는 신규 수집은 물론 다음 depth 경유지에서도
+    제외 — 정제에서 버려질 노이즈(블랙리스트·브랜드 등)가 하위 제안어를 증폭시키던
+    문제를 확장 단계에서 차단 (요청 낭비 + 노이즈 팬아웃 감소)."""
     known = set(known) | set(seeds)
     new_found, origins = [], {}
     visited = set(seeds)
@@ -111,6 +114,8 @@ def expand_keywords(seeds, url, known=frozenset(), max_new=100, max_depth=2,
                 if sug in visited:
                     continue
                 visited.add(sug)
+                if exclude is not None and exclude(sug):
+                    continue  # v14: 정제 대상 노이즈는 경유지·수집 모두 제외
                 origins[sug] = kw
                 next_queue.append(sug)
                 if sug not in known and len(new_found) < max_new:

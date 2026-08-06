@@ -46,6 +46,34 @@ def boost_for_score(score):
     return 0
 
 
+# v14 §3: 백분위 자가보정 임계 — 프리셋·배지가 절대값 하드코딩 대신 데이터 분포를
+# 따라가 재보정 커밋(v12/v13형)을 원천 차단. 표본 부족·P50=0이면 폴백 절대값.
+MIN_PERCENTILE_SAMPLES = 20
+THRESHOLD_SPECS = (
+    # (응답 키, 지표, 분위, 폴백 절대값)
+    ("ai_cite", "ai_cite_idx", 0.5, 0.6),
+    ("demand", "demand_idx", 0.5, 0.001),
+    ("opportunity", "opportunity", 0.75, 20.0),
+)
+RISING_GROWTH_MIN = 0.1  # 상승 프리셋: 최근 7일 평균이 이전 23일 대비 +10% 이상
+
+
+def resolve_thresholds(d):
+    """반환: (임계 dict, 소스 'percentile'|'fallback'|'mixed') — 조회 시마다 계산
+    (키워드 ≤ 500, 쿼리 비용 무시 가능 — 스펙 §3.3). 지표별로 폴백 판단."""
+    thresholds, sources = {}, set()
+    for key, metric, q, fallback in THRESHOLD_SPECS:
+        n, pct = d.percentiles(metric)
+        if n >= MIN_PERCENTILE_SAMPLES and pct.get(0.5, 0) > 0:
+            thresholds[key] = pct[q]
+            sources.add("percentile")
+        else:
+            thresholds[key] = fallback
+            sources.add("fallback")
+    source = sources.pop() if len(sources) == 1 else "mixed"
+    return thresholds, source
+
+
 def create_app(cfg):
     env = cfg.get("env", "development")
     # v3: fail-closed — 프로덕션에서 토큰 미설정 시 기동 거부 (스펙 §7).
@@ -118,23 +146,30 @@ def create_app(cfg):
         #     유망 = 기회≥20(성장 신호) & 수요≥0.001. 쇼핑클릭은 별도 열로만 노출.
         # v6: 기본 프리셋 'ai_pick' — AI 인용 가능성 + 수요(조회수 프록시) 기반,
         #     애드포스트 1차 목표에 맞는 '지금 써야 할 키워드' 상위 20개 중심
-        opportunity_min, demand_min, ai_cite_min = 0.0, 0.0, 0.0
+        # v14: 임계는 백분위 자가보정 (ai_pick = ai_cite≥P50 & demand≥P50,
+        #     promising = opportunity≥P75 & demand≥P50) — 폴백은 v13 절대값.
+        #     thresholds 필드로 대시보드에 노출해 배지·툴팁이 같은 임계를 쓴다.
+        #     rising = demand_growth≥0.1 & demand≥P50 (성공 기준 ② 검증용).
+        thresholds, threshold_source = run_db(resolve_thresholds)
+        opportunity_min, demand_min, ai_cite_min, growth_min = 0.0, 0.0, 0.0, None
         if preset == "promising":
-            opportunity_min, demand_min = 20.0, 0.001
+            opportunity_min, demand_min = thresholds["opportunity"], thresholds["demand"]
         elif preset == "ai_pick":
-            # v6: demand_idx는 데이터랩 앵커('냉장고') 대비 상대 비율 — 실측 0~0.01 분포.
-            #     0.2 임계는 전 키워드 탈락을 유발해 0.001(앵커의 0.1%)로 현실화 (임계는 절대값이 아닌 상대값)
-            ai_cite_min, demand_min = 0.6, 0.001
+            ai_cite_min, demand_min = thresholds["ai_cite"], thresholds["demand"]
+        elif preset == "rising":
+            demand_min, growth_min = thresholds["demand"], RISING_GROWTH_MIN
         filters = dict(category=category, commercial_min=commercial_min, q=q,
                        discovered_since=discovered_since,
                        active=None if show_inactive else 1,
                        opportunity_min=opportunity_min, demand_min=demand_min,
-                       click_min=click_min, ai_cite_min=ai_cite_min)
+                       click_min=click_min, ai_cite_min=ai_cite_min,
+                       growth_min=growth_min)
         items = run_db(lambda d: d.query_keywords(
             sort=sort, sort_dir=sort_dir, limit=page_size,
             offset=(page - 1) * page_size, **filters))
         total = run_db(lambda d: d.count_keywords(**filters))
-        return {"items": items, "count": total, "page": page, "page_size": page_size}
+        return {"items": items, "count": total, "page": page, "page_size": page_size,
+                "thresholds": thresholds, "threshold_source": threshold_source}
 
     @app.get("/keywords/{keyword_id}")
     def keyword_detail(keyword_id: int):
@@ -305,18 +340,17 @@ def create_app(cfg):
         # v11: boost는 (새 점수 보너스 - 기존 점수 보너스) 차액만 가산 — 같은 초안에
         # 피드백을 반복 전송해도 누적되지 않는 멱등 처리. 성과 우수(>=70) 키워드는
         # 은퇴 판정에서도 보호 (db.find_retire_candidates의 performance_boost 조건).
+        # v14: 점수 저장과 boost 가산을 단일 트랜잭션으로 — 중간 실패 시 재시도의
+        # 차액이 0이 되어 boost가 유실되던 틈 차단. 누적 boost는 [-20, 20] 클램프.
         draft = run_db(lambda d: d.get_draft(draft_id))
         if not draft:
             raise HTTPException(status_code=404, detail="not found")
         score = max(0.0, min(100.0, body.performance_score))
         published = body.published_at or config_mod.now_kst_iso()
-        run_db(lambda d: d.update_draft_performance(
-            draft_id, published, score, body.note, config_mod.now_kst_iso()))
-        kw = run_db(lambda d: d.get_keyword(draft["keyword_id"]))
-        if kw:
-            delta = boost_for_score(score) - boost_for_score(draft.get("performance_score"))
-            if delta:
-                run_db(lambda d: d.set_performance_boost(draft["keyword_id"], delta))
+        delta = boost_for_score(score) - boost_for_score(draft.get("performance_score"))
+        run_db(lambda d: d.record_draft_feedback(
+            draft_id, draft["keyword_id"], published, score, body.note,
+            config_mod.now_kst_iso(), delta))
         return run_db(lambda d: d.get_draft(draft_id))
 
     @app.get("/")

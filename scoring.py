@@ -17,16 +17,18 @@ DEFAULT_CPC_TIERS = config_mod.DEFAULT_CPC_TIERS
 
 QUESTION_PATTERNS = (
     "방법", "비교", "추천", "차이", "원인", "이유", "정의", "vs", "순위",
-    "장단점", "하는 법", "하는법", "준비", "팁", "가이드", "사용법",
+    "장단점", "하는법", "준비", "팁", "가이드", "사용법",
     "효과", "후기", "비용", "기준", "조건", "절차", "과정", "해결", "대처",
 )
+# v14: "하는 법"(공백 포함)은 매칭 전 공백 제거 때문에 사어 — 제거 ("하는법"만 유효)
 
 # 과정형(본문 인용 유리) vs 결과물형(이미지 인용만) 카테고리 가중
 CATEGORY_AI_WEIGHT = {
     "여행": 1.0, "레시피": 1.0, "요리": 1.0, "반려동물": 1.0, "육아": 0.9,
-    "IT": 0.9, "디지털": 0.9, "건강": 0.9, "금융": 0.9, "보험": 0.9,
-    "재테크": 0.9, "교육": 0.9, "자격증": 0.9, "부동산": 0.9, "법률": 0.9,
-    "인테리어": 0.4, "전시": 0.4, "패션": 0.4, "뷰티": 0.5,
+    "IT": 0.9, "디지털": 0.9, "건강": 0.9, "의료": 0.9, "금융": 0.9,
+    "보험": 0.9, "재테크": 0.9, "교육": 0.9, "자격증": 0.9, "부동산": 0.9,
+    "법률": 0.9, "인테리어": 0.4, "전시": 0.4, "패션": 0.4, "뷰티": 0.5,
+    "맛집": 0.4,  # v14: 결과물형(사진 중심) — 여행과 동일 가중
 }
 DEFAULT_AI_WEIGHT = 0.7
 
@@ -54,17 +56,32 @@ def cpc_tier_score(category, tiers=None):
 DEMAND_NORM_MAX = 0.01
 
 
-def v6_priority(ai_cite, demand, cpc):
-    """0.35×AI인용 + 0.35×조회수잠재력(demand/0.01, ≤1) + 0.30×CPC (0~100)."""
+def growth_norm(growth):
+    """v14: 데이터랩 실측 기울기 → [-0.5, 1.0] 정규화. None(미수집)은 0(중립) —
+    데이터랩 미지원 키워드의 기존 순위에 영향 없도록."""
+    if growth is None:
+        return 0.0
+    return max(-0.5, min(1.0, growth / GROWTH_NORM_MAX))
+
+
+def v6_priority(ai_cite, demand, cpc, growth=None):
+    """v14: 30×AI인용 + 25×수요(demand/0.01, ≤1) + 15×성장 + 30×CPC (0~100, boost 별도).
+    성장 몫(15)은 수요에서 분리 — 성장은 보조 신호라 몫 축소 (스펙 §4.2).
+    db.PRIORITY_SQL과 동일 수식 유지 (v12 원칙)."""
     ai = max(0.0, min(1.0, ai_cite or 0.0))
     dm = max(0.0, min(1.0, (demand or 0.0) / DEMAND_NORM_MAX))
     cp = max(0.0, min(1.0, cpc or 0.0))
-    return round(35.0 * ai + 35.0 * dm + 30.0 * cp, 1)
+    return round(30.0 * ai + 25.0 * dm + 15.0 * growth_norm(growth) + 30.0 * cp, 1)
+
+
+# v14: 증감률 최소 기준 볼륨 — prev가 너무 작으면 비율이 노이즈(0→100이 100% 성장
+# 취급되어 신규·저량 키워드의 기회점수가 부풀던 문제). 기준 미달은 중립(0.0).
+GROWTH_RATE_MIN_BASE = 10
 
 
 def growth_rate(prev_total, curr_total):
-    if prev_total == 0:
-        return 1.0 if curr_total > 0 else 0.0
+    if prev_total < GROWTH_RATE_MIN_BASE:
+        return 0.0
     return (curr_total - prev_total) / prev_total
 
 
@@ -75,20 +92,13 @@ def competition(total):
 
 
 def opportunity_score(fresh_ratio, growth, total):
-    growth_norm = max(0.0, min(1.0, growth / GROWTH_NORM_MAX))
+    opp_growth_norm = max(0.0, min(1.0, growth / GROWTH_NORM_MAX))
     return round(
         40.0 * fresh_ratio
-        + 30.0 * growth_norm
+        + 30.0 * opp_growth_norm
         + 30.0 * (1.0 - competition(total)),
         1,
     )
 
-
-def commercial_score(shop_total, avg_price):
-    if shop_total <= 0:
-        return 0.0
-    return round(
-        60.0 * min(shop_total / 500.0, 1.0)
-        + 40.0 * min(avg_price / 30000.0, 1.0),
-        1,
-    )
+# v14: commercial_score 제거 — 쇼핑 검색 API 종료(v4) 이후 상업성은 항상 NULL,
+# 호출부 없는 사어 코드. 상업 신호는 쇼핑인사이트 클릭 지수(배치 갱신)가 대체.

@@ -1,4 +1,5 @@
 # collect.py
+import json
 import sys
 import time
 from datetime import date, datetime, timedelta
@@ -9,7 +10,7 @@ from analyzer import analyze_keyword
 from autocomplete import expand_keywords
 from datalab import DatalabError, fetch_demand_ratios
 from naver_client import NaverAPIError, NaverClient
-from refine import refine_keywords
+from refine import refine_keywords, reject_reason
 from scoring import ai_citation_score, growth_rate, opportunity_score
 from shopping_insight import fetch_click_ratios
 
@@ -18,7 +19,11 @@ MANUAL_DISCOVERY_MAX_NEW = 30       # 첫 실행(활성 0개)의 수동 발굴 �
 MANUAL_DISCOVERY_MAX_REQUESTS = 40
 RETIRE_MIN_AGE_DAYS = 14
 RETIRE_WINDOW_DAYS = 7
-RETIRE_OPPORTUNITY_LT = 35.0
+# v14: 은퇴 기회점수 임계는 백분위(P25) 자가보정 — 고정 35.0는 실측 기회점수
+# 최대(~24)보다 높아 "최근 기회 전부 < 35"가 항상 참이 되어 은퇴 판정이
+# 쇼핑클릭 조건으로 퇴화하던 버그. 표본 부족 시 폴백 절대값.
+RETIRE_OPPORTUNITY_LT_FALLBACK = 12.0
+RETIRE_MIN_SAMPLES = 20        # 백분위 유효 최소 표본 (프리셋과 동일 원칙 — 스펙 §3.2)
 RETIRE_CLICK_LT = 0.5          # v4: 쇼핑 클릭 지수(앵커 대비) 임계 — 상업성(NULL 상시) 대체
 STATS_RETENTION_DAYS = 90
 TOP_RESULTS_RETENTION_DAYS = 30
@@ -86,11 +91,13 @@ def discover(d, cfg, today, now, trigger, result, budget_seconds=None):
         return
     try:
         # v3: 예산을 발굴에도 적용(잔여 예산 기반 타임아웃·중단), 유래 키워드(origins) 추적
+        # v14: exclude — 정제에서 버려질 노이즈는 BFS 경유지에서도 제외 (팬아웃 차단)
         found, origins, stopped = expand_keywords(
             [s["keyword"] for s in seeds], url=cfg["autocomplete_url"],
             known=d.all_keyword_names(), max_new=remaining,
             max_depth=cfg["autocomplete_max_depth"], max_requests=max_requests,
-            budget_seconds=budget_seconds)
+            budget_seconds=budget_seconds,
+            exclude=lambda w: reject_reason(w) is not None)
     except Exception as e:
         d.log_collection("(seed)", "error", f"autocomplete: {e}", now)
         result["crawl_stopped"] = "blocked"
@@ -105,12 +112,17 @@ def discover(d, cfg, today, now, trigger, result, budget_seconds=None):
     seed_cat = {s["keyword"]: s["category"] for s in seeds}
     rules = cfg.get("keyword_category_rules", [])
     kept, rejected = refine_keywords(found)
+    # v14 §1.2: 거부율 지표 원료 — 발굴 후보 수·거부 수를 result로 올려 note에 기록
+    result["found_raw"] = len(found)
+    result["rejected"] = len(rejected)
     for kw, reason in rejected:
         d.log_collection(kw, "reject", reason, now)  # v3: 사유 기록 (substring/token/...)
     for kw in kept[:remaining]:
         cat = seed_cat.get(origins.get(kw, ""), "")
         if not cat:
             cat = _categorize_by_rules(kw, rules)
+        if not cat:
+            cat = cfg.get("fallback_category", config_mod.FALLBACK_CATEGORY)  # v14 §2
         d.upsert_keyword(kw, category=cat, day=today)
         d.log_collection(kw, "new", "발굴", now)
     result["new_keywords"] = len(kept[:remaining])
@@ -211,10 +223,17 @@ def update_shop_clicks(d, cfg, today, now, budget_seconds=None, started=None):
 
 def retire(d, today, now):
     base = date.fromisoformat(today)
+    # v14: 기회점수 임계는 활성 키워드 최신 스냅샷의 P25 — 데이터 분포를 따라가
+    # 재보정 커밋 없이도 실측 스케일과 정합 (표본 < 20 또는 P50=0이면 폴백).
+    n, pct = d.percentiles("opportunity")
+    if n >= RETIRE_MIN_SAMPLES and pct.get(0.5, 0) > 0:
+        opp_lt = pct[0.25]
+    else:
+        opp_lt = RETIRE_OPPORTUNITY_LT_FALLBACK
     victims = d.find_retire_candidates(
         (base - timedelta(days=RETIRE_MIN_AGE_DAYS)).isoformat(),
         (base - timedelta(days=RETIRE_WINDOW_DAYS)).isoformat(),
-        RETIRE_OPPORTUNITY_LT, RETIRE_CLICK_LT)
+        opp_lt, RETIRE_CLICK_LT)
     for v in victims:
         d.set_active(v["id"], 0)
         d.log_collection(v["keyword"], "retire", "저성과 자동 비활성", now)
@@ -265,7 +284,16 @@ def run_collection(cfg, client=None, today=None, trigger="schedule",
             status = "partial"
         else:
             status = "done"
-        d.finish_run(run_id, status, config_mod.now_kst_iso(), result)
+        # v14 §1.2: 노이즈 유입률(거부율) — 발굴이 있었던 실행만 note에 JSON 기록
+        # (대시보드는 collection_runs.note 파싱으로 노출 — 스펙 §5)
+        note = ""
+        if result.get("found_raw"):
+            note = json.dumps({
+                "found_raw": result["found_raw"],
+                "rejected": result.get("rejected", 0),
+                "reject_rate": round(result.get("rejected", 0) / result["found_raw"], 4),
+            }, ensure_ascii=False)
+        d.finish_run(run_id, status, config_mod.now_kst_iso(), result, note)
     except Exception:
         d.finish_run(run_id, "failed", config_mod.now_kst_iso(), result)
         raise

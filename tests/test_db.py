@@ -324,3 +324,132 @@ def test_draft_list_by_keyword(tmp_path):
     assert len(drafts) == 2
     assert drafts[0]["title"] == "두번째"
     d.close()
+
+
+# ---------- v14: 백분위 (자가보정 임계 단일 소스) ----------
+
+def _seed_opps(d, values, day="2026-08-02", prefix="kw"):
+    ids = []
+    for i, v in enumerate(values):
+        kid = d.upsert_keyword(f"{prefix}{i:02d}", day="2026-08-01")
+        if v is not None:
+            d.insert_daily_stats(kid, day, {"opportunity": v})
+        ids.append(kid)
+    return ids
+
+
+def test_percentiles_empty_table(tmp_path):
+    # v14: 빈 테이블 — 표본 0, 폴백 판단(n<20)은 호출 측
+    d = make_db(tmp_path)
+    assert d.percentiles("opportunity") == (0, {})
+
+
+def test_percentiles_single_and_ties(tmp_path):
+    d = make_db(tmp_path)
+    _seed_opps(d, [10.0])
+    n, pct = d.percentiles("opportunity")
+    assert n == 1
+    assert pct[0.25] == pct[0.5] == pct[0.75] == pct[0.9] == 10.0
+    # 동점 — 모든 분위가 동일값
+    _seed_opps(d, [10.0] * 3, prefix="tie")
+    n, pct = d.percentiles("opportunity")
+    assert n == 4
+    assert pct[0.5] == 10.0
+
+
+def test_percentiles_boundaries_and_latest_snapshot(tmp_path):
+    # v14: 오프셋 ROUND(분위×(n-1), half-up) 경계 + 키워드별 최신 스냅샷만 집계
+    d = make_db(tmp_path)
+    ids = _seed_opps(d, [float(i) for i in range(1, 21)])  # 값 1..20, n=20
+    # 최신 스냅샷보다 오래된 값은 집계에서 제외돼야 함 (최신 스냅샷 기준 — 스펙 §3.1)
+    d.insert_daily_stats(ids[0], "2026-08-01", {"opportunity": 999.0})
+    n, pct = d.percentiles("opportunity")
+    assert n == 20
+    # 0-base 인덱스: 값 = 인덱스+1
+    assert pct[0.25] == 6.0    # idx int(0.25×19+0.5)=5
+    assert pct[0.5] == 11.0    # idx int(0.5×19+0.5)=10
+    assert pct[0.75] == 15.0   # idx int(0.75×19+0.5)=14
+    assert pct[0.9] == 18.0    # idx int(0.9×19+0.5)=17
+
+
+def test_percentiles_excludes_inactive_and_null(tmp_path):
+    d = make_db(tmp_path)
+    ids = _seed_opps(d, [1.0, 2.0, None])
+    d.set_active(ids[1], 0)  # 비활성 제외
+    n, pct = d.percentiles("opportunity")
+    assert n == 1            # NULL·비활성 제외 → 1건만
+    assert pct[0.5] == 1.0
+
+
+def test_percentiles_rejects_unknown_metric(tmp_path):
+    import pytest
+    d = make_db(tmp_path)
+    with pytest.raises(ValueError):
+        d.percentiles("total_sim")
+
+
+# ---------- v14: boost 클램프 + 피드백 원자성 ----------
+
+def test_performance_boost_clamped(tmp_path):
+    # v14: 다수 초안 피드백에도 누적 boost는 [-20, 20]
+    d = make_db(tmp_path)
+    kid = d.upsert_keyword("키워드", day="2026-08-01")
+    for _ in range(5):
+        d.set_performance_boost(kid, 10)
+    assert d.get_keyword(kid)["performance_boost"] == 20.0
+    d.set_performance_boost(kid, -10)
+    assert d.get_keyword(kid)["performance_boost"] == 10.0
+    for _ in range(5):
+        d.set_performance_boost(kid, -10)
+    assert d.get_keyword(kid)["performance_boost"] == -20.0
+    d.close()
+
+
+def test_record_draft_feedback_atomic(tmp_path):
+    # v14: 초안 점수 + 키워드 boost가 한 트랜잭션에 반영 (부분 유실 틈 제거)
+    d = make_db(tmp_path)
+    kid = d.upsert_keyword("키워드", day="2026-08-01")
+    did = d.insert_draft(kid, "제목", "첫문단", "본문",
+                         created_at="2026-08-04T08:00:00+09:00")
+    d.record_draft_feedback(did, kid, "2026-08-05T09:00:00+09:00", 85.0,
+                            "메모", "2026-08-05T09:00:00+09:00", 10)
+    draft = d.get_draft(did)
+    assert draft["status"] == "published"
+    assert draft["performance_score"] == 85.0
+    assert d.get_keyword(kid)["performance_boost"] == 10.0
+    d.close()
+
+
+def test_priority_sql_matches_v6_priority(tmp_path):
+    # v14 §6: db.PRIORITY_SQL과 scoring.v6_priority 동일 수식 — 하나의 테스트로
+    # 정합 보장 (v12 원칙: 두 곳 동일 값 유지)
+    import scoring
+    d = make_db(tmp_path)
+    a = d.upsert_keyword("보험 비교 방법", category="보험", day="2026-08-01")
+    b = d.upsert_keyword("하락 키워드", category="여행", day="2026-08-01")
+    c = d.upsert_keyword("성장 미수집", category="요리", day="2026-08-01")
+    d.insert_daily_stats(a, "2026-08-02", {
+        "ai_cite_idx": 0.8, "demand_idx": 0.004, "demand_growth": 0.02})
+    d.insert_daily_stats(b, "2026-08-02", {
+        "ai_cite_idx": 0.5, "demand_idx": 0.002, "demand_growth": -0.2})
+    d.insert_daily_stats(c, "2026-08-02", {
+        "ai_cite_idx": 0.4, "demand_idx": 0.001})  # demand_growth NULL
+    rows = {r["keyword"]: r["priority"] for r in d.query_keywords()}
+    assert rows["보험 비교 방법"] == scoring.v6_priority(0.8, 0.004, 1.0, 0.02)
+    assert rows["하락 키워드"] == scoring.v6_priority(0.5, 0.002, 0.4, -0.2)
+    assert rows["성장 미수집"] == scoring.v6_priority(0.4, 0.001, 0.5, None)
+    d.close()
+
+
+def test_query_growth_min_filter(tmp_path):
+    # v14: 상승 프리셋용 demand_growth 하한 필터 (NULL은 자동 제외)
+    d = make_db(tmp_path)
+    a = d.upsert_keyword("상승", day="2026-08-01")
+    b = d.upsert_keyword("하락", day="2026-08-01")
+    c = d.upsert_keyword("미수집", day="2026-08-01")
+    d.insert_daily_stats(a, "2026-08-02", {"opportunity": 10.0, "demand_growth": 0.3})
+    d.insert_daily_stats(b, "2026-08-02", {"opportunity": 10.0, "demand_growth": -0.2})
+    d.insert_daily_stats(c, "2026-08-02", {"opportunity": 10.0})
+    assert [r["keyword"] for r in d.query_keywords(growth_min=0.1)] == ["상승"]
+    assert d.count_keywords(growth_min=0.1) == 1
+    assert d.count_keywords() == 3

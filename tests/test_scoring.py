@@ -1,7 +1,7 @@
-# tests/test_scoring.py
 from scoring import (
-    ai_citation_score, commercial_score, competition, cpc_tier_score,
-    growth_rate, opportunity_score, question_pattern_score, v6_priority,
+    ai_citation_score, competition, cpc_tier_score,
+    growth_norm, growth_rate, opportunity_score, question_pattern_score,
+    v6_priority,
 )
 
 
@@ -9,8 +9,15 @@ def test_growth_rate():
     assert growth_rate(100, 105) == 0.05
     assert growth_rate(100, 50) == -0.5
     assert growth_rate(100, 100) == 0.0
-    assert growth_rate(0, 100) == 1.0
     assert growth_rate(100, 0) == -1.0
+
+
+def test_growth_rate_low_base_is_neutral():
+    # v14: prev < 10이면 비율이 노이즈(0→100이 100% 성장) — 중립 0.0 반환
+    assert growth_rate(0, 100) == 0.0
+    assert growth_rate(5, 100) == 0.0
+    assert growth_rate(9, 1000) == 0.0
+    assert growth_rate(10, 15) == 0.5  # 기준 볼륨 이상은 정상 계산
 
 
 def test_competition_saturates_at_10k():
@@ -33,14 +40,6 @@ def test_opportunity_mid():
     assert opportunity_score(0.5, 0.01, 1000) == 33.5
 
 
-def test_commercial_score():
-    assert commercial_score(0, 0) == 0.0
-    assert commercial_score(500, 30000) == 100.0
-    assert commercial_score(250, 15000) == 50.0
-    # 60×(10/500) + 40×(1000/30000) = 1.2 + 1.33… → 2.5 (v1 계획의 기대값 10은 오류)
-    assert commercial_score(10, 1000) == 2.5
-
-
 # ---------- v6: AI 인용 가능성 + 애드포스트 CPC ----------
 
 def test_question_pattern_score():
@@ -49,6 +48,8 @@ def test_question_pattern_score():
     assert question_pattern_score("자격증 준비") == 1.0
     assert question_pattern_score("에어프라이어") == 0.0  # 질문형 패턴 없음
     assert question_pattern_score("") == 0.0
+    # v14: "하는 법"은 공백 제거 후 "하는법"으로 매칭 (패턴 목록은 무공백만 유지)
+    assert question_pattern_score("청소 하는 법") == 1.0
 
 
 def test_ai_citation_score_formula():
@@ -59,6 +60,9 @@ def test_ai_citation_score_formula():
     # 과정형(여행 1.0) vs 결과물형(인테리어 0.4) 카테고리 가중 차이
     assert ai_citation_score("여행 코스 추천", 0.5, "여행") > ai_citation_score(
         "여행 코스 추천", 0.5, "인테리어")
+    # v14: 의료(0.9)·맛집(0.4) 가중 추가 — CPC 티어와 정합
+    assert ai_citation_score("검진 방법", 0.0, "의료") == 0.68   # 0.5+0+0.18
+    assert ai_citation_score("맛집 추천", 0.0, "맛집") == 0.58   # 0.5+0+0.08
 
 
 def test_cpc_tier_defaults():
@@ -70,17 +74,37 @@ def test_cpc_tier_defaults():
     assert cpc_tier_score("보험", {"보험": 0.9}) == 0.9  # tiers 오버라이드
 
 
+# ---------- v14: 성장 정규화 + priority 공식 ----------
+
+def test_growth_norm():
+    # v14 §4.1: clamp(growth / 0.05, -0.5, 1.0), None은 0 (미수집 중립)
+    assert growth_norm(None) == 0.0
+    assert growth_norm(0.0) == 0.0
+    assert growth_norm(0.05) == 1.0    # 일 5% 성장 = 만점
+    assert growth_norm(0.2) == 1.0     # 상한 클램프
+    assert growth_norm(0.025) == 0.5
+    assert growth_norm(-0.1) == -0.5   # 하한 클램프
+    assert growth_norm(-0.025) == -0.5
+
+
 def test_v6_priority_bounds():
-    # 0.35×ai + 0.35×demand(0.01 기준 정규화) + 0.30×cpc
-    assert v6_priority(1.0, 1.0, 1.0) == 100.0
+    # v14: 30×ai + 25×demand(0.01 기준 정규화) + 15×growth + 30×cpc
+    assert v6_priority(1.0, 1.0, 1.0, 0.05) == 100.0
+    assert v6_priority(1.0, 1.0, 1.0) == 85.0          # growth None은 중립
     assert v6_priority(0.0, 0.0, 0.0) == 0.0
-    assert v6_priority(None, None, None) == 0.0  # NULL 보호
-    assert v6_priority(1.0, 5.0, 1.0) == 100.0   # demand 상한(0.01) 초과는 1로 클램프
+    assert v6_priority(None, None, None) == 0.0        # NULL 보호
+    assert v6_priority(1.0, 5.0, 1.0, 0.05) == 100.0   # demand 상한(0.01) 초과는 1로 클램프
 
 
 def test_v6_priority_demand_normalized_v12():
-    # v12: v9 실측 demand(앵커 대비 0~0.01) 기준 정규화 — 기존 ≤1 클램프는 demand 항 무력화
-    assert v6_priority(1.0, 0.01, 1.0) == 100.0       # 실측 상한 = 만점
-    assert v6_priority(1.0, 0.005, 1.0) == 82.5       # 35×1 + 35×0.5 + 30×1
-    assert v6_priority(1.0, 0.001, 1.0) == 68.5       # 35×1 + 35×0.1 + 30×1
-    assert v6_priority(1.0, 0.0, 1.0) == 65.0
+    # v12 정규화 유지 + v14 가중치(30/25/15/30)
+    assert v6_priority(1.0, 0.01, 1.0) == 85.0         # 30×1 + 25×1 + 30×1
+    assert v6_priority(1.0, 0.005, 1.0) == 72.5        # 30 + 12.5 + 30
+    assert v6_priority(1.0, 0.001, 1.0) == 62.5        # 30 + 2.5 + 30
+    assert v6_priority(1.0, 0.0, 1.0) == 60.0
+
+
+def test_v6_priority_growth_term():
+    # 상승 키워드 상향, 하락 키워드 하향 (성공 기준 ②)
+    assert v6_priority(1.0, 0.0, 1.0, 0.2) == 75.0     # 60 + 15×1.0
+    assert v6_priority(1.0, 0.0, 1.0, -0.2) == 52.5    # 60 + 15×(-0.5)

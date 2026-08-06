@@ -201,6 +201,9 @@ class Database:
     # v12: v9에서 demand_idx가 앵커 대비 상대비율(실측 0~0.01)로 바뀌면서 기존 ≤1 클램프는
     #     demand 항을 사실상 무력화(최대 기여 ~0.35점) — 0.01(실측 상한) 기준 정규화로
     #     0~1 복원. 상한 초과는 1.0으로 클램프 (scoring.v6_priority와 동일 값 유지).
+    # v14: growth 몫(15)을 수요에서 분리 — 30×AI인용 + 25×수요 + 15×성장 + 30×CPC.
+    #     growth_norm = clamp(demand_growth / 0.05, -0.5, 1.0), NULL은 0 (scoring.growth_norm
+    #     동일 수식 — GROWTH_NORM_MAX 0.05 재사용). 성공 기준 ② 상승 키워드 상단 노출.
     # SORT_COLUMNS에 쓰이는 priority 표현식 — SELECT에도 동일 alias로 노출 (server 조회용)
     CPC_TIER_SQL = (
         "CASE WHEN k.category IN ('보험','금융','재테크') THEN 1.0 "
@@ -211,13 +214,33 @@ class Database:
         "WHEN k.category IN ('반려동물','일상','취미') THEN 0.3 "
         "ELSE 0.5 END"
     )
+    GROWTH_NORM_SQL = (
+        "CASE WHEN ds.demand_growth IS NULL THEN 0.0 "
+        "WHEN ds.demand_growth / 0.05 >= 1.0 THEN 1.0 "
+        "WHEN ds.demand_growth / 0.05 <= -0.5 THEN -0.5 "
+        "ELSE ds.demand_growth / 0.05 END"
+    )
     PRIORITY_SQL = (
-        "ROUND(CAST(35.0 * COALESCE(ds.ai_cite_idx, 0) "
-        "+ 35.0 * CASE WHEN COALESCE(ds.demand_idx, 0) >= 0.01 THEN 1.0 "
+        "ROUND(CAST(30.0 * COALESCE(ds.ai_cite_idx, 0) "
+        "+ 25.0 * CASE WHEN COALESCE(ds.demand_idx, 0) >= 0.01 THEN 1.0 "
         "ELSE COALESCE(ds.demand_idx, 0) / 0.01 END "
+        f"+ 15.0 * {GROWTH_NORM_SQL} "
         f"+ 30.0 * {CPC_TIER_SQL} "
         "+ COALESCE(k.performance_boost, 0) AS NUMERIC), 1)"
     )
+    # v14: performance_boost 누적 클램프 — 다수 초안 피드백의 무한 누적/상쇄 왜곡 방지
+    BOOST_CLAMP_SQL = {
+        "sqlite": "MAX(-20.0, MIN(20.0, COALESCE(performance_boost, 0) + ?))",
+        "postgres": "GREATEST(-20.0, LEAST(20.0, COALESCE(performance_boost, 0) + %s))",
+    }
+    # v14: 백분위 자가보정 임계가 지원하는 지표 (percentiles)
+    PERCENTILE_METRICS = {
+        "ai_cite_idx": "ds.ai_cite_idx",
+        "demand_idx": "ds.demand_idx",
+        "opportunity": "ds.opportunity",
+        "demand_growth": "ds.demand_growth",
+    }
+    PERCENTILE_QUANTILES = (0.25, 0.5, 0.75, 0.9)
     SORT_COLUMNS = {
         "opportunity": "ds.opportunity",
         "commercial": "ds.commercial",
@@ -423,9 +446,13 @@ LEFT JOIN daily_stats ds
 
     def set_performance_boost(self, keyword_id, delta):
         # v10 [6]: 게시 성과 피드백 보너스 — priority 상향/하향 (은퇴·우선순위 보정)
-        self._qd(
-            "UPDATE keywords SET performance_boost = COALESCE(performance_boost, 0) + ? "
-            "WHERE id = ?",
+        # v14: 누적값은 [-20, 20] 클램프 — 한 키워드에 초안이 여러 개일 때 보너스가
+        # 무한 누적(또는 상쇄)되어 priority를 왜곡하던 문제 차단
+        self._q(
+            "UPDATE keywords SET performance_boost = "
+            + self.BOOST_CLAMP_SQL["sqlite"] + " WHERE id = ?",
+            "UPDATE keywords SET performance_boost = "
+            + self.BOOST_CLAMP_SQL["postgres"] + " WHERE id = %s",
             (delta, keyword_id),
         )
 
@@ -456,6 +483,27 @@ ORDER BY last_day, k.id"""
     def all_keyword_names(self):
         rows = self._qd("SELECT keyword FROM keywords", (), fetch=True)
         return {r["keyword"] for r in rows}
+
+    def percentiles(self, metric):
+        """v14 §3: 활성 키워드 최신 스냅샷 기준 백분위 — 자가보정 임계의 단일 소스.
+        반환: (표본 수, {분위: 값}) — 표본 부족·P50=0일 때의 폴백은 호출 측 판단.
+        지표별 최신 스냅샷(_KEYWORD_BASE)의 NULL 제외 정렬값을 읽어 오프셋
+        (ROUND(분위 × (n-1)))으로 도출 — SQL 함수 없이 양 백엔드 동일 결과.
+        (키워드 ≤ 500이라 요청마다 계산해도 비용 무시 가능 — 스펙 §3.3)"""
+        col = self.PERCENTILE_METRICS.get(metric)
+        if col is None:
+            raise ValueError(f"unknown percentile metric: {metric}")
+        sql = f"""
+SELECT {col} AS v {self._KEYWORD_BASE}
+WHERE k.active = 1 AND {col} IS NOT NULL
+ORDER BY 1"""
+        vals = [r["v"] for r in self._qd(sql, (), fetch=True)]
+        n = len(vals)
+        if not n:
+            return 0, {}
+        # half-up 오프셋 — Python round()의 banker's rounding는 SQL ROUND와
+        # .5 경계에서 어긋남 (SQLite ROUND는 0에서 먼 방향)
+        return n, {q: vals[int(q * (n - 1) + 0.5)] for q in self.PERCENTILE_QUANTILES}
 
     # ---------- 스냅샷 ----------
 
@@ -616,8 +664,9 @@ ORDER BY ds.opportunity DESC LIMIT ?"""
             return None  # 경합 패배 — 다른 실행이 잠금 보유
         return rows[0]["id"]
 
-    def finish_run(self, run_id, status, finished_iso, result):
+    def finish_run(self, run_id, status, finished_iso, result, note=""):
         # v3: status는 호출 측이 done/partial/failed로 구분해 전달 (note의 partial 표기 제거)
+        # v14: note는 호출 측이 자유롭게 채움 (거부율 지표 JSON — 스펙 §1.2/§5)
         self._qd(
             "UPDATE collection_runs SET status = ?, finished_at = ?, new_keywords = ?, "
             "snapshotted = ?, errors = ?, note = ? WHERE id = ?",
@@ -625,7 +674,7 @@ ORDER BY ds.opportunity DESC LIMIT ?"""
                 status, finished_iso,
                 result.get("new_keywords", 0), result.get("snapshotted", 0),
                 len(result.get("errors", [])),
-                "", run_id,
+                note, run_id,
             ),
         )
 
@@ -665,9 +714,15 @@ ORDER BY k.id"""
 
     # ---------- 대시보드 목록 (단일 쿼리 + 페이징) ----------
 
+    @staticmethod
+    def _escape_like(s):
+        # v14: 검색어의 LIKE 와일드카드(% _)를 리터럴로 — 미이스케이프 시
+        # '50%' 검색이 '50'으로 시작하는 모든 키워드에 매치되던 문제
+        return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
     def _keyword_where(self, category, commercial_min, q, discovered_since, active,
                        opportunity_min=0.0, demand_min=0.0, click_min=0.0,
-                       ai_cite_min=0.0):
+                       ai_cite_min=0.0, growth_min=None):
         where, params = [], []
         if active is not None:
             where.append("k.active = ?")
@@ -690,9 +745,12 @@ ORDER BY k.id"""
         if ai_cite_min:      # v6: AI 인용 가능성 최소 (AI 유망 프리셋)
             where.append("ds.ai_cite_idx >= ?")
             params.append(ai_cite_min)
+        if growth_min is not None:  # v14: 상승 프리셋 — 성장 기울기 최소 (NULL 자동 제외)
+            where.append("ds.demand_growth >= ?")
+            params.append(growth_min)
         if q:
-            where.append("k.keyword LIKE ?")
-            params.append(f"%{q}%")
+            where.append("k.keyword LIKE ? ESCAPE '\\'")
+            params.append(f"%{self._escape_like(q)}%")
         if discovered_since:
             where.append("k.first_seen >= ?")
             params.append(discovered_since)
@@ -701,17 +759,18 @@ ORDER BY k.id"""
     def query_keywords(self, sort="opportunity", sort_dir="desc", category="",
                        commercial_min=0.0, q="", discovered_since="", active=1,
                        opportunity_min=0.0, demand_min=0.0, click_min=0.0,
-                       ai_cite_min=0.0, limit=50, offset=0):
+                       ai_cite_min=0.0, growth_min=None, limit=50, offset=0):
         col = self.SORT_COLUMNS.get(sort, "ds.opportunity")
         order = "ASC" if sort_dir == "asc" else "DESC"  # v3: 정렬 토글 (UX §6)
         where_sql, params = self._keyword_where(
             category, commercial_min, q, discovered_since, active,
-            opportunity_min, demand_min, click_min, ai_cite_min)
+            opportunity_min, demand_min, click_min, ai_cite_min, growth_min)
         sql = f"""
 SELECT k.id, k.keyword, k.active, k.first_seen, ds.day,
        COALESCE(NULLIF(ds.shop_category, ''), k.category) AS category,
        ds.opportunity, ds.commercial, ds.growth, ds.demand_idx, ds.shop_click_idx,
        ds.fresh_ratio, ds.total_sim, ds.shop_total, ds.ai_cite_idx,
+       ds.demand_growth,
        {self.PRIORITY_SQL} AS priority,
        (SELECT COUNT(*) FROM daily_stats h WHERE h.keyword_id = k.id) AS days
 {self._KEYWORD_BASE}{where_sql}
@@ -722,10 +781,10 @@ LIMIT ? OFFSET ?"""
     def count_keywords(self, category="", commercial_min=0.0, q="",
                        discovered_since="", active=1,
                        opportunity_min=0.0, demand_min=0.0, click_min=0.0,
-                       ai_cite_min=0.0):
+                       ai_cite_min=0.0, growth_min=None):
         where_sql, params = self._keyword_where(
             category, commercial_min, q, discovered_since, active,
-            opportunity_min, demand_min, click_min, ai_cite_min)
+            opportunity_min, demand_min, click_min, ai_cite_min, growth_min)
         sql = f"SELECT COUNT(*) AS c {self._KEYWORD_BASE}{where_sql}"
         return self._qd(sql, tuple(params), fetch=True)[0]["c"]
 
@@ -801,14 +860,47 @@ LIMIT ? OFFSET ?"""
             (section_images_json, updated_at, draft_id),
         )
 
-    def update_draft_performance(self, draft_id, published_at, score, note="", updated_at=""):
+    def record_draft_feedback(self, draft_id, keyword_id, published_at, score,
+                              note, updated_at, boost_delta):
         # v10 [6]: 게시 후 성과 기록 — 서치어드바이저 수동 입력 기반.
         # score 0~100 (유입/체류 반영), note는 성과 메모.
-        self._qd(
-            "UPDATE drafts SET published_at = ?, performance_score = ?, "
-            "performance_note = ?, status = 'published', updated_at = ? WHERE id = ?",
-            (published_at, score, note, updated_at, draft_id),
-        )
+        # v14: 초안 점수 갱신과 키워드 boost 가산을 단일 커밋으로 묶음 — 기존은
+        # 점수 저장 후 boost 갱신 실패 시 재시도의 차액이 0이 되어 boost가 영구
+        # 유실되는 틈이 있었음 (서버리스 중간 종료 리스크).
+        for attempt in (0, 1):
+            try:
+                if self.dialect == "postgres":
+                    with self.conn.cursor() as cur:
+                        cur.execute(
+                            "UPDATE drafts SET published_at = %s, performance_score = %s, "
+                            "performance_note = %s, status = 'published', updated_at = %s "
+                            "WHERE id = %s",
+                            (published_at, score, note, updated_at, draft_id),
+                        )
+                        cur.execute(
+                            "UPDATE keywords SET performance_boost = "
+                            + self.BOOST_CLAMP_SQL["postgres"] + " WHERE id = %s",
+                            (boost_delta, keyword_id),
+                        )
+                        self.conn.commit()
+                else:
+                    self.conn.execute(
+                        "UPDATE drafts SET published_at = ?, performance_score = ?, "
+                        "performance_note = ?, status = 'published', updated_at = ? "
+                        "WHERE id = ?",
+                        (published_at, score, note, updated_at, draft_id),
+                    )
+                    self.conn.execute(
+                        "UPDATE keywords SET performance_boost = "
+                        + self.BOOST_CLAMP_SQL["sqlite"] + " WHERE id = ?",
+                        (boost_delta, keyword_id),
+                    )
+                    self.conn.commit()
+                return
+            except CONNECTION_ERRORS:
+                if attempt == 1:
+                    raise
+                self._connect()
 
     def list_drafts_by_keyword(self, keyword_id):
         return self._qd(
