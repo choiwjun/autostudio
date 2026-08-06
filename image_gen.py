@@ -12,8 +12,10 @@ DEFAULT_BASE_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com"
 IMAGE_TIMEOUT = 55
 
 _SINGLE_SCENE_RULES = (
-    "단일 장면 하나만 그릴 것, 한 장소와 한 시간대만 표현할 것, "
-    "가로형 블로그 삽화, 16:9 와이드 화면. "
+    "단일 장면 하나만 표현할 것, 한 장소와 한 시간대만 표현할 것, "
+    "실사 사진 스타일, photorealistic, 자연스러운 조명과 현실적인 카메라 렌즈·질감, "
+    "다큐멘터리 또는 에디토리얼 사진 분위기, 가로형 블로그 사진, 16:9 와이드 화면. "
+    "카툰 금지, 일러스트 금지, 애니메이션 금지, 3D 렌더링 금지. "
     "콜라주 금지, 여러 패널 금지, 분할 화면 금지, 격자 구성 금지, "
     "몽타주 금지, 인포그래픽 금지, 포스터 금지, 스토리보드 금지, "
     "테두리와 프레임 금지, 장면을 여러 개 나누어 그리지 말 것. "
@@ -49,7 +51,7 @@ def generate_section_images(keyword, title, sections, runner=None, timeout=IMAGE
         prompt = (
             f"네이버 블로그 본문 삽화. 주제: {keyword}. 글 제목: {title}. "
             f"현재 섹션의 핵심 장면: {sec_text}. "
-            f"밝고 선명한 일러스트 스타일. {_SINGLE_SCENE_RULES}"
+            f"현실적인 사진 촬영 스타일. {_SINGLE_SCENE_RULES}"
         )
         try:
             urls.append(run(prompt))
@@ -61,7 +63,7 @@ def generate_section_images(keyword, title, sections, runner=None, timeout=IMAGE
 def _build_prompt(keyword, title):
     return (
         f"네이버 블로그 대표 이미지. 주제: {keyword}. 제목: {title}. "
-        f"밝고 선명한 일러스트 스타일. {_SINGLE_SCENE_RULES}"
+        f"현실적인 사진 촬영 스타일. {_SINGLE_SCENE_RULES}"
     )
 
 

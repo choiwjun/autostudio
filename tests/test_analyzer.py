@@ -55,6 +55,35 @@ def test_analyze_keyword_combines_sources():
     assert calls["n"] == 2
 
 
+def test_analyze_keyword_builds_blog_news_search_evidence():
+    class FakeClient:
+        def search_blog(self, query, sort="sim", display=100, start=1):
+            if sort == "date":
+                return {"total": 2, "items": [{
+                    "postdate": "20260805", "title": "<b>블로그 제목</b>",
+                    "description": "최신 정보\n설명", "link": "https://blog.example/post",
+                }]}
+            return {"total": 1, "items": [{"postdate": "20260804",
+                "description": "검색 설명", "bloggername": "a"}]}
+
+        def search_news(self, query, sort="date", display=20, start=1):
+            return {"total": 1, "items": [{
+                "title": "<b>뉴스 제목</b>", "description": "뉴스 설명",
+                "pubDate": "Thu, 06 Aug 2026 09:00:00 +0900",
+                "link": "javascript:alert(1)",
+            }]}
+
+    result = analyze_keyword(FakeClient(), "최신 정보", TODAY,
+                             searched_at_kst="2026-08-06T10:00:00+09:00")
+    evidence = result["search_evidence"]
+    assert evidence["status"] == "available"
+    assert evidence["reference_date"] == "2026-08-03"
+    assert evidence["searched_at_kst"] == "2026-08-06T10:00:00+09:00"
+    assert {item["source"] for item in evidence["items"]} == {"blog", "news"}
+    assert all("<b>" not in item["title"] for item in evidence["items"])
+    assert all(item["link"] != "javascript:alert(1)" for item in evidence["items"])
+
+
 def test_analyze_keyword_captures_top_bloggers():
     # v6: 상위글 작성자 집중도 — 동일 블로거 다수 점유가 권위 블로거 존재 신호
     items = ([{"postdate": "20260801", "bloggername": "권위블로거"}] * 12

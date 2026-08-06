@@ -29,6 +29,21 @@ def test_search_blog_passes_headers(monkeypatch):
     assert result["items"][0]["postdate"] == "20260801"
 
 
+def test_search_news_passes_date_sort(monkeypatch):
+    captured = {}
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        captured.update(url=url, params=params)
+        return FakeResponse({"items": [{"title": "뉴스", "pubDate": "2026-08-06"}]})
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    client = NaverClient("cid", "csec")
+    result = client.search_news("테스트")
+    assert captured["url"].endswith("/news.json")
+    assert captured["params"]["sort"] == "date"
+    assert result["items"][0]["pubDate"] == "2026-08-06"
+
+
 def test_search_blog_raises_on_error(monkeypatch):
     def fake_get(url, params=None, headers=None, timeout=None):
         return FakeResponse({"errorMessage": "SE01"}, status_code=400)

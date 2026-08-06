@@ -63,3 +63,9 @@ class NaverClient:
             "query": query, "sort": sort,
             "display": display, "start": start,
         })
+
+    def search_news(self, query, sort="date", display=20, start=1):
+        return self._get("news.json", {
+            "query": query, "sort": sort,
+            "display": display, "start": start,
+        })

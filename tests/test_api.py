@@ -252,6 +252,52 @@ def test_create_draft_mocks_generator(tmp_path, monkeypatch):
     assert body["created_at"].endswith("+09:00")
 
 
+def test_create_draft_passes_fresh_search_evidence(tmp_path, monkeypatch):
+    import draft_pipeline
+    import server
+
+    evidence = {
+        "status": "available",
+        "searched_at_kst": "2026-08-06T10:00:00+09:00",
+        "reference_date": "2026-08-06",
+        "items": [{"source": "news", "rank": 1,
+                    "title": "최신 뉴스", "description": "최신 내용"}],
+    }
+    captured = {}
+
+    monkeypatch.setattr(server, "_latest_search_snapshot", lambda cfg, keyword, day: (
+        {"top_descriptions": ["최신 내용"]}, evidence))
+
+    def fake_generate(keyword, structure, **kwargs):
+        captured.update(structure=structure, kwargs=kwargs)
+        return {"title": "최신 제목", "first_paragraph": "최신 첫문단",
+                "body": "## 소제목\n본문"}, []
+
+    monkeypatch.setattr(draft_pipeline, "generate_two_pass", fake_generate)
+    client = TestClient(make_app(tmp_path))
+    r = client.post("/drafts", json={"keyword_id": 1})
+    assert r.status_code == 200
+    assert captured["kwargs"]["search_evidence"] == evidence
+    assert captured["kwargs"]["current_date"].isoformat()
+    assert "최신 내용" in captured["structure"]
+    assert "search_evidence_unavailable" not in r.json().get("quality_warnings", [])
+
+
+def test_create_draft_warns_when_fresh_search_is_unavailable(tmp_path, monkeypatch):
+    import draft_pipeline
+
+    def fake_generate(keyword, structure, **kwargs):
+        assert kwargs["search_evidence"]["status"] == "unavailable"
+        assert "search_evidence" in structure
+        return {"title": "제목", "first_paragraph": "첫문단", "body": "## 소제목\n본문"}, []
+
+    monkeypatch.setattr(draft_pipeline, "generate_two_pass", fake_generate)
+    client = TestClient(make_app(tmp_path))
+    r = client.post("/drafts", json={"keyword_id": 1})
+    assert r.status_code == 200
+    assert "search_evidence_unavailable" in r.json()["quality_warnings"]
+
+
 def test_get_draft(tmp_path, monkeypatch):
     import draft_pipeline
     monkeypatch.setattr(draft_pipeline, "generate_two_pass", lambda k, s, **kw: (

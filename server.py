@@ -86,6 +86,42 @@ class FeedbackIn(BaseModel):
     note: str = ""
 
 
+def _unavailable_search_evidence(reference_date, searched_at):
+    return {
+        "status": "unavailable",
+        "searched_at_kst": searched_at,
+        "reference_date": reference_date.isoformat(),
+        "items": [],
+    }
+
+
+def _latest_search_snapshot(cfg, keyword, reference_date):
+    import analyzer
+    from naver_client import NaverAPIError, NaverClient
+
+    searched_at = config_mod.now_kst_iso()
+    if not cfg.get("client_id") or not cfg.get("client_secret"):
+        return None, _unavailable_search_evidence(reference_date, searched_at)
+    client = NaverClient(cfg["client_id"], cfg["client_secret"])
+    try:
+        snapshot = analyzer.analyze_keyword(
+            client, keyword, reference_date, searched_at_kst=searched_at)
+    except NaverAPIError as e:
+        logger.warning("latest search unavailable keyword=%s: %s", keyword, e)
+        return None, _unavailable_search_evidence(reference_date, searched_at)
+    return snapshot, snapshot["search_evidence"]
+
+
+def _refresh_outline_structure(structure, search_evidence):
+    try:
+        parsed = json.loads(structure) if isinstance(structure, str) else structure
+    except json.JSONDecodeError:
+        parsed = {}
+    parsed = parsed if isinstance(parsed, dict) else {}
+    parsed["search_evidence"] = search_evidence
+    return json.dumps(parsed, ensure_ascii=False)
+
+
 def boost_for_score(score):
     """v11: 성과 점수 → priority 보너스. 피드백 재입력 시 차액만 가산해 멱등."""
     if score is None:
@@ -300,18 +336,17 @@ def create_app(cfg):
 
     @app.post("/outlines/{keyword_id}", dependencies=[Depends(require_token)])
     def analyze_outline(keyword_id: int):
-        # v7: 상위글 골격 분석 — 블로그 검색 API description 캡처 → structure JSON 저장
+        # v16: 블로그+뉴스 최신 검색 근거와 KST 기준일을 outline에 함께 저장
         kw = run_db(lambda d: d.get_keyword(keyword_id))
         if not kw:
             raise HTTPException(status_code=404, detail="not found")
-        import analyzer
         import outline as outline_mod
-        from naver_client import NaverClient
-        client = NaverClient(cfg.get("client_id", ""), cfg.get("client_secret", ""))
-        snap = analyzer.analyze_keyword(client, kw["keyword"], config_mod.today_kst())
-        structure = outline_mod.build_outline_structure(snap["top_descriptions"])
-        day = config_mod.today_kst().isoformat()
-        run_db(lambda d: d.upsert_outline(keyword_id, day, structure))
+        reference_date = config_mod.today_kst()
+        snap, evidence = _latest_search_snapshot(cfg, kw["keyword"], reference_date)
+        descriptions = snap["top_descriptions"] if snap else []
+        structure = outline_mod.build_outline_structure(descriptions, evidence)
+        run_db(lambda d: d.upsert_outline(
+            keyword_id, reference_date.isoformat(), structure))
         return run_db(lambda d: d.get_outline(keyword_id))
 
     @app.post("/drafts", dependencies=[Depends(require_token)])
@@ -328,13 +363,37 @@ def create_app(cfg):
                 status_code=400,
                 detail="먼저 상위글 골격 분석이 필요합니다 — '글 생성' 플로우에서 골격 분석 후 다시 시도하세요",
             )
-        structure = outline["structure"]
+        reference_date = config_mod.today_kst()
+        snap, search_evidence = _latest_search_snapshot(
+            cfg, kw["keyword"], reference_date)
+        quality_warnings = []
+        if snap:
+            import outline as outline_mod
+            structure = outline_mod.build_outline_structure(
+                snap["top_descriptions"], search_evidence)
+            run_db(lambda d: d.upsert_outline(
+                body.keyword_id, reference_date.isoformat(), structure))
+        else:
+            try:
+                parsed = json.loads(outline["structure"])
+            except (TypeError, json.JSONDecodeError):
+                parsed = {}
+            structure = json.dumps({
+                "questions": parsed.get("questions", []),
+                "comparisons": parsed.get("comparisons", []),
+                "facts": [],
+                "headings": parsed.get("headings", []),
+                "search_evidence": search_evidence,
+            }, ensure_ascii=False)
+            quality_warnings.append("search_evidence_unavailable")
+        if search_evidence.get("status") == "empty":
+            quality_warnings.append("search_evidence_empty")
         try:
-            # v10: 2패스 생성(골격→섹션 확장) + 검수 8항목. 검수 미달 항목은 응답에 포함.
-            # v11: 재생성 시간 예산 25초 — 1사이클이 예산을 넘기면 재생성 없이 경고만
-            # 반환 (서버리스에서 2사이클 풀 실행 시 타임아웃 리스크).
+            # v16: 생성 직전 최신 검색 근거·KST 기준일을 2패스 전체에 전달
             draft, failed_checks = draft_pipeline.generate_two_pass(
-                kw["keyword"], structure, retry_budget_seconds=25)
+                kw["keyword"], structure, retry_budget_seconds=25,
+                current_date=reference_date, search_evidence=search_evidence)
+
         except draft_pipeline.DraftGenerationError as e:
             # v15: 구조화 로그 — 배포 환경에서 초안 실패 원인을 추적할 수 있게
             logger.warning("draft generation failed kw_id=%s kw=%s: %s",
@@ -345,8 +404,9 @@ def create_app(cfg):
             body.keyword_id, draft["title"], draft["first_paragraph"],
             draft["body"], created_at=created_at))
         result = run_db(lambda d: d.get_draft(draft_id))
-        if failed_checks:
-            result["quality_warnings"] = failed_checks
+        all_warnings = quality_warnings + failed_checks
+        if all_warnings:
+            result["quality_warnings"] = all_warnings
         return result
 
     @app.get("/drafts/{draft_id}", dependencies=[Depends(require_token)])

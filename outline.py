@@ -110,6 +110,13 @@ def extract_outline(descriptions):
     }
 
 
-def build_outline_structure(descriptions):
+def build_outline_structure(descriptions, search_evidence=None):
     """outlines.structure에 저장할 JSON 문자열을 만든다."""
-    return json.dumps(extract_outline(descriptions), ensure_ascii=False)
+    structure = extract_outline(descriptions)
+    structure["search_evidence"] = search_evidence or {
+        "status": "legacy",
+        "searched_at_kst": "",
+        "reference_date": "",
+        "items": [],
+    }
+    return json.dumps(structure, ensure_ascii=False)

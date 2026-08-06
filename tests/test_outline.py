@@ -35,6 +35,17 @@ def test_build_outline_structure_is_json():
     parsed = json.loads(s)
     assert "questions" in parsed
     assert "headings" in parsed
+    assert parsed["search_evidence"]["status"] == "legacy"
+
+
+def test_build_outline_structure_preserves_search_evidence():
+    evidence = {
+        "status": "available", "searched_at_kst": "2026-08-06T10:00:00+09:00",
+        "reference_date": "2026-08-06", "items": [{"source": "news"}],
+    }
+    parsed = __import__("json").loads(
+        build_outline_structure(["최신 정보"], evidence))
+    assert parsed["search_evidence"] == evidence
 
 
 # ---------- v11: 문장 분리 기반 추출 ----------
