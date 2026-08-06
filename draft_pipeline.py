@@ -158,9 +158,15 @@ def check_faq(draft):
 def _keyword_cores(keyword):
     """v11: 밀도 검사 핵심어 후보 — 띄어쓰기 변형·부분 사용에 강건하게.
     전체 키워드(공백 제거) + 3자 이상 개별 토큰. '실비보험추천'처럼 붙여쓴
-    키워드가 본문에 '실비보험 추천'으로 등장하는 경우를 공백 제거 매칭으로 잡는다."""
+    키워드가 본문에 '실비보험 추천'으로 등장하는 경우를 공백 제거 매칭으로 잡는다.
+    v14.2: 전 토큰이 3자 미만인 키워드('여름 휴가 추천')는 완전 구절 매칭만 남아
+    자연스러운 변형('여름 휴가', '휴가 추천')이 전부 누락되던 과소집계 결함 —
+    이 경우에만 2자 토큰을 핵심어로 허용 (3자+ 토큰이 있는 키워드는 기준 유지)."""
     cores = [keyword.replace(" ", "")]
-    cores += [t for t in keyword.split() if len(t) >= 3]
+    tokens = [t for t in keyword.split() if len(t) >= 3]
+    if not tokens:
+        tokens = [t for t in keyword.split() if len(t) >= 2]
+    cores += tokens
     return list(dict.fromkeys(cores))
 
 

@@ -91,6 +91,27 @@ def test_check_keyword_density_partial_core():
     assert check_keyword_density({"body": body}, "다이어트 식단 추천 메뉴")
 
 
+def test_check_keyword_density_short_token_keyword():
+    # v14.2: 전 토큰 2자 키워드('여름 휴가 추천') — 완전 구절('여름휴가추천')만
+    # 세던 과소집계 결함 회귀 방지. 자연스러운 변형 언급이 핵심어로 인정돼야 함.
+    body = ("여름 휴가를 준비한다면 확인해야 할 항목이 많습니다. " * 30
+            + "일정 계획과 예산 기준을 정리합니다. " * 60)
+    draft = {"body": body}
+    assert check_keyword_density(draft, "여름 휴가 추천")
+    # 실측 카운터도 동일 기준으로 — 구절 0회여도 토큰 출현을 잡아야 함
+    from draft_pipeline import keyword_density_stats
+    count, density = keyword_density_stats(draft, "여름 휴가 추천")
+    assert count >= 30
+    assert density >= KEYWORD_DENSITY_MIN
+
+
+def test_keyword_cores_long_token_unchanged():
+    # v14.2: 3자+ 토큰이 있는 키워드는 기존 기준 유지 (2자 토큰 미허용)
+    from draft_pipeline import _keyword_cores
+    assert _keyword_cores("실비보험 추천") == ["실비보험추천", "실비보험"]
+    assert _keyword_cores("여름 휴가 추천") == ["여름휴가추천", "여름", "휴가", "추천"]
+
+
 def test_check_no_fake_experience():
     assert check_no_fake_experience(_good_draft())
     assert not check_no_fake_experience({"body": "제가 직접 사용해봤습니다"})
