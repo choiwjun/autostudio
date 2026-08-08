@@ -354,6 +354,30 @@ def test_draft_tags_roundtrip(tmp_path):
     d.close()
 
 
+def test_inactive_keywords_bypass_score_filters(tmp_path):
+    # v17.2: 제외 목록 포함(active=None)이면 제외 키워드는 프리셋 점수와 무관하게
+    # 보여야 함 — 임계 미달 제외 키워드가 영구 숨겨져 복원조차 못 하던 문제
+    d = make_db(tmp_path)
+    high = d.upsert_keyword("고점수", day="2026-08-01")
+    low_active = d.upsert_keyword("저점수 활성", day="2026-08-01")
+    low_inactive = d.upsert_keyword("저점수 제외", day="2026-08-01")
+    d.insert_daily_stats(high, "2026-08-02", {"opportunity": 90.0})
+    d.insert_daily_stats(low_active, "2026-08-02", {"opportunity": 10.0})
+    d.insert_daily_stats(low_inactive, "2026-08-02", {"opportunity": 10.0})
+    d.set_active(low_inactive, False)
+
+    rows = d.query_keywords(opportunity_min=50.0)
+    assert [r["keyword"] for r in rows] == ["고점수"]
+
+    rows = d.query_keywords(opportunity_min=50.0, active=None)
+    assert {r["keyword"] for r in rows} == {"고점수", "저점수 제외"}
+
+    # 목록·카운트 일치 (페이지네이션 total이 같은 필터를 써야 함)
+    assert d.count_keywords(opportunity_min=50.0) == 1
+    assert d.count_keywords(opportunity_min=50.0, active=None) == 2
+    d.close()
+
+
 # ---------- v14: 백분위 (자가보정 임계 단일 소스) ----------
 
 def _seed_opps(d, values, day="2026-08-02", prefix="kw"):

@@ -756,30 +756,42 @@ ORDER BY k.id"""
         if category:
             where.append("(ds.shop_category LIKE ? OR k.category = ?)")
             params += [category + "%", category]
-        if commercial_min:
-            where.append("ds.commercial >= ?")
-            params.append(commercial_min)
-        if opportunity_min:  # v3: 유망 프리셋용
-            where.append("ds.opportunity >= ?")
-            params.append(opportunity_min)
-        if demand_min:       # v3: 유망 프리셋용
-            where.append("ds.demand_idx >= ?")
-            params.append(demand_min)
-        if click_min:        # v4: 쇼핑 클릭 지수 최소 (유망 프리셋·필터)
-            where.append("ds.shop_click_idx >= ?")
-            params.append(click_min)
-        if ai_cite_min:      # v6: AI 인용 가능성 최소 (AI 유망 프리셋)
-            where.append("ds.ai_cite_idx >= ?")
-            params.append(ai_cite_min)
-        if growth_min is not None:  # v14: 상승 프리셋 — 성장 기울기 최소 (NULL 자동 제외)
-            where.append("ds.demand_growth >= ?")
-            params.append(growth_min)
         if q:
             where.append("k.keyword LIKE ? ESCAPE '\\'")
             params.append(f"%{self._escape_like(q)}%")
         if discovered_since:
             where.append("k.first_seen >= ?")
             params.append(discovered_since)
+        # v17.2: 점수(프리셋) 필터 — 제외 목록 포함(active=None) 경로는 복원·관리
+        # 용도라 제외 키워드는 프리셋 점수와 무관하게 보여야 함. 기존은 기본
+        # 프리셋(AI픽) 임계에 못 미치는 제외 키워드가 '제외 목록 포함'을 켜도
+        # 계속 숨겨져 사용자가 복원조차 못 하던 문제.
+        score, score_params = [], []
+        if commercial_min:
+            score.append("ds.commercial >= ?")
+            score_params.append(commercial_min)
+        if opportunity_min:  # v3: 유망 프리셋용
+            score.append("ds.opportunity >= ?")
+            score_params.append(opportunity_min)
+        if demand_min:       # v3: 유망 프리셋용
+            score.append("ds.demand_idx >= ?")
+            score_params.append(demand_min)
+        if click_min:        # v4: 쇼핑 클릭 지수 최소 (유망 프리셋·필터)
+            score.append("ds.shop_click_idx >= ?")
+            score_params.append(click_min)
+        if ai_cite_min:      # v6: AI 인용 가능성 최소 (AI 유망 프리셋)
+            score.append("ds.ai_cite_idx >= ?")
+            score_params.append(ai_cite_min)
+        if growth_min is not None:  # v14: 상승 프리셋 — 성장 기울기 최소 (NULL 자동 제외)
+            score.append("ds.demand_growth >= ?")
+            score_params.append(growth_min)
+        if score:
+            if active is None:
+                where.append(f"(k.active = 0 OR ({' AND '.join(score)}))")
+                params += score_params
+            else:
+                where += score
+                params += score_params
         return (" WHERE " + " AND ".join(where)) if where else "", params
 
     def query_keywords(self, sort="opportunity", sort_dir="desc", category="",
