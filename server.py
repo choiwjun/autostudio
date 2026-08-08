@@ -395,9 +395,17 @@ def create_app(cfg):
             quality_warnings.append("search_evidence_empty")
         try:
             # v16: 생성 직전 최신 검색 근거·KST 기준일을 2패스 전체에 전달
+            # v17.1: 25초 재생성 예산+55초 하드 예산은 Vercel 60초 한도 전용.
+            # 로컬(ENV=development)은 서버리스 한도가 없어 예산 해제 — 2패스
+            # 1사이클이 25초를 항상 초과해 검수 미달 재생성이 실제로는 한 번도
+            # 실행되지 않고 경고만 반환되던 문제를 개발 환경에서 제거.
+            serverless = cfg.get("env") != "development"
             draft, failed_checks = draft_pipeline.generate_two_pass(
-                kw["keyword"], structure, retry_budget_seconds=25,
-                current_date=reference_date, search_evidence=search_evidence)
+                kw["keyword"], structure,
+                retry_budget_seconds=25 if serverless else None,
+                current_date=reference_date, search_evidence=search_evidence,
+                hard_budget_seconds=(draft_pipeline.HARD_BUDGET_SECONDS
+                                     if serverless else None))
 
         except draft_pipeline.DraftGenerationError as e:
             # v15: 구조화 로그 — 배포 환경에서 초안 실패 원인을 추적할 수 있게

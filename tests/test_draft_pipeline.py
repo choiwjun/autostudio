@@ -484,3 +484,106 @@ def test_density_warning_includes_measured_count(monkeypatch):
     assert len(failed) == 1
     assert failed[0].startswith("keyword_density ('에어프라이어' 4회·밀도")
     assert "허용 0.25%~3%" in failed[0]
+
+
+# ---------- v17.1: title·no_fake_experience 재생성 피드백 + 상세 경고 ----------
+
+def _fake_experience_body(keyword="에어프라이어"):
+    """검수 중 no_fake_experience만 미달 — '제가 직접' 1회 삽입, 나머지 통과."""
+    return _good_body(keyword).replace(
+        "구매 전 확인해야 할 항목을 정리했습니다.",
+        "제가 직접 확인한 결과입니다. 구매 전 확인해야 할 항목을 정리했습니다.", 1)
+
+
+def test_generate_two_pass_title_feedback_in_retry():
+    # v17.1: 1차 제목 초과 → 재생성 프롬프트에 실측 길이·교정 지시 주입
+    import json as json_mod
+    calls = []
+
+    def fake_runner(prompt, timeout=90):
+        calls.append(prompt)
+        if "골격을 확장" not in prompt:
+            return _PASS1_JSON
+        n_pass2 = len([c for c in calls if "골격을 확장" in c])
+        if n_pass2 == 1:
+            return json_mod.dumps({
+                "title": "가" * 40,
+                "first_paragraph": "즉답입니다 키워드 추천 기준은 용량과 조리 방식입니다 30자 이상",
+                "body": _good_body("키워드"),
+            }, ensure_ascii=False)
+        return _pass2_json()
+
+    draft, failed = generate_two_pass("키워드", {}, runner=fake_runner)
+    assert failed == []
+    retry_prompt = [c for c in calls if "골격을 확장" in c][1]
+    assert "검수 피드백" in retry_prompt
+    assert "40자" in retry_prompt          # 1차 실측 길이 주입
+    assert "30자 이내" in retry_prompt     # 교정 지시
+
+
+def test_generate_two_pass_fake_experience_feedback_in_retry():
+    # v17.1: 1차 허위 경험 감지 → 재생성 프롬프트에 감지 문구·교정 지시 주입
+    import json as json_mod
+    calls = []
+
+    def fake_runner(prompt, timeout=90):
+        calls.append(prompt)
+        if "골격을 확장" not in prompt:
+            return _PASS1_JSON
+        n_pass2 = len([c for c in calls if "골격을 확장" in c])
+        if n_pass2 == 1:
+            return json_mod.dumps({
+                "title": "좋은 제목",
+                "first_paragraph": "즉답입니다 키워드 추천 기준은 용량과 조리 방식입니다 30자 이상",
+                "body": _fake_experience_body("키워드"),
+            }, ensure_ascii=False)
+        return _pass2_json()
+
+    draft, failed = generate_two_pass("키워드", {}, runner=fake_runner)
+    assert failed == []
+    retry_prompt = [c for c in calls if "골격을 확장" in c][1]
+    assert "검수 피드백" in retry_prompt
+    assert "'제가 직접'" in retry_prompt   # 감지 문구 주입
+    assert "객관적 조언" in retry_prompt
+
+
+def test_title_warning_includes_measured_length(monkeypatch):
+    # v17.1: 재생성 생략(예산 초과) 경로에서도 경고에 실측 길이 포함
+    import json as json_mod
+    import draft_pipeline as dp_mod
+    ticks = iter(range(100, 200))
+    monkeypatch.setattr(dp_mod.time, "monotonic", lambda: next(ticks))
+
+    def fake_runner(prompt, timeout=90):
+        if "골격을 확장" not in prompt:
+            return _PASS1_JSON
+        return json_mod.dumps({
+            "title": "가" * 40,
+            "first_paragraph": "즉답입니다 키워드 추천 기준은 용량과 조리 방식입니다 30자 이상",
+            "body": _good_body("키워드"),
+        }, ensure_ascii=False)
+
+    draft, failed = generate_two_pass("키워드", {}, runner=fake_runner,
+                                      retry_budget_seconds=0)
+    assert failed == ["title (40자 — 기준 30자 이하)"]
+
+
+def test_fake_experience_warning_includes_phrase(monkeypatch):
+    # v17.1: 재생성 생략 경로에서도 경고에 감지 문구 포함
+    import json as json_mod
+    import draft_pipeline as dp_mod
+    ticks = iter(range(100, 200))
+    monkeypatch.setattr(dp_mod.time, "monotonic", lambda: next(ticks))
+
+    def fake_runner(prompt, timeout=90):
+        if "골격을 확장" not in prompt:
+            return _PASS1_JSON
+        return json_mod.dumps({
+            "title": "좋은 제목",
+            "first_paragraph": "즉답입니다 키워드 추천 기준은 용량과 조리 방식입니다 30자 이상",
+            "body": _fake_experience_body("키워드"),
+        }, ensure_ascii=False)
+
+    draft, failed = generate_two_pass("키워드", {}, runner=fake_runner,
+                                      retry_budget_seconds=0)
+    assert failed == ["no_fake_experience ('제가 직접' 포함)"]

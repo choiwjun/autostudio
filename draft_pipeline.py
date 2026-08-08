@@ -220,10 +220,10 @@ def pass1_outline(keyword, structure, runner=None, current_date=None,
 
 
 def pass2_expand(keyword, h2s, intent, facts=None, comparisons=None, runner=None,
-                 density_feedback="", current_date=None, search_evidence=None,
+                 qc_feedback="", current_date=None, search_evidence=None,
                  timeout=120):
     """2패스: 1패스 H2 골격을 섹션별로 확장해 최종 초안을 만든다.
-    v14.1: density_feedback — 1차 검수에서 밀도 미달이면 실측 횟수·필요량을 주입해
+    v14.1: qc_feedback — 1차 검수 미달 시 실측 수치·교정 지시를 주입해
     재생성이 같은 실패를 반복하지 않도록 함 (기존은 동일 프롬프트 맹재시도).
     v17: facts·comparisons 실제 주입 — 기존 has_facts는 생성 경로가 없는
     verified_facts를 보느라 항상 '수치 금지' 경로였음 (버그 5 + 고도화 2)."""
@@ -257,7 +257,7 @@ def pass2_expand(keyword, h2s, intent, facts=None, comparisons=None, runner=None
 6. 마지막에 '## 자주 묻는 질문' 섹션 1개만 (H3 질문 3~5개, 답변 40~120자). 다른 FAQ성 섹션 금지
 {intent_section}
 {grounding}
-{density_feedback}
+{qc_feedback}
 ## 출력 형식 (JSON만, 코드블록 금지)
 {{
   "title": "제목 (30자 이내)",
@@ -342,14 +342,23 @@ def check_keyword_density(draft, keyword):
 
 
 def _enrich_failed(failed, draft, keyword):
-    """v14.1: keyword_density 실패는 실측 수치 포함 상세로 교체 — '기준 미달'만으로는
-    사용자가 횟수 부족인지 도배인지 알 수 없었음."""
-    if "keyword_density" not in failed:
-        return failed
-    count, density = keyword_density_stats(draft, keyword)
-    detail = (f"keyword_density ('{keyword}' {count}회·밀도 {density:.2%} — "
-              f"허용 {KEYWORD_DENSITY_MIN:.2%}~{KEYWORD_DENSITY_MAX:.0%})")
-    return [detail if f == "keyword_density" else f for f in failed]
+    """v14.1+: 실패 항목을 실측 수치 포함 상세로 교체 — '기준 미달'만으로는
+    사용자가 원인(횟수 부족/도배, 제목 길이, 감지 문구)을 알 수 없었음."""
+    if "keyword_density" in failed:
+        count, density = keyword_density_stats(draft, keyword)
+        detail = (f"keyword_density ('{keyword}' {count}회·밀도 {density:.2%} — "
+                  f"허용 {KEYWORD_DENSITY_MIN:.2%}~{KEYWORD_DENSITY_MAX:.0%})")
+        failed = [detail if f == "keyword_density" else f for f in failed]
+    if "title" in failed:
+        detail = (f"title ({len(draft.get('title', ''))}자 — "
+                  f"기준 {TITLE_MAX_LEN}자 이하)")
+        failed = [detail if f == "title" else f for f in failed]
+    if "no_fake_experience" in failed:
+        hits = ", ".join(f"'{p}'" for p in FAKE_EXPERIENCE
+                         if p in draft.get("body", ""))
+        failed = [f"no_fake_experience ({hits} 포함)"
+                  if f == "no_fake_experience" else f for f in failed]
+    return failed
 
 
 def check_no_fake_experience(draft):
@@ -402,7 +411,7 @@ def generate_two_pass(keyword, structure, runner=None, retry_budget_seconds=None
         return max(MIN_CALL_TIMEOUT, min(default, remaining))
 
     draft, failed = None, []
-    density_feedback = ""
+    qc_feedback = ""
     for attempt in (1, 2):
         timeout1 = call_timeout(90)
         if timeout1 is None:
@@ -414,7 +423,7 @@ def generate_two_pass(keyword, structure, runner=None, retry_budget_seconds=None
             if timeout2 is None:
                 break
             draft = pass2_expand(keyword, h2s, intent, facts, comparisons, runner,
-                                 density_feedback, current_date, search_evidence,
+                                 qc_feedback, current_date, search_evidence,
                                  timeout=timeout2)
         except DraftGenerationError:
             if attempt == 1:
@@ -429,7 +438,7 @@ def generate_two_pass(keyword, structure, runner=None, retry_budget_seconds=None
                 # 예산 초과 — 미달 항목은 실측 상세와 함께 응답 경고로 전달
                 return draft, _enrich_failed(failed, draft, keyword)
             if "temporal_relevance" in failed:
-                density_feedback += (
+                qc_feedback += (
                     "\n## 최신성 검수 피드백 (이번 작성분에 반드시 반영)\n"
                     f"- 기준 발행일은 {_publication_context(current_date)}\n"
                     "- 과거 월·계절을 현재 추천처럼 단정한 문장을 모두 수정할 것. "
@@ -449,10 +458,26 @@ def generate_two_pass(keyword, structure, runner=None, retry_budget_seconds=None
                     action = (
                         f"반복된 언급을 자연스러운 표현으로 교체·삭제해 "
                         f"{KEYWORD_USE_MAX}회 이하로 낮출 것 (도배는 검색 품질 저하).")
-                density_feedback = (
+                qc_feedback += (
                     f"\n## 검수 피드백 (이번 작성분에 반드시 반영)\n"
                     f"- 키워드 '{keyword}'가 본문에 {count}회·밀도 {density:.2%} — "
                     f"허용 밴드({band}) 밖.\n- {action}\n")
+            # v17.1: title·no_fake_experience도 실측 교정 지시 주입 — 기존은 이
+            # 항목 실패 시 피드백 없는 맹재시도라 같은 위반이 반복됐음
+            if "title" in failed:
+                qc_feedback += (
+                    "\n## 검수 피드백 (이번 작성분에 반드시 반영)\n"
+                    f"- 제목이 {len(draft.get('title', ''))}자로 기준"
+                    f"({TITLE_MAX_LEN}자) 초과 — 키워드 '{keyword}'를 포함해 "
+                    f"{TITLE_MAX_LEN}자 이내로 다시 작성할 것.\n")
+            if "no_fake_experience" in failed:
+                hits = ", ".join(f"'{p}'" for p in FAKE_EXPERIENCE
+                                 if p in draft.get("body", ""))
+                qc_feedback += (
+                    "\n## 검수 피드백 (이번 작성분에 반드시 반영)\n"
+                    f"- 허위 1인칭 경험 표현({hits}) 감지 — 해당 문장을 '일반적으로', "
+                    "'확인해야 하는 기준은' 같은 객관적 조언으로 고칠 것. "
+                    "'제가', '직접' 등 1인칭 경험 표현은 전면 금지.\n")
             continue  # 1회 재생성
     if draft is None:
         # v17: 하드 예산 소진으로 초안 자체가 없는 경우 — None 반환은 호출 측
