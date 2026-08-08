@@ -879,6 +879,20 @@ async function createDraft(kid) {
   }
 }
 
+function tagsBlock(d) {
+  // v17.2: 네이버 블로그 태그란에 붙여넣을 쉼표 구분 태그
+  const tags = Array.isArray(d.tags) ? d.tags : [];
+  if (!tags.length) return '';
+  return `<div class="draft-block">
+      <h4>태그 (네이버 블로그 태그란에 입력)</h4>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="tagsText" readonly value="${esc(tags.join(', '))}"
+          style="flex:1;padding:8px 10px;background:rgba(15,23,42,.6);border:1px solid var(--border);border-radius:8px;color:#e2e8f0">
+        <button class="btn" id="tagsCopyBtn">태그 복사</button>
+      </div>
+    </div>`;
+}
+
 async function renderDraftStep(d) {
   // v11: 검수 경고 표시 — 8항목 QC 미달 시 재생성 대신 경고 노출
   const warnings = (Array.isArray(d.quality_warnings) && d.quality_warnings.length)
@@ -895,6 +909,7 @@ async function renderDraftStep(d) {
     <div class="draft-block">
       <h4>본문</h4><div class="draft-body">${esc(d.body).replace(/\n/g, '<br>')}</div>
     </div>
+    ${tagsBlock(d)}
     <div class="draft-block" id="imgWrap">
       <h4>블로그 이미지</h4>
       <div id="imgArea"></div>
@@ -922,6 +937,8 @@ async function renderDraftStep(d) {
   document.getElementById('exportBtn').onclick = () => exportDraft(d.id);
   document.getElementById('copyBtn').onclick = () => copyDraft(d);
   document.getElementById('fbBtn').onclick = () => recordFeedback(d.id);
+  const tagsCopyBtn = document.getElementById('tagsCopyBtn');
+  if (tagsCopyBtn) tagsCopyBtn.onclick = () => copyTags(d);
   if (d.image_url) showDraftImage(d.id, d.image_url);
   if (d.section_images) showSectionImages(d.id, d.section_images);
 }
@@ -1069,6 +1086,22 @@ async function copyDraft(d) {
     document.execCommand('copy');
     ta.remove();
     setStatus('초안이 복사되었습니다');
+  }
+}
+
+async function copyTags(d) {
+  const text = (Array.isArray(d.tags) ? d.tags : []).join(', ');
+  try {
+    await navigator.clipboard.writeText(text);
+    setStatus('태그가 복사되었습니다 — 네이버 블로그 태그란에 붙여넣으세요');
+  } catch (err) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+    setStatus('태그가 복사되었습니다');
   }
 }
 

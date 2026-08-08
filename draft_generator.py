@@ -51,6 +51,21 @@ def _run_llm(prompt, timeout=90):
     return content
 
 
+TAGS_MAX_COUNT = 10  # 네이버 태그 상한 여유 있게 — 프롬프트는 5~8개 요구
+
+
+def _normalize_tags(raw_tags):
+    """태그 정규화 — #·공백 정리, 중복 제거, 상한 클램프. 없으면 빈 리스트."""
+    if not isinstance(raw_tags, list):
+        return []
+    tags = []
+    for raw in raw_tags:
+        tag = str(raw).strip().lstrip("#").strip()
+        if tag and tag not in tags:
+            tags.append(tag)
+    return tags[:TAGS_MAX_COUNT]
+
+
 def parse_draft(raw):
     text = llm_client.strip_code_fence(raw)
     try:
@@ -64,6 +79,8 @@ def parse_draft(raw):
         "title": data["title"].strip(),
         "first_paragraph": data["first_paragraph"].strip(),
         "body": data["body"].strip(),
+        # 태그는 선택 필드 — 모델 누락 시 pass2_expand가 키워드로 보장
+        "tags": _normalize_tags(data.get("tags")),
     }
 
 

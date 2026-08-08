@@ -96,7 +96,8 @@ def _create_draft(d, cfg, client, keyword_row, today, now, deadline):
         logger.warning("batch draft qc warnings kw=%s: %s", keyword, failed)
     draft_id = d.insert_draft(
         keyword_row["id"], draft["title"], draft["first_paragraph"],
-        draft["body"], created_at=now)
+        draft["body"], created_at=now,
+        tags=json.dumps(draft.get("tags") or [], ensure_ascii=False))
     d.log_collection(keyword, "draft", "배치 초안 생성", now)
     created_images = 0
     try:

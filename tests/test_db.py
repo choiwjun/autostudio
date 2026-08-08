@@ -340,6 +340,20 @@ def test_draft_list_by_keyword(tmp_path):
     d.close()
 
 
+def test_draft_tags_roundtrip(tmp_path):
+    # v17.2: 태그는 JSON 배열 문자열 저장, 태그 없이 저장한 초안은 빈 문자열
+    d = make_db(tmp_path)
+    kid = d.upsert_keyword("여름 휴가 추천", day="2026-08-01")
+    did = d.insert_draft(kid, "제목", "첫문단", "본문",
+                         created_at="2026-08-08T12:00:00+09:00",
+                         tags='["여름 휴가 추천", "국내 여행"]')
+    assert d.get_draft(did)["tags"] == '["여름 휴가 추천", "국내 여행"]'
+    old = d.insert_draft(kid, "옛초안", "p", "b",
+                         created_at="2026-08-08T11:00:00+09:00")
+    assert d.get_draft(old)["tags"] == ""
+    d.close()
+
+
 # ---------- v14: 백분위 (자가보정 임계 단일 소스) ----------
 
 def _seed_opps(d, values, day="2026-08-02", prefix="kw"):

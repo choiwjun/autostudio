@@ -153,6 +153,46 @@ def test_pass2_expand_uses_runner():
     assert "자주 묻는 질문" in draft["body"]
 
 
+def test_pass2_expand_prompt_includes_tags_rule():
+    # v17.2: 프롬프트가 태그 개수·키워드 first 규칙과 출력 필드를 지시해야 함
+    captured = {}
+
+    def fake_run(prompt, timeout=90):
+        captured["prompt"] = prompt
+        return '{"title": "제목", "first_paragraph": "즉답", "body": "## H2\\n내용"}'
+
+    pass2_expand("여름 휴가 추천", [{"title": "H2", "bullets": ["내용"]}],
+                 "info", [], [], runner=fake_run)
+    assert "태그" in captured["prompt"]
+    assert '"tags"' in captured["prompt"]
+
+
+def test_pass2_expand_guarantees_keyword_tag():
+    # v17.2: 모델이 태그를 누락해도 주제 키워드는 첫 태그로 보장
+    def run_no_tags(prompt, timeout=90):
+        return '{"title": "제목", "first_paragraph": "즉답", "body": "## H2\\n내용"}'
+
+    draft = pass2_expand("여름 휴가 추천", [{"title": "H2", "bullets": ["b"]}],
+                         "info", [], [], runner=run_no_tags)
+    assert draft["tags"] == ["여름 휴가 추천"]
+
+    def run_other_tags(prompt, timeout=90):
+        return ('{"title": "제목", "first_paragraph": "즉답", "body": "## H2\\n내용", '
+                '"tags": ["부산 여행", "휴가 팁"]}')
+
+    draft = pass2_expand("여름 휴가 추천", [{"title": "H2", "bullets": ["b"]}],
+                         "info", [], [], runner=run_other_tags)
+    assert draft["tags"] == ["여름 휴가 추천", "부산 여행", "휴가 팁"]
+
+    def run_keyword_included(prompt, timeout=90):
+        return ('{"title": "제목", "first_paragraph": "즉답", "body": "## H2\\n내용", '
+                '"tags": ["여름 휴가 추천", "휴가 팁"]}')
+
+    draft = pass2_expand("여름 휴가 추천", [{"title": "H2", "bullets": ["b"]}],
+                         "info", [], [], runner=run_keyword_included)
+    assert draft["tags"] == ["여름 휴가 추천", "휴가 팁"]
+
+
 _PASS1_JSON = '{"h2s": [{"title": "H2", "bullets": ["b"]}]}'
 
 

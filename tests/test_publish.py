@@ -43,3 +43,17 @@ def test_export_survives_bad_section_json():
     draft = _draft(section_images="not json")
     md = build_export_markdown(draft)
     assert "## 섹션1" in md  # 이미지 없이 본문 유지
+
+
+def test_export_includes_tags():
+    # v17.2: 태그는 본문 끝 첨부 — 네이버 블로그 태그란에 그대로 붙여넣기
+    draft = _draft(tags=json.dumps(
+        ["에어프라이어 추천", "주방가전"], ensure_ascii=False))
+    md = build_export_markdown(draft)
+    assert "태그: 에어프라이어 추천, 주방가전" in md
+    assert md.rstrip().endswith("태그: 에어프라이어 추천, 주방가전")
+
+
+def test_export_without_tags_omits_section():
+    assert "태그:" not in build_export_markdown(_draft())
+    assert "태그:" not in build_export_markdown(_draft(tags="not json"))

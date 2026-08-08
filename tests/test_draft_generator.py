@@ -9,7 +9,7 @@ from draft_generator import DraftGenerationError, parse_draft
 
 def test_parse_draft_json():
     d = parse_draft('{"title": "t", "first_paragraph": "p", "body": "b"}')
-    assert d == {"title": "t", "first_paragraph": "p", "body": "b"}
+    assert d == {"title": "t", "first_paragraph": "p", "body": "b", "tags": []}
 
 
 def test_parse_draft_strips_codeblock():
@@ -56,3 +56,29 @@ def test_faq_skipped_without_questions():
     draft = {"title": "t", "first_paragraph": "p", "body": "본문"}
     out = _append_faq_if_missing(draft, {"questions": []})
     assert out["body"] == "본문"
+
+
+# ---------- v17.2: 태그 정규화 ----------
+
+def test_parse_draft_normalizes_tags():
+    # # 제거·공백 정리·중복 제거·순서 유지
+    raw = ('{"title": "t", "first_paragraph": "p", "body": "b", '
+           '"tags": ["#여름휴가", " 여름 휴가 추천 ", "여름휴가", "", "부산 여행"]}')
+    assert parse_draft(raw)["tags"] == ["여름휴가", "여름 휴가 추천", "부산 여행"]
+
+
+def test_parse_draft_tags_missing_or_malformed():
+    assert parse_draft('{"title": "t", "first_paragraph": "p", "body": "b"}')["tags"] == []
+    # 리스트가 아니면 빈 리스트로 정규화 (모델이 문자열로 돌려주는 경우 대비)
+    raw = ('{"title": "t", "first_paragraph": "p", "body": "b", '
+           '"tags": "여름휴가"}')
+    assert parse_draft(raw)["tags"] == []
+
+
+def test_parse_draft_tags_capped():
+    from draft_generator import TAGS_MAX_COUNT
+    tags = [f"태그{i}" for i in range(15)]
+    import json as json_mod
+    raw = json_mod.dumps({"title": "t", "first_paragraph": "p",
+                          "body": "b", "tags": tags}, ensure_ascii=False)
+    assert len(parse_draft(raw)["tags"]) == TAGS_MAX_COUNT

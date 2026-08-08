@@ -29,4 +29,15 @@ def build_export_markdown(draft):
         if is_section_h2 and img_i < len(urls):
             img_i += 1
             lines += ["", f"![섹션 이미지 {img_i}]({urls[img_i - 1]})", ""]
+    # v17.2: 태그 — 본문 끝 첨부, 네이버 블로그 태그란에 그대로 입력
+    tags = []
+    if draft.get("tags"):
+        try:
+            parsed = json.loads(draft["tags"])
+            if isinstance(parsed, list):
+                tags = [t for t in parsed if t]
+        except json.JSONDecodeError:
+            tags = []
+    if tags:
+        lines += ["", "---", "", "태그: " + ", ".join(tags)]
     return "\n".join(lines).rstrip() + "\n"

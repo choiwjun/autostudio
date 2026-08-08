@@ -12,7 +12,8 @@ import time
 
 import config as config_mod
 from draft_generator import (
-    DraftGenerationError, _append_faq_if_missing, _run_llm, parse_draft,
+    TAGS_MAX_COUNT, DraftGenerationError, _append_faq_if_missing, _run_llm,
+    parse_draft,
 )
 from intent import classify, intent_template
 from llm_client import strip_code_fence
@@ -29,6 +30,7 @@ H2_MIN_COUNT = 3              # 검수 하한 — FAQ 제외, 섹션 병합 허�
 FIRST_PARA_PROMPT_MIN, FIRST_PARA_PROMPT_MAX = 50, 200
 FIRST_PARA_QC_MIN, FIRST_PARA_QC_MAX = 30, 400
 KEYWORD_USE_MIN, KEYWORD_USE_MAX = 10, 15      # 프롬프트 지시 + 검수 피드백 목표
+TAGS_PROMPT_MIN, TAGS_PROMPT_MAX = 5, 8        # 네이버 태그 — 주제키워드 first
 KEYWORD_DENSITY_MIN = 0.0025  # 400자에 1회 — KEYWORD_USE 하한(10회)/4000자와 정합
 KEYWORD_DENSITY_MAX = 0.03    # 3% 초과는 도배
 KEYWORD_DENSITY_BASE_CAP = 4000  # v11: 밀도 분모 상한 — 긴 글(5000자)이 불리하지 않게
@@ -255,6 +257,7 @@ def pass2_expand(keyword, h2s, intent, facts=None, comparisons=None, runner=None
 4. 키워드 '{keyword}'를 본문 전체에 자연스럽게 {KEYWORD_USE_MIN}~{KEYWORD_USE_MAX}회 사용 (도배 금지, 문맥 속에 녹일 것)
 5. 말투: 친근한 존댓말. 1인칭 허위 경험('제가 직접...') 금지 — 객관적 조언으로
 6. 마지막에 '## 자주 묻는 질문' 섹션 1개만 (H3 질문 3~5개, 답변 40~120자). 다른 FAQ성 섹션 금지
+7. 태그 {TAGS_PROMPT_MIN}~{TAGS_PROMPT_MAX}개: 주제 키워드 '{keyword}'를 첫 태그로, 이어서 변형·연관어(지역·계절·용도·대상 등). # 기호 없이 낱개만
 {intent_section}
 {grounding}
 {qc_feedback}
@@ -262,13 +265,20 @@ def pass2_expand(keyword, h2s, intent, facts=None, comparisons=None, runner=None
 {{
   "title": "제목 (30자 이내)",
   "first_paragraph": "첫문단",
-  "body": "본문 마크다운 (H2 골격 유지 + 확장)"
+  "body": "본문 마크다운 (H2 골격 유지 + 확장)",
+  "tags": ["{keyword}", "연관 태그 1", "연관 태그 2"]
 }}
 """
     raw = (runner or _run_llm)(prompt, timeout=timeout)
     draft = parse_draft(raw)
     if isinstance(h2s, list) and h2s:
         draft = _append_faq_if_missing(draft, {"questions": [h["title"] for h in h2s]})
+    # v17.2: 키워드 태그 보장 — 모델이 태그를 누락해도 주제 키워드는 네이버
+    # 검색 연관성의 첫 태그로 항상 들어가야 함
+    tags = draft.get("tags") or []
+    if keyword not in tags:
+        tags = [keyword] + tags
+    draft["tags"] = tags[:TAGS_MAX_COUNT]
     return draft
 
 

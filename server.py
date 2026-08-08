@@ -100,6 +100,18 @@ def _unavailable_search_evidence(reference_date, searched_at):
     }
 
 
+def _with_parsed_tags(draft):
+    """v17.2: DB의 태그 JSON 문자열 → 응답용 리스트 (대시보드가 바로 쓰게)."""
+    if not draft:
+        return draft
+    try:
+        parsed = json.loads(draft.get("tags") or "[]")
+        draft["tags"] = parsed if isinstance(parsed, list) else []
+    except (TypeError, json.JSONDecodeError):
+        draft["tags"] = []
+    return draft
+
+
 def _latest_search_snapshot(cfg, keyword, reference_date):
     import analyzer
     from naver_client import NaverAPIError, NaverClient
@@ -415,8 +427,9 @@ def create_app(cfg):
         created_at = config_mod.now_kst_iso()
         draft_id = run_db(lambda d: d.insert_draft(
             body.keyword_id, draft["title"], draft["first_paragraph"],
-            draft["body"], created_at=created_at))
-        result = run_db(lambda d: d.get_draft(draft_id))
+            draft["body"], created_at=created_at,
+            tags=json.dumps(draft.get("tags") or [], ensure_ascii=False)))
+        result = _with_parsed_tags(run_db(lambda d: d.get_draft(draft_id)))
         all_warnings = quality_warnings + failed_checks
         if all_warnings:
             result["quality_warnings"] = all_warnings
@@ -427,7 +440,7 @@ def create_app(cfg):
         draft = run_db(lambda d: d.get_draft(draft_id))
         if not draft:
             raise HTTPException(status_code=404, detail="not found")
-        return draft
+        return _with_parsed_tags(draft)
 
     # v15.1: 생성 이미지 다운로드 프록시 — DB 저장 URL만 사용(임의 URL 파라미터
     # 없음), attachment 헤더로 브라우저 다운로드 보장. 파일명은 고정 안전 이름.

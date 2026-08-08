@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS drafts (
     body TEXT NOT NULL,
     image_url TEXT NOT NULL DEFAULT '',
     section_images TEXT NOT NULL DEFAULT '',
+    tags TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'draft',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT '',
@@ -181,6 +182,7 @@ CREATE TABLE IF NOT EXISTS drafts (
     body TEXT NOT NULL,
     image_url TEXT NOT NULL DEFAULT '',
     section_images TEXT NOT NULL DEFAULT '',
+    tags TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'draft',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT '',
@@ -363,6 +365,9 @@ LEFT JOIN daily_stats ds
         ("drafts", "adpost_revenue", "REAL", "DOUBLE PRECISION"),
         ("drafts", "adpost_impressions", "INTEGER", "INTEGER"),
         ("drafts", "adpost_clicks", "INTEGER", "INTEGER"),
+        # v17.2: 네이버 블로그 태그 — JSON 배열 문자열 (section_images와 동일 관례)
+        ("drafts", "tags", "TEXT NOT NULL DEFAULT ''",
+         "TEXT NOT NULL DEFAULT ''"),
     )
 
     def _migrate(self):
@@ -850,20 +855,20 @@ LIMIT ? OFFSET ?"""
     # ---------- v7: 글 초안 (drafts) ----------
 
     def insert_draft(self, keyword_id, title, first_paragraph, body,
-                     image_url="", status="draft", created_at=""):
+                     image_url="", status="draft", created_at="", tags=""):
         # v15: id는 RETURNING/lastrowid로 취득 — 기존 'INSERT 후 ORDER BY id DESC
         # LIMIT 1 재읽기'는 다중 인스턴스에서 그 사이 끼어든 타 실행의 초안 ID를
         # 반환할 수 있는 레이스였음
         values = (keyword_id, title, first_paragraph, body, image_url, status,
-                  created_at, created_at)
+                  created_at, created_at, tags)
         if self.dialect == "postgres":
             for attempt in (0, 1):
                 try:
                     with self.conn.cursor() as cur:
                         cur.execute(
                             "INSERT INTO drafts (keyword_id, title, first_paragraph, "
-                            "body, image_url, status, created_at, updated_at) "
-                            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                            "body, image_url, status, created_at, updated_at, tags) "
+                            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                             values)
                         draft_id = cur.fetchone()["id"]
                         self.conn.commit()
@@ -874,7 +879,7 @@ LIMIT ? OFFSET ?"""
                     self._connect()
         cur = self.conn.execute(
             "INSERT INTO drafts (keyword_id, title, first_paragraph, body, image_url, "
-            "status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "status, created_at, updated_at, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             values)
         self.conn.commit()
         return cur.lastrowid

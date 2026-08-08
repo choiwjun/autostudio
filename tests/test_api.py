@@ -252,6 +252,37 @@ def test_create_draft_mocks_generator(tmp_path, monkeypatch):
     assert body["created_at"].endswith("+09:00")
 
 
+def test_create_draft_saves_and_returns_tags(tmp_path, monkeypatch):
+    # v17.2: 생성된 태그는 DB 저장·응답에서 파싱된 리스트로 반환
+    import draft_pipeline
+
+    def fake_generate(keyword, structure, **kwargs):
+        return {"title": "제목", "first_paragraph": "첫문단", "body": "## 소제목\n본문",
+                "tags": ["여름 휴가 추천", "국내 여행"]}, []
+
+    monkeypatch.setattr(draft_pipeline, "generate_two_pass", fake_generate)
+    client = TestClient(make_app(tmp_path))
+    r = client.post("/drafts", json={"keyword_id": 1})
+    assert r.status_code == 200
+    assert r.json()["tags"] == ["여름 휴가 추천", "국내 여행"]
+    did = r.json()["id"]
+    assert client.get(f"/drafts/{did}").json()["tags"] == ["여름 휴가 추천", "국내 여행"]
+
+
+def test_create_draft_without_tags_returns_empty_list(tmp_path, monkeypatch):
+    # v17.2: tags 없는 초안은 빈 리스트로 정규화
+    import draft_pipeline
+
+    def fake_generate(keyword, structure, **kwargs):
+        return {"title": "제목", "first_paragraph": "첫문단", "body": "## 소제목\n본문"}, []
+
+    monkeypatch.setattr(draft_pipeline, "generate_two_pass", fake_generate)
+    client = TestClient(make_app(tmp_path))
+    r = client.post("/drafts", json={"keyword_id": 1})
+    assert r.status_code == 200
+    assert r.json()["tags"] == []
+
+
 def test_create_draft_passes_fresh_search_evidence(tmp_path, monkeypatch):
     import draft_pipeline
     import server
