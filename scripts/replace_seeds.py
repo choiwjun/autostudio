@@ -2,7 +2,7 @@
 """프로덕션 시드 교체 — v6: 기존 22개 트렌드 시드 삭제 + 집중 시드 추가.
 
 사용: DASHBOARD_TOKEN=<토큰> BASE_URL=<vercel-url> python scripts/replace_seeds.py
-  BASE_URL 예: https://my1-eight-ivory.vercel.app
+  BASE_URL 예: https://autostudio-eight.vercel.app
 
 주의: 프로덕션 쓰기 API이므로 실행 전 대시보드 상태 확인 필수.
 """
@@ -11,7 +11,7 @@ import sys
 
 import requests
 
-BASE = os.getenv("BASE_URL", "https://my1-eight-ivory.vercel.app").rstrip("/")
+BASE = os.getenv("BASE_URL", "https://autostudio-eight.vercel.app").rstrip("/")
 TOKEN = os.getenv("DASHBOARD_TOKEN", "")
 if not TOKEN:
     sys.exit("DASHBOARD_TOKEN 환경변수 필요 (fail-closed: 프로덕션은 토큰 필수)")
