@@ -371,6 +371,7 @@ def test_generate_two_pass_injects_saved_facts(monkeypatch):
 def test_hard_budget_clamps_call_timeouts(monkeypatch):
     # v17 (버그 4): 하드 예산이 1회차부터 LLM 타임아웃을 클램프 — runner가 받은
     # timeout이 하드 상한을 넘지 않아야 함 (기존은 90/120초 무제한)
+    # v17.2: pass1은 PASS2_RESERVE를 남기도록 추가 클램프
     import draft_pipeline as dp_mod
     received = []
 
@@ -382,9 +383,9 @@ def test_hard_budget_clamps_call_timeouts(monkeypatch):
                 '"body": "짧아서 검수 미달"}')
 
     generate_two_pass("키워드", {}, runner=fake_runner, retry_budget_seconds=0,
-                      hard_budget_seconds=40)
-    assert received[0] <= 40  # pass1 90초 기본이 예산으로 클램프됨
-    assert all(t <= 40 for t in received)
+                      hard_budget_seconds=55)
+    assert received[0] == 55 - dp_mod.PASS2_RESERVE  # pass1은 pass2 몫 제외 클램프
+    assert all(t <= 55 for t in received)
     assert all(t >= dp_mod.MIN_CALL_TIMEOUT for t in received)
 
 
@@ -396,6 +397,28 @@ def test_hard_budget_exhausted_raises(monkeypatch):
                           runner=lambda p, timeout=90: _PASS1_JSON,
                           hard_budget_seconds=0)
     assert "예산" in str(e.value)
+
+
+def test_generate_two_pass_pass1_leaves_pass2_reserve(monkeypatch):
+    # v17.2: 하드 예산 경로에서 pass1 타임아웃은 pass2 몫(PASS2_RESERVE)을
+    # 남기도록 클램프 — pass1이 예산을 다 먹고 pass2가 시작조차 못 하던 경로 방지
+    import draft_pipeline as dp_mod
+    ticks = iter([0, 0, 5, 5, 5, 5])
+    monkeypatch.setattr(dp_mod.time, "monotonic", lambda: next(ticks))
+    seen = {}
+
+    def fake_runner(prompt, timeout=90):
+        if "골격을 확장" not in prompt:
+            seen["pass1_timeout"] = timeout
+            return _PASS1_JSON
+        seen["pass2_timeout"] = timeout
+        return _pass2_json()
+
+    draft, failed = generate_two_pass("키워드", {}, runner=fake_runner,
+                                      hard_budget_seconds=55)
+    assert failed == []
+    assert seen["pass1_timeout"] == 25       # 55 - PASS2_RESERVE(30)
+    assert seen["pass2_timeout"] >= 30       # pass2 최소 몫 보장
 
 
 def test_density_bounds_are_sane():

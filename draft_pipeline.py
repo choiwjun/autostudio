@@ -39,6 +39,9 @@ KEYWORD_DENSITY_BASE_CAP = 4000  # v11: 밀도 분모 상한 — 긴 글(5000자
 # 1회차부터 무제한이라 60초에 죽고(비용 손실·저장 없음) 검수 기회도 잃었음 (버그 4).
 HARD_BUDGET_SECONDS = 55
 MIN_CALL_TIMEOUT = 15  # 이 미만 잔여 예산에선 호출 시작 무의미 (중도 절단 확정)
+# v17.2: pass1은 이 만큼을 pass2에 남기도록 클램프 — pass1이 예산 대부분을
+# 소진하면 pass2 시작 자체가 불가능해 draft 없이 반환되던 500 경로 제거
+PASS2_RESERVE = 30
 FAKE_EXPERIENCE = ("제가 직접", "직접 사용해", "직접 분석해", "제 경험", "제가 해")
 FAQ_MARKER = "자주 묻는 질문"
 STALE_MONTH_CUES = ("정답", "좋은", "추천", "떠나", "여행지", "지금", "이번", "가볼", "알맞", "최적", "성수기")
@@ -412,10 +415,10 @@ def generate_two_pass(keyword, structure, runner=None, retry_budget_seconds=None
     facts, comparisons = _outline_grounding(structure)
     started = time.monotonic()
 
-    def call_timeout(default):
+    def call_timeout(default, reserve=0):
         if hard_budget_seconds is None:
             return default
-        remaining = hard_budget_seconds - (time.monotonic() - started)
+        remaining = hard_budget_seconds - (time.monotonic() - started) - reserve
         if remaining < MIN_CALL_TIMEOUT:
             return None
         return max(MIN_CALL_TIMEOUT, min(default, remaining))
@@ -423,7 +426,7 @@ def generate_two_pass(keyword, structure, runner=None, retry_budget_seconds=None
     draft, failed = None, []
     qc_feedback = ""
     for attempt in (1, 2):
-        timeout1 = call_timeout(90)
+        timeout1 = call_timeout(90, reserve=PASS2_RESERVE)
         if timeout1 is None:
             break  # 하드 예산 소진 — 이미 만든 초안이 있으면 그걸로 반환
         try:
