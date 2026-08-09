@@ -597,6 +597,25 @@ def test_list_drafts_missing_images(tmp_path):
     assert [r["id"] for r in rows] == [d1, d3, d4]
 
 
+def test_list_drafts_missing_images_pg_like_escape():
+    """회귀(v17.3): postgres SQL의 LIKE 와일드카드 '%'는 psycopg2 파라미터
+    마커로 오인되지 않게 '%%'로 이스케이프해야 한다. 누락 시 LIMIT %s 외
+    % 포함 리터럴에서 IndexError(tuple index out of range) — 8/9~8/10
+    content batch가 매일 실패해 수집 실행이 partial로 기록되던 원인.
+    db.py의 실제 postgres 분기 SQL을 소스에서 추출해 파라미터 마커 수를
+    검증한다 (복제 문자열이 아닌 실제 코드 기준)."""
+    import inspect
+    import re
+    src = inspect.getsource(Database.list_drafts_missing_images)
+    pg_block = src.split('if self.dialect == "postgres":')[1].split('else:')[0]
+    pg_sql = pg_block.split('sql = """')[1].split('"""')[0]
+    # psycopg2 규칙: '%%'는 리터럴 %, '%s'만 파라미터 마커
+    markers = len(re.findall(r"(?<!%)%(?!%)", pg_sql))
+    assert markers == 1, (
+        f"postgres SQL 파라미터 마커 수 {markers} != 1 (LIMIT %s 하나여야 함) — "
+        "LIKE 와일드카드 % 는 %% 로 이스케이프할 것")
+
+
 def test_keywords_without_drafts_priority_order(tmp_path):
     d = make_db(tmp_path)
     low = d.upsert_keyword("저순위", category="일상", day="2026-08-01")

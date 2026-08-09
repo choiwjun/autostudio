@@ -969,11 +969,14 @@ LIMIT ? OFFSET ?"""
         """대표 또는 섹션 이미지가 비어 있는 초안 (생성 순서대로).
         섹션 이미지는 본문에 H2가 있어야 생성 가능 — 조건에서 같이 거른다."""
         if self.dialect == "postgres":
+            # psycopg2는 SQL의 '%'를 파라미터 마커로 해석하므로 LIKE 와일드카드는
+            # '%%'로 이스케이프해야 한다 — 누락 시 LIMIT %s 외 % 포함 리터럴에서
+            # IndexError(tuple index out of range)로 매 실행 content batch가 실패
             sql = """
 SELECT * FROM drafts
 WHERE image_url = ''
    OR (section_images = ''
-       AND (body LIKE '## %' OR body LIKE E'%\\n## %'))
+       AND (body LIKE '## %%' OR body LIKE E'%%\\n## %%'))
 ORDER BY id LIMIT %s"""
         else:
             sql = """
