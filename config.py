@@ -151,7 +151,7 @@ def load_config(load_env=True):
         "content_batch_enabled": os.getenv("CONTENT_BATCH_ENABLED", "1") == "1",
         "content_batch_max_new": int(os.getenv("CONTENT_BATCH_MAX_NEW", "2")),
         "content_batch_budget_seconds": int(
-            os.getenv("CONTENT_BATCH_BUDGET_SECONDS", "2400")),
+            os.getenv("CONTENT_BATCH_BUDGET_SECONDS", "1200")),
         # v6: 시드 비어 있을 때 자동 초기화용 집중 시드 + 애드포스트 CPC 등급
         # v8: 무카테고리 키워드 자동 분류 규칙 (시드 상속 실패 시 폴백)
         "default_focus_seeds": DEFAULT_FOCUS_SEEDS,

@@ -134,7 +134,10 @@ def run_content_batch(d, cfg, today, now, client=None):
         d.log_collection("(content)", "skip", "LLM 키 없음 — 콘텐츠 배치 생략", now)
         return result
     started = time.monotonic()
-    budget = cfg.get("content_batch_budget_seconds", 2400)
+    # v17.3: 기본 예산 2400→1200 — 발굴·스냅샷(500키워드)·수요·쇼핑 합계가
+    # GH Actions 잡 timeout(60분)을 넘기면 도중 kill로 당일 수집이 유실됨.
+    # 미완성분은 증분 설계라 다음 실행이 이어서 생성한다.
+    budget = cfg.get("content_batch_budget_seconds", 1200)
     deadline = started + budget
     client = client or NaverClient(cfg["client_id"], cfg["client_secret"])
 

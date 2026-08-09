@@ -634,6 +634,27 @@ def test_adpost_import_rejects_bad_csv(tmp_path):
                      files={"file": ("r.csv", b"x", "text/csv")}).status_code == 401
 
 
+def test_adpost_import_budget_guard_partial(tmp_path, monkeypatch):
+    # v17.3: 시간 예산 초과 시 남은 행을 건너뛰고 partial로 명시 — 서버리스
+    # 중간 타임아웃으로 무소음 유실되지 않도록 (재업로드로 나머지 반영 가능).
+    # 주의: time.monotonic 전역 패치는 TestClient/httpx 내부 타임아웃 계산도
+    # 오염시켜 행(deterministic 상수 패치) — 모듈 상수를 0으로 강제.
+    import server as server_mod
+    client = TestClient(make_app(tmp_path))
+    did = _create_draft(client, monkeypatch)
+    client.post(f"/drafts/{did}/published-url",
+                json={"url": "https://blog.naver.com/a/1"})
+    monkeypatch.setattr(server_mod, "ADPOST_IMPORT_BUDGET_SECONDS", 0)
+    csv = ("게시물 제목,URL,수익(원)\n"
+           "제목,https://blog.naver.com/a/1,100\n"
+           "매칭 실패 글,https://blog.naver.com/a/999,100\n").encode("utf-8-sig")
+    body = client.post("/adpost/import",
+                       files={"file": ("r.csv", csv, "text/csv")}).json()
+    assert body["partial"] is True and body["skipped"] == 2
+    assert body["matched"] == 0
+    assert "재업로드" in body["message"]
+
+
 def test_section_images_incremental(tmp_path, monkeypatch):
     # v17 (버그 3): 기존 이미지 이후부터 증분 생성 + 즉시 저장
     import json as json_mod

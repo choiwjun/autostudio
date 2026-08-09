@@ -51,6 +51,9 @@ CREATE TABLE IF NOT EXISTS top_results (
     day TEXT NOT NULL,
     post_date TEXT NOT NULL
 );
+-- v17.3: 스냅샷 INSERT/DELETE·보존 DELETE (30일 보유분 풀스캔 방지)
+CREATE INDEX IF NOT EXISTS idx_top_results_keyword_day
+    ON top_results(keyword_id, day);
 CREATE TABLE IF NOT EXISTS collection_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_at TEXT NOT NULL,
@@ -58,6 +61,9 @@ CREATE TABLE IF NOT EXISTS collection_log (
     action TEXT NOT NULL,
     note TEXT NOT NULL DEFAULT ''
 );
+-- v17.3: 보존 DELETE·조회 인덱스 (180일 보유분 풀스캔 방지)
+CREATE INDEX IF NOT EXISTS idx_collection_log_run_at
+    ON collection_log(run_at);
 CREATE TABLE IF NOT EXISTS collection_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at TEXT NOT NULL,
@@ -102,6 +108,10 @@ CREATE TABLE IF NOT EXISTS drafts (
     adpost_impressions INTEGER,
     adpost_clicks INTEGER
 );
+-- v17.3: 게시 URL·제목 매칭(AdPost 임포트)과 키워드별 초안 조회 인덱스
+CREATE INDEX IF NOT EXISTS idx_drafts_keyword ON drafts(keyword_id);
+CREATE INDEX IF NOT EXISTS idx_drafts_published_url ON drafts(published_url);
+CREATE INDEX IF NOT EXISTS idx_drafts_title ON drafts(title);
 """,
     "postgres": """
 CREATE TABLE IF NOT EXISTS seed_keywords (
@@ -143,6 +153,9 @@ CREATE TABLE IF NOT EXISTS top_results (
     day TEXT NOT NULL,
     post_date TEXT NOT NULL
 );
+-- v17.3: 스냅샷 INSERT/DELETE·보존 DELETE (30일 보유분 풀스캔 방지)
+CREATE INDEX IF NOT EXISTS idx_top_results_keyword_day
+    ON top_results(keyword_id, day);
 CREATE TABLE IF NOT EXISTS collection_log (
     id SERIAL PRIMARY KEY,
     run_at TEXT NOT NULL,
@@ -150,6 +163,9 @@ CREATE TABLE IF NOT EXISTS collection_log (
     action TEXT NOT NULL,
     note TEXT NOT NULL DEFAULT ''
 );
+-- v17.3: 보존 DELETE·조회 인덱스 (180일 보유분 풀스캔 방지)
+CREATE INDEX IF NOT EXISTS idx_collection_log_run_at
+    ON collection_log(run_at);
 CREATE TABLE IF NOT EXISTS collection_runs (
     id SERIAL PRIMARY KEY,
     started_at TEXT NOT NULL,
@@ -194,6 +210,10 @@ CREATE TABLE IF NOT EXISTS drafts (
     adpost_impressions INTEGER,
     adpost_clicks INTEGER
 );
+-- v17.3: 게시 URL·제목 매칭(AdPost 임포트)과 키워드별 초안 조회 인덱스
+CREATE INDEX IF NOT EXISTS idx_drafts_keyword ON drafts(keyword_id);
+CREATE INDEX IF NOT EXISTS idx_drafts_published_url ON drafts(published_url);
+CREATE INDEX IF NOT EXISTS idx_drafts_title ON drafts(title);
 """,
 }
 

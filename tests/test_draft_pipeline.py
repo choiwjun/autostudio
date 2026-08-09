@@ -384,7 +384,8 @@ def test_hard_budget_clamps_call_timeouts(monkeypatch):
 
     generate_two_pass("키워드", {}, runner=fake_runner, retry_budget_seconds=0,
                       hard_budget_seconds=55)
-    assert received[0] == 55 - dp_mod.PASS2_RESERVE  # pass1은 pass2 몫 제외 클램프
+    # v17.2: 실시간 경과(~ms)가 정확한 등식 비교를 깨뜨리는 flaky 수정 — 여유 1초 허용
+    assert 55 - dp_mod.PASS2_RESERVE - 1 <= received[0] <= 55 - dp_mod.PASS2_RESERVE
     assert all(t <= 55 for t in received)
     assert all(t >= dp_mod.MIN_CALL_TIMEOUT for t in received)
 

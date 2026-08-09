@@ -73,7 +73,7 @@ python -m pytest tests -q                                # 테스트
 | `ACTIVE_KEYWORD_CAP` / `DAILY_NEW_KEYWORD_CAP` | 활성 키워드 총량(기본 500) / 일일 신규 상한(0=무제한) |
 | `CONTENT_BATCH_ENABLED` | 스케줄 수집의 초안·이미지 배치 (기본 1) |
 | `CONTENT_BATCH_MAX_NEW` | 회당 신규 초안 상한 (기본 2) |
-| `CONTENT_BATCH_BUDGET_SECONDS` | 배치 시간 예산 (기본 2400, Actions 60분 내) |
+| `CONTENT_BATCH_BUDGET_SECONDS` | 배치 시간 예산 (기본 1200, 수집 전 단계와 합산해도 60분 미만) |
 
 ## 설계 제약
 

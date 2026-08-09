@@ -21,6 +21,10 @@ logger = logging.getLogger("server")
 IMAGE_DOWNLOAD_TIMEOUT = 30
 IMAGE_DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024
 IMAGE_DOWNLOAD_MAX_REDIRECTS = 3
+# v17.3: AdPost 임포트 처리 시간 예산 — 서버리스 60초 한도 대비.
+# 모듈 레벨 상수로 테스트가 결정적으로 패치 가능 (time.monotonic 전역
+# 패치는 TestClient/httpx 내부 타임아웃 계산도 오염시켜 금지).
+ADPOST_IMPORT_BUDGET_SECONDS = 50
 
 
 def _fetch_image_bytes(url):
@@ -599,7 +603,11 @@ def create_app(cfg):
     async def import_adpost_report(file: UploadFile = File(...)):
         # v17: AdPost 리포트 CSV → 초안 매칭 → 성과 점수·priority 자동 보정.
         # 수동 점수 입력(FeedbackIn)의 자동화 대체 경로 (고도화 1).
+        # v17.3: 시간 예산 초과 시 남은 행은 건너뛰고 부분 처리 결과를 명시적으로
+        # 반환 — 중간 타임아웃으로 무소음 유실 방지. 멱등 설계(boost 차액)라
+        # 같은 CSV 재업로드로 나머지를 이어서 반영할 수 있다.
         import adpost
+        import time as time_mod
         raw = await file.read()
         if len(raw) > ADPOST_IMPORT_MAX_BYTES:
             raise HTTPException(status_code=400, detail="CSV가 너무 큽니다 (5MB 상한)")
@@ -608,8 +616,13 @@ def create_app(cfg):
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         now = config_mod.now_kst_iso()
-        matched, unmatched = [], 0
+        started = time_mod.monotonic()
+        budget = ADPOST_IMPORT_BUDGET_SECONDS
+        matched, unmatched, skipped = [], 0, 0
         for row in rows:
+            if time_mod.monotonic() - started >= budget:
+                skipped += 1
+                continue
             draft = (run_db(lambda d, u=row["url"]: d.find_draft_by_published_url(u))
                      if row["url"] else None)
             if not draft and row["title"]:
@@ -627,8 +640,14 @@ def create_app(cfg):
                 r["clicks"], s, now, now, dl))
             matched.append({"draft_id": draft["id"], "title": draft["title"],
                             "revenue": row["revenue"], "performance_score": score})
-        return {"matched": len(matched), "unmatched": unmatched,
-                "results": matched}
+        result = {"matched": len(matched), "unmatched": unmatched,
+                  "results": matched}
+        if skipped:
+            result["partial"] = True
+            result["skipped"] = skipped
+            result["message"] = (f"시간 예산 내 {len(rows) - skipped}/{len(rows)}행 처리 — "
+                                 "같은 CSV 재업로드로 나머지를 반영하세요")
+        return result
 
     @app.get("/")
     def index():
