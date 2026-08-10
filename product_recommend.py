@@ -2,10 +2,14 @@
 # 네이버쇼핑커넥트 상품 블록(Phase B)의 상품 소스. 초안 키워드 → 상품 3개 추출.
 # B.2(딥링크 변환)는 SHOPPING_CONNECT_PID 설정 후 활성화 — 미설정 시 링크 자리 표시.
 import logging
+import re
 
 from naver_client import NaverAPIError
 
 logger = logging.getLogger("product_recommend")
+
+# 네이버 쇼핑 검색 API의 title은 <b> 강조 마크업 포함 — 제거 (v21.1 버그 수정)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 # 카테고리 → 쇼핑 검색 최적 키워드 가중치 (B.3에서 초안 삽입 시 우선 대상)
 PRODUCT_BLOCK_CATEGORIES = ("요리", "패션", "뷰티", "IT", "디지털", "인테리어", "반려동물")
@@ -16,7 +20,7 @@ PRODUCT_MAX = 3
 
 def _parse_item(item):
     """네이버 쇼핑 검색 응답 항목 → 정규화 상품 dict. 필수 필드 누락 시 None."""
-    title = str(item.get("title") or "").strip()
+    title = _HTML_TAG_RE.sub("", str(item.get("title") or "")).strip()
     link = str(item.get("link") or "").strip()
     if not title or not link:
         return None

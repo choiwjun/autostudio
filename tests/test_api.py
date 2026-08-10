@@ -612,6 +612,10 @@ def test_published_url_set_and_validate(tmp_path, monkeypatch):
                     json={"url": "https://blog.naver.com/a/1"})
     assert r.status_code == 200
     assert r.json()["published_url"] == "https://blog.naver.com/a/1"
+    # v21.1: URL 등록 = 게시 확정 — status published + 게시 로그 노출
+    assert r.json()["status"] == "published"
+    planner = client.get("/planner").json()
+    assert planner["recent_published"][0]["draft_id"] == did
     assert client.post("/drafts/999/published-url",
                        json={"url": "https://x.com"}).status_code == 404
     prod = TestClient(make_app(tmp_path, env="production"))

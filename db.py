@@ -1128,9 +1128,13 @@ LIMIT ?"""
     # ---------- v17: 게시·AdPost 피드백 ----------
 
     def set_draft_published_url(self, draft_id, url, updated_at=""):
+        # v21.1: URL 등록 = 게시 확정 — status·published_at 갱신으로 게시 로그에
+        # 즉시 노출 (기존 draft 유지 시 발행 이력에서 누락)
         self._qd(
-            "UPDATE drafts SET published_url = ?, updated_at = ? WHERE id = ?",
-            (url, updated_at, draft_id),
+            "UPDATE drafts SET published_url = ?, status = 'published', "
+            "published_at = CASE WHEN published_at = '' THEN ? "
+            "ELSE published_at END, updated_at = ? WHERE id = ?",
+            (url, updated_at, updated_at, draft_id),
         )
 
     def mark_draft_refreshed(self, draft_id, refreshed_at):

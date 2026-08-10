@@ -60,6 +60,15 @@ def test_product_block_markdown():
     assert product_block_markdown("키워드", []) == ""
 
 
+def test_search_products_strips_html_tags():
+    # v21.1: 네이버 쇼핑 API title은 <b> 강조 마크업 포함 — 제거 후 저장
+    items = [{"title": "<b>에어프라이어</b> 5L", "link": "https://shopping.naver.com/1",
+              "lprice": "15000", "mallName": "스토어"}]
+    products = search_products(FakeShopClient(items=items), "에어프라이어")
+    assert products[0]["title"] == "에어프라이어 5L"
+    assert "<b>" not in products[0]["title"]
+
+
 def test_product_block_categories_defined():
     # B.3: 상품 블록 우선 카테고리 — 요리·패션·IT 등 쇼핑 전환 적합 분야
     assert "요리" in PRODUCT_BLOCK_CATEGORIES
