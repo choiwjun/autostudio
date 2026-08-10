@@ -4,7 +4,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.db
-!engine/data/engine.db
+!engine/data/
 data/
 .venv/
 .vercel
