@@ -132,19 +132,20 @@ Phase A·B(수익화) → Phase 1(엔진 포팅 — 완료) → Phase 2(별도 �
 | # | 작업 | 산출물 |
 |---|---|---|
 | 2.1 | **별도 저장소·프로젝트 생성** | `autoblog`(가칭) — FastAPI + static (autostudio 동일 스택), 별도 Vercel 배포 + 별도 Supabase 프로젝트 |
-| 2.2 | `blog_posts` 테이블 (Supabase B) | slug(유니크)·제목·본문(markdown)·태그·카테고리·발행일·수정일·엔진 메타(운세 유형·기준일)·status |
+| 2.2 | `blog_posts` 테이블 (Supabase B) + **slug 규칙** | slug(유니크)·제목·본문(markdown)·태그·카테고리·발행일·수정일·엔진 메타(운세 유형·기준일)·status(draft/published). **slug 규칙**: 운세 `fortune-YYYY-MM-DD`·일반 `키워드-kebab-case` — 발행 클라이언트가 생성, 멱등 update의 기준 키 |
 | 2.3 | 공개 블로그 페이지 | `/` 목록(카드)·`/{slug}` 상세(마크다운→HTML + XSS 새니타이즈)·카테고리·**AEO 구조**(한줄 답변 요약·질문형 헤딩·FAQ) |
-| 2.4 | **SEO** | sitemap.xml·robots.txt·RSS·OG 태그·canonical·**JSON-LD**(Article·FAQPage·BreadcrumbList) |
+| 2.4 | **SEO** | sitemap.xml·robots.txt·RSS·canonical·**OG 이미지(대표 이미지)+Twitter Card**·**JSON-LD**(Article·FAQPage·BreadcrumbList·**WebSite·Organization·Speakable**) + **Search Console 등록·sitemap 제출(운영 루프)** |
 | 2.5 | **AEO/GEO 강화** | 생성형 AI(GPT·Perplexity·AI Overview)가 인용하는 구조: E-E-A-T 신호(저자·게시일·수정일·출처 표시), 인용 가능한 답변 블록, 사실·수치 블록 구조화, 내부 링크 클러스터, 표/리스트 활용 |
-| 2.6 | **GA4** | Measurement ID(env) → 스크립트 삽입 + 게시물 조회·스크롤 이벤트 추적 (운세 글 성과 측정) |
-| 2.7 | **발행 API** | `POST /api/posts` — 토큰 인증, 마크다운+메타 수신 → blog_posts 저장 (autostudio 배치·대시보드가 호출) |
-| 2.8 | **발행 클라이언트 (autostudio)** | `content_batch` 확장 — 초안·운세 글 생성 후 발행 API로 전송 (멱등: slug 중복 시 update) |
+| 2.6 | **GA4** | Measurement ID(env) → 스크립트 삽입 + 게시물 조회·스크롤·**CTA(블로그 내 이동)·외부 링크 클릭 이벤트** — 유입→메인 체류·전환 경로 측정 |
+| 2.7 | **발행 API** | `POST /api/posts`(생성)·`PATCH /api/posts/{slug}`(수정)·`DELETE /api/posts/{slug}`(삭제)·**status 전이**(draft↔published) — 토큰 인증, 마크다운+메타 수신 (운세 오발행 롤백 가능) |
+| 2.8 | **발행 클라이언트 (autostudio)** | `content_batch` 확장 — 초안·운세 글 생성 후 발행 API로 전송 (멱등: slug 중복 시 PATCH update) |
 
 ### SEO·AEO·GEO 설계 원칙
 - **SEO**: 검색 엔진 크롤링 최적화 — sitemap·canonical·구조화 데이터·모바일·속도 (정적 렌더링)
-- **AEO (Answer Engine)**: 질문에 즉답하는 구조 — 한줄 요약(블로그 상세본 프롬프트 B 내장) + 질문형 H2 + FAQ 스키마 — Google Featured Snippet·AI Overview 인용 대상
+- **AEO (Answer Engine)**: 질문에 즉답하는 구조 — 한줄 요약(블로그 상세본 프롬프트 B 내장) + 질문형 H2 + FAQ 스키마 + **Speakable**(음성 비서 인용) — Google Featured Snippet·AI Overview 인용 대상
 - **GEO (Generative Engine)**: 생성형 AI가 **출처로 인용**하도록 — E-E-A-T 신호(저자 프로필·발행/수정일·신뢰할 수 있는 표현), 독립적 사실 블록(엔진 계산 근거 표기), 명확한 결론 구조, 내부 링크로 권위 축적
-- **GA4**: 유입 채널·게시물별 조회/체류 측정 — 운세 글 성과 → 콘텐츠 전략 환류
+- **GA4**: 유입 채널·게시물별 조회/체류·**CTA/외부 링크 클릭** 측정 — 운세 유입 → 메인 콘텐츠 전환 경로 확인, 콘텐츠 전략 환류
+- **운영 루프**: Search Console 등록·sitemap 제출·인덱싱/노출 모니터링 — SEO 개선의 피드백
 
 ### 설계 원칙
 - Next.js 도입 없이 FastAPI + static — autostudio와 동일 스택 (유지보수 단일화)
