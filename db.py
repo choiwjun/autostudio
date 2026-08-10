@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS fortune_generations (
     grounding TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'generated',
     created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT '',
     UNIQUE(ref_date, content_type)
 );
 """,
@@ -274,6 +275,7 @@ CREATE TABLE IF NOT EXISTS fortune_generations (
     grounding TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'generated',
     created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT '',
     UNIQUE(ref_date, content_type)
 );
 """,
@@ -1463,6 +1465,16 @@ LIMIT ?"""
              config_mod.now_kst_iso()),
         )
         return True
+
+    def update_fortune_generation(self, ref_date, content_type, content,
+                                  status="generated"):
+        """생성 완료 후 실데이터 저장 (placeholder 행 갱신)."""
+        import config as config_mod
+        self._qd(
+            "UPDATE fortune_generations SET content = ?, status = ?, "
+            "updated_at = ? WHERE ref_date = ? AND content_type = ?",
+            (content, status, config_mod.now_kst_iso(), ref_date, content_type),
+        )
 
     def list_fortune_generations(self, ref_date=None, limit=50):
         sql = ("SELECT * FROM fortune_generations "

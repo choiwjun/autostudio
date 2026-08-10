@@ -324,11 +324,64 @@ def retire(d, today, now):
     return len(victims)
 
 
+def fortune_generate_step(d, cfg, today):
+    """v22.2(3.3): 오늘의 운세 콘텐츠 생성 — SNS 요약본 + 블로그 상세본.
+    - LLM 키 없으면 조용히 생략 (수집 전용 환경 호환 — 콘텐츠 배치와 동일 철학)
+    - 멱등: 같은 기준일 이미 생성 시 스킵
+    - 실패해도 수집 성과는 보존 — 로그만 기록 (운세는 유입 훅이라 부수적)
+    반환: 생성 건수 (0 = 스킵/생략/실패)"""
+    import llm_client
+    if not llm_client.has_api_key():
+        d.log_collection("(fortune)", "skip", "LLM 키 없음 — 운세 생성 생략", now_kst())
+        return 0
+    import json as json_mod
+    import sys
+    from datetime import date as date_mod
+    from engine.fortune_content import (
+        build_daily_grounding, generate_blog_detail, generate_sns_summary,
+        validate_content,
+    )
+    ref = today
+    try:
+        grounding = build_daily_grounding(date_mod.fromisoformat(ref))
+    except Exception as e:
+        d.log_collection("(fortune)", "error", f"그라운딩 실패: {e}", now_kst())
+        return 0
+    grounding_json = json_mod.dumps(grounding, ensure_ascii=False)
+    created = 0
+    for ctype, generator, validator in (
+        ("daily_sns", generate_sns_summary,
+         lambda c: validate_content(c, ref, "sns")),
+        ("daily_blog", generate_blog_detail,
+         lambda c: validate_content(c, ref, "blog")),
+    ):
+        if not d.upsert_fortune_generation(ref, ctype, "",
+                                           grounding=grounding_json):
+            continue  # 이미 생성됨 (멱등)
+        try:
+            content = generator(grounding)
+            ok, fails = validator(content)
+            if not ok:
+                d.log_collection("(fortune)", "error",
+                                 f"{ctype} 검수 실패: {', '.join(fails)}", now_kst())
+            stored = json_mod.dumps(content, ensure_ascii=False)
+        except Exception as e:
+            d.log_collection("(fortune)", "error", f"{ctype} 생성 실패: {e}",
+                             now_kst())
+            continue
+        d.update_fortune_generation(ref, ctype, stored)
+        created += 1
+    return created
+
+
+def now_kst():
+    return datetime.now(config_mod.KST).isoformat(timespec="microseconds")
+
+
 def run_collection(cfg, client=None, today=None, trigger="schedule",
                    budget_seconds=None):
     started = time.monotonic()
-    today = today or config_mod.today_kst().isoformat()  # 날짜 키는 KST 고정
-    # v3: 잠금 타임스탬프는 마이크로초 — 초 단위 now_kst_iso()로는 동일 초에 시작된
+    today = today or config_mod.today_kst().isoformat()  # 날짜 키는 KST 고정    # v3: 잠금 타임스탬프는 마이크로초 — 초 단위 now_kst_iso()로는 동일 초에 시작된
     # 기존 running 행과 소유권 비교(시작 시각 일치)가 충돌해 잠금이 무시될 수 있음
     now = datetime.now(config_mod.KST).isoformat(timespec="microseconds")
     d = db.Database(cfg["db_url"])
@@ -343,7 +396,8 @@ def run_collection(cfg, client=None, today=None, trigger="schedule",
     result = {"locked": False, "new_keywords": 0, "snapshotted": 0, "errors": [],
               "partial": False, "crawl_stopped": None, "retired": 0,
               "demand_updated": 0, "shop_clicks_updated": 0,
-              "drafts_created": 0, "draft_images_created": 0}
+              "drafts_created": 0, "draft_images_created": 0,
+              "fortune_created": 0}
     try:
         # v3: 예산은 발굴·스냅샷·개별 호출 타임아웃까지 전 구간 적용
         discover(d, cfg, today, now, trigger, result, budget_seconds)
@@ -377,6 +431,8 @@ def run_collection(cfg, client=None, today=None, trigger="schedule",
                     logger.warning("content batch failed: %s", e)
                     d.log_collection("(content)", "error", str(e), now)
                     result["errors"].append(f"content_batch: {e}")
+            # v22.2(3.3): 오늘의 운세 콘텐츠 생성 (멱등 — LLM 키 없으면 스킵)
+            result["fortune_created"] = fortune_generate_step(d, cfg, today)
         # v3: 상태 구분 — done(전량 성공) / partial(예산 종료·일부 오류·발굴 중단) / failed(전량 실패)
         if result["errors"] and result["snapshotted"] == 0:
             status = "failed"
@@ -414,11 +470,11 @@ def main():
         raise SystemExit(0)
     logger.info(
         "완료: 신규 %d개, 스냅샷 %d개, 수요갱신 %d개, 쇼핑클릭 %d개, 은퇴 %d개, "
-        "초안 %d개, 이미지 %d개, 오류 %d개%s",
+        "초안 %d개, 이미지 %d개, 운세 %d개, 오류 %d개%s",
         result["new_keywords"], result["snapshotted"], result["demand_updated"],
         result["shop_clicks_updated"], result["retired"],
         result.get("drafts_created", 0), result.get("draft_images_created", 0),
-        len(result["errors"]),
+        result.get("fortune_created", 0), len(result["errors"]),
         f" — 발굴 중단({result.get('crawl_stopped')})"
         if result.get("crawl_stopped") else "")
     # v3: 자동완성 차단은 스냅샷 성공 여부와 무관하게 exit 1 — 차단을 조기에 인지해야
