@@ -131,14 +131,14 @@ Phase A·B(수익화) → Phase 1(엔진 포팅 — 완료) → Phase 2(별도 �
 
 | # | 작업 | 산출물 |
 |---|---|---|
-| 2.1 | **별도 저장소·프로젝트 생성** | `autoblog`(가칭) — FastAPI + static (autostudio 동일 스택), 별도 Vercel 배포 + 별도 Supabase 프로젝트 |
-| 2.2 | `blog_posts` 테이블 (Supabase B) + **slug 규칙** | slug(유니크)·제목·본문(markdown)·태그·카테고리·발행일·수정일·엔진 메타(운세 유형·기준일)·status(draft/published). **slug 규칙**: 운세 `fortune-YYYY-MM-DD`·일반 `키워드-kebab-case` — 발행 클라이언트가 생성, 멱등 update의 기준 키 |
-| 2.3 | 공개 블로그 페이지 | `/` 목록(카드)·`/{slug}` 상세(마크다운→HTML + XSS 새니타이즈)·카테고리·**AEO 구조**(한줄 답변 요약·질문형 헤딩·FAQ) |
-| 2.4 | **SEO** | sitemap.xml·robots.txt·RSS·canonical·**OG 이미지(대표 이미지)+Twitter Card**·**JSON-LD**(Article·FAQPage·BreadcrumbList·**WebSite·Organization·Speakable**) + **Search Console 등록·sitemap 제출(운영 루프)** |
-| 2.5 | **AEO/GEO 강화** | 생성형 AI(GPT·Perplexity·AI Overview)가 인용하는 구조: E-E-A-T 신호(저자·게시일·수정일·출처 표시), 인용 가능한 답변 블록, 사실·수치 블록 구조화, 내부 링크 클러스터, 표/리스트 활용 |
-| 2.6 | **GA4** | Measurement ID(env) → 스크립트 삽입 + 게시물 조회·스크롤·**CTA(블로그 내 이동)·외부 링크 클릭 이벤트** — 유입→메인 체류·전환 경로 측정 |
-| 2.7 | **발행 API** | `POST /api/posts`(생성)·`PATCH /api/posts/{slug}`(수정)·`DELETE /api/posts/{slug}`(삭제)·**status 전이**(draft↔published) — 토큰 인증, 마크다운+메타 수신 (운세 오발행 롤백 가능) |
-| 2.8 | **발행 클라이언트 (autostudio)** | `content_batch` 확장 — 초안·운세 글 생성 후 발행 API로 전송 (멱등: slug 중복 시 PATCH update) |
+| 2.1 | **별도 저장소·프로젝트 생성** | `autoblog`(가칭) — FastAPI + static (autostudio 동일 스택), 별도 Vercel 배포 + 별도 Supabase 프로젝트 + **CI(테스트)·배포 파이프라인** |
+| 2.2 | `blog_posts` 테이블 (Supabase B) + **slug 규칙** | slug(유니크)·제목·본문(markdown)·태그·카테고리·발행일·수정일·엔진 메타(운세 유형·기준일)·status(draft/published)·**indexed(noindex 제어)**. **slug 규칙**: 운세 `fortune-YYYY-MM-DD`·일반 `키워드-kebab-case` — 발행 클라이언트가 생성, 멱등 update의 기준 키 |
+| 2.3 | 공개 블로그 페이지 | `/` 목록(카드·**페이지네이션**)·`/{slug}` 상세(마크다운→HTML + XSS 새니타이즈 + **외부 링크 rel=nofollow**)·카테고리·**태그 페이지**·**draft 미리보기**(`/preview/{slug}?token=` — 인증)·**관련 글 위젯**(상세 하단, 태그 기반 매칭 3~5개)·AEO 구조(한줄 답변 요약·질문형 헤딩·FAQ) |
+| 2.4 | **SEO** | sitemap.xml·robots.txt·RSS·canonical·**OG 이미지(대표 이미지)+Twitter Card**(절대 URL — base_url 설정)**·JSON-LD**(Article·FAQPage·BreadcrumbList·WebSite·Organization·Speakable) + **Search Console 등록·sitemap 제출(운영 루프)** + **인덱스 정책: 당일 운세만 index, 과거 운세 noindex(meta robots)** |
+| 2.5 | **AEO/GEO 강화** | 생성형 AI(GPT·Perplexity·AI Overview)가 인용하는 구조: E-E-A-T 신호(저자·게시일·수정일·출처 표시), 인용 가능한 답변 블록, 사실·수치 블록 구조화, 내부 링크 클러스터(관련 글 위젯), 표/리스트 활용. **운세 글 하단 관련 메인 글 선택 규칙: 태그 매칭 → 최신순** |
+| 2.6 | **GA4** | Measurement ID(env) → 스크립트 삽입 + 게시물 조회·스크롤·CTA(블로그 내 이동)·외부 링크 클릭 이벤트 — 유입→메인 체류·전환 경로 측정 |
+| 2.7 | **발행 API** | `POST /api/posts`(생성)·`PATCH /api/posts/{slug}`(수정)·`DELETE /api/posts/{slug}`(삭제)·**status 전이**(draft↔published)·**rate limit(분당 60회)** — 토큰 인증, 마크다운+메타 수신 (운세 오발행 롤백 가능) |
+| 2.8 | **발행 클라이언트 (autostudio)** | `content_batch` 확장 — 초안·운세 글 생성 후 발행 API로 전송 (멱등: slug 중복 시 PATCH update). **이미지: 발행 시 외부 CDN URL 그대로 전달** (자체 호스팅 프록시는 추후 필요 시) |
 
 ### SEO·AEO·GEO 설계 원칙
 - **SEO**: 검색 엔진 크롤링 최적화 — sitemap·canonical·구조화 데이터·모바일·속도 (정적 렌더링)
@@ -152,6 +152,12 @@ Phase A·B(수익화) → Phase 1(엔진 포팅 — 완료) → Phase 2(별도 �
 - 블로그는 공개(인증 없음), 발행 API만 토큰 인증
 - 자동 발행: autostudio → 블로그 발행 API (HTTP push) — DB 직접 접근 없음
 - 도메인: 별도 구매 예정 — 개발 중 Vercel 기본 도메인으로 진행 후 연결
+
+### 출범 운영 체크리스트
+1. **애드센스 승인** — 신규 도메인은 승인 전 수익 0. 메인 콘텐츠 15~20편 확보 후 신청 (콘텐츠·정책 준수 필요)
+2. **Search Console 등록** — 도메인 소유권 확인 + sitemap 제출 + 인덱싱 모니터링
+3. **GA4 연결** — Measurement ID 설정 + 이벤트 검증
+4. **당일 운세 index 확인** — 과거 운세 noindex 정상 적용 여부 (robots 테스트)
 
 ## 8. Phase 3 — 운세 채널 자동화
 
