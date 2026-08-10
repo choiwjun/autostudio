@@ -38,12 +38,14 @@ def solar_to_lunar(solar_date, db_path=None):
 
 
 def lunar_to_solar(lunar_year, lunar_month, lunar_day, is_leap=0, db_path=None):
-    """음력(년/월/일/윤달) → 양력 날짜('YYYY-MM-DD') 또는 None."""
+    """음력(년/월/일/윤달) → 양력 날짜('YYYY-MM-DD') 또는 None.
+    키 형식은 myunglab 원본과 동일하게 패딩('년-월-일-윤달')."""
     conn = _connect(db_path)
     try:
         row = conn.execute(
             "SELECT solar_date FROM engine_lunar_solar WHERE lunar_key = ?",
-            (f"{lunar_year}-{lunar_month}-{lunar_day}-{is_leap}",)).fetchone()
+            (f"{lunar_year:04d}-{lunar_month:02d}-{lunar_day:02d}-{is_leap}",
+             )).fetchone()
     finally:
         conn.close()
     return row["solar_date"] if row else None
@@ -56,7 +58,7 @@ def get_solar_terms(year, db_path=None):
     conn = _connect(db_path)
     try:
         rows = conn.execute(
-            "SELECT ordinal, source_name, korean_name, month, day, hour, "
+            "SELECT year, ordinal, source_name, korean_name, month, day, hour, "
             "minute, second, julian_day FROM engine_solar_terms "
             "WHERE year = ? ORDER BY ordinal", (year,)).fetchall()
     finally:
