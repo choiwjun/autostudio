@@ -46,10 +46,149 @@ def to_julian_day(year, month, day):
 
 def to_kst_timestamp(parts):
     """KST 벽시계 부품 → UTC 타임스탬프 (temporal.toKstTimestamp 1:1)."""
+    return to_offset_timestamp(parts, 9 * 60)
+
+
+def to_offset_timestamp(parts, offset_minutes):
+    """벽시계 부품 → UTC 타임스탬프 (오프셋 분 지정 — legal time 반영)."""
     dt = datetime(parts['year'], parts['month'], parts['day'],
                   parts.get('hour', 0), parts.get('minute', 0),
-                  parts.get('second', 0), tzinfo=timezone(timedelta_minutes(9 * 60)))
+                  parts.get('second', 0),
+                  tzinfo=timezone(timedelta(minutes=offset_minutes)))
     return dt.timestamp()
+
+
+# ---------- v22.2(1.5-선행): 한국 법정시간 이력 (korean-legal-time.ts 1:1) ----------
+# 1908~현재의 표준시·서머타임 이력 — 과거 생일 사주 계산의 정확성 기반.
+# 현재 날짜(1961-08-10 이후)는 +9 고정이라 일운·월운에는 무영향.
+
+class ManseryeokPolicyError(ValueError):
+    pass
+
+
+class AmbiguousCivilTimeError(ValueError):
+    """전환으로 벽시계 라벨이 반복되는 구간 (1954-03-21 00:00~00:30 등)."""
+
+
+class NonexistentCivilTimeError(ValueError):
+    """전환으로 벽시계 라벨이 건너뛰는 구간 (1961-08-10 00:00~00:30 등)."""
+
+
+_STANDARD_TIME_RULES = [
+    # (start, end, standard_offset_minutes)
+    ((1908, 4, 1), (1912, 1, 1), 510),
+    ((1912, 1, 1), (1954, 3, 21), 540),
+    ((1954, 3, 21), (1961, 8, 10), 510),
+    ((1961, 8, 10, 0, 30), (1987, 1, 1), 540),
+    ((1987, 1, 1), (1989, 1, 1), 540),
+    ((1989, 1, 1), None, 540),
+]
+
+_DAYLIGHT_SAVING_RULES = [
+    # (start, end, daylight_offset_minutes) — [start, end) 구간
+    ((1948, 6, 1), (1948, 9, 13), 60),
+    ((1949, 4, 3), (1949, 9, 11), 60),
+    ((1950, 4, 1), (1950, 9, 10), 60),
+    ((1951, 5, 6), (1951, 9, 9), 60),
+    ((1955, 5, 5), (1955, 9, 9), 60),
+    ((1956, 5, 20), (1956, 9, 30), 60),
+    ((1957, 5, 5), (1957, 9, 22), 60),
+    ((1958, 5, 4), (1958, 9, 21), 60),
+    ((1959, 5, 3), (1959, 9, 20), 60),
+    ((1960, 5, 1), (1960, 9, 18), 60),
+    ((1987, 5, 10, 2), (1987, 10, 11, 3), 60),
+    ((1988, 5, 8, 2), (1988, 10, 9, 3), 60),
+]
+
+
+def _parts_tuple(dt_parts):
+    return (dt_parts['year'], dt_parts['month'], dt_parts['day'],
+            dt_parts.get('hour', 0), dt_parts.get('minute', 0),
+            dt_parts.get('second', 0))
+
+
+def _rule_start_tuple(rule):
+    start = rule[0]
+    return (start[0], start[1], start[2], start[3] if len(start) > 3 else 0,
+            start[4] if len(start) > 4 else 0, 0)
+
+
+def _compare(left, right):
+    return (left > right) - (left < right)
+
+
+def _is_in_interval(date_parts, start, end):
+    """[start, end) 구간 판정 (벽시계 비교)."""
+    now = _parts_tuple(date_parts)
+    if _compare(now, start) < 0:
+        return False
+    if end is not None and _compare(now, end) >= 0:
+        return False
+    return True
+
+
+def _assert_supported_standard_transition(date_parts):
+    # 1954-03-21 00:00~00:30 — 표준시 전환으로 라벨 반복 (모호)
+    if _is_in_interval(date_parts, (1954, 3, 21), (1954, 3, 21, 0, 30)):
+        raise AmbiguousCivilTimeError(
+            "1954 standard-time transition: civil label repeated")
+    # 1961-08-10 00:00~00:30 — 전환으로 라벨 스킵 (부재)
+    if _is_in_interval(date_parts, (1961, 8, 10), (1961, 8, 10, 0, 30)):
+        raise NonexistentCivilTimeError(
+            "1961 standard-time transition: civil label skipped")
+
+
+def resolve_korean_legal_time(date_parts):
+    """한국 법정시간 해석 (korean-legal-time.resolveKoreanLegalTime 1:1).
+    반환: {'standard_offset_minutes', 'daylight_offset_minutes',
+           'total_offset_minutes', 'standard_meridian_degrees',
+           'transition_status'} — 1908-04-01 이전은 ManseryeokPolicyError."""
+    _assert_supported_standard_transition(date_parts)
+    standard = None
+    for start, end, offset in _STANDARD_TIME_RULES:
+        if _is_in_interval(date_parts, start, end):
+            standard = (offset, start, end)
+            break
+    if standard is None:
+        raise ManseryeokPolicyError(
+            "Korean legal time is not defined before 1908-04-01")
+    standard_offset = standard[0]
+
+    daylight = None
+    for start, end, offset in _DAYLIGHT_SAVING_RULES:
+        # DST 전환 경계: 시작 직후 +60분(스킵)·종료 직전 -60분(반복) 구간
+        if _is_in_interval(date_parts, start, end):
+            daylight = (offset, start, end)
+            break
+    daylight_offset = daylight[0] if daylight else 0
+
+    if daylight:
+        nonexistent_end = _shift_utc(
+            {'year': daylight[1][0], 'month': daylight[1][1],
+             'day': daylight[1][2], 'hour': daylight[1][3] if len(daylight[1]) > 3 else 0,
+             'minute': daylight[1][4] if len(daylight[1]) > 4 else 0, 'second': 0},
+            daylight[0])
+        if _compare(_parts_tuple(date_parts), _parts_tuple(nonexistent_end)) < 0 \
+                and _compare(_parts_tuple(date_parts), _rule_start_tuple(daylight)) >= 0:
+            raise NonexistentCivilTimeError(
+                "daylight-saving transition: civil label skipped")
+        ambiguous_start = _shift_utc(
+            {'year': daylight[2][0], 'month': daylight[2][1],
+             'day': daylight[2][2], 'hour': daylight[2][3] if len(daylight[2]) > 3 else 0,
+             'minute': daylight[2][4] if len(daylight[2]) > 4 else 0, 'second': 0},
+            -daylight[0])
+        if _compare(_parts_tuple(date_parts), _parts_tuple(ambiguous_start)) >= 0 \
+                and _compare(_parts_tuple(date_parts), _parts_tuple(daylight[2])) < 0:
+            raise AmbiguousCivilTimeError(
+                "daylight-saving transition: civil label repeated")
+
+    return {
+        'standard_offset_minutes': standard_offset,
+        'daylight_offset_minutes': daylight_offset,
+        'total_offset_minutes': standard_offset + daylight_offset,
+        'standard_meridian_degrees': standard_offset / 4,
+        'transition_status': 'daylight' if daylight else 'standard',
+    }
 
 
 def _normalize_to_kst(term):
@@ -77,25 +216,6 @@ def list_solar_terms_for_year(year, db_path=None):
     return [_normalize_to_kst(t) for t in get_solar_terms(year, db_path=db_path)]
 
 
-def get_latest_major_solar_term(date_parts, db_path=None):
-    """기준 시각 이전 가장 최근 절(節)기 — 월주 경계 판정.
-    date_parts: {'year','month','day','hour','minute','second'} (KST 벽시계)"""
-    effective_ts = to_kst_timestamp(date_parts)
-    candidates = []
-    for year in (date_parts['year'] - 1, date_parts['year']):
-        candidates += [t for t in list_solar_terms_for_year(year, db_path)
-                       if t['korean_name'] in MAJOR_SOLAR_TERM_TO_MONTH_INDEX]
-    best = None
-    for term in candidates:
-        term_ts = to_kst_timestamp(term)
-        if term_ts <= effective_ts and (best is None
-                                        or term_ts > to_kst_timestamp(best)):
-            best = term
-    if best is None:
-        raise ValueError(f"No major solar term found for {date_parts}")
-    return best
-
-
 def get_ipchun(year, db_path=None):
     terms = [t for t in list_solar_terms_for_year(year, db_path)
              if t['korean_name'] == '입춘']
@@ -116,22 +236,32 @@ def _get_day_index(year, month, day):
 
 
 def get_ganji(year, month, day, hour=0, minute=0, second=0,
-              sect=2, db_path=None):
+              sect=2, db_path=None, legal_time=True):
     """사주 4기둥 (ganji.getGanji 1:1 이식 — 최신 소스 기준).
     sect: 1=자시 일주 바꿈(야자시), 2=안 바꿈. hour=23 처리 포함.
-    반환: {'year':{'gan','ji','ganji'}, 'month':..., 'day':..., 'hour':...}
-    dayHourDateTimeSchoolApplied: 학교 적용 여부 (False 기본 — 23시 shift)"""
+    legal_time: 과거 날짜에 한국 법정시간(표준시·DST) 반영 (normalized-context
+    흐름 — DST 제거 후 legal 오프셋 타임스탬프, 절기 비교는 KST 유지).
+    반환: {'year':{'gan','ji','ganji'}, 'month':..., 'day':..., 'hour':...}"""
     base = {'year': year, 'month': month, 'day': day,
             'hour': hour, 'minute': minute, 'second': second}
+    # 년월 경계 판정용 유효 타임스탬프 — 법정시간 반영
+    if legal_time:
+        legal = resolve_korean_legal_time(base)
+        effective = (_shift_utc(base, -legal['daylight_offset_minutes'])
+                     if legal['daylight_offset_minutes'] else base)
+        effective_ts = to_offset_timestamp(
+            effective, legal['total_offset_minutes'])
+    else:
+        effective_ts = to_kst_timestamp(base)
+
     # 년주: 입춘 경계
     ipchun = get_ipchun(base['year'], db_path)
-    effective_ts = to_kst_timestamp(base)
     effective_year = base['year'] if effective_ts >= to_kst_timestamp(ipchun) \
         else base['year'] - 1
     year_pillar = _create_pillar(effective_year - 1984)  # 1984 = 갑자년
 
     # 월주: 가장 최근 절(節)기 기준
-    latest = get_latest_major_solar_term(base, db_path)
+    latest = _latest_major_term(base, effective_ts, db_path)
     month_index = MAJOR_SOLAR_TERM_TO_MONTH_INDEX[latest['korean_name']]
     stem_start = TIGER_MONTH_STEM_START[year_pillar['gan']]
     stem = STEMS[mod(stem_start + month_index, 10)]
@@ -162,6 +292,24 @@ def get_ganji(year, month, day, hour=0, minute=0, second=0,
         'year': year_pillar, 'month': month_pillar,
         'day': day_pillar, 'hour': hour_pillar,
     }
+
+
+def _latest_major_term(date_parts, effective_ts, db_path=None):
+    """기준 시각 이전 가장 최근 절(節)기 — 월주 경계 판정.
+    effective_ts: legal time 반영된 타임스탬프, 절기는 KST(+9) 기준."""
+    candidates = []
+    for year in (date_parts['year'] - 1, date_parts['year']):
+        candidates += [t for t in list_solar_terms_for_year(year, db_path)
+                       if t['korean_name'] in MAJOR_SOLAR_TERM_TO_MONTH_INDEX]
+    best = None
+    for term in candidates:
+        term_ts = to_kst_timestamp(term)
+        if term_ts <= effective_ts and (best is None
+                                        or term_ts > to_kst_timestamp(best)):
+            best = term
+    if best is None:
+        raise ValueError(f"No major solar term found for {date_parts}")
+    return best
 
 
 def _shift_utc(parts, minutes):

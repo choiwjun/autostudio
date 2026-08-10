@@ -131,3 +131,108 @@ def test_ipchun_boundary():
     before = get_ganji(2026, 2, 3, 12, 0)
     after = get_ganji(2026, 2, 4, 12, 0)
     assert before["year"]["ganji"] != after["year"]["ganji"]
+
+
+# ---------- v22.2(1.5-선행): 한국 법정시간 (korean-legal-time 포팅 검증) ----------
+
+from engine.calendar import (  # noqa: E402
+    AmbiguousCivilTimeError, ManseryeokPolicyError, NonexistentCivilTimeError,
+    resolve_korean_legal_time,
+)
+
+POLICY_FIXTURE = os.path.join(
+    MYUNGLAB_ROOT, "tests", "fixtures", "manseryeok-policy-cases.json")
+
+
+@pytest.fixture(scope="module")
+def legal_time_cases():
+    if not os.path.exists(POLICY_FIXTURE):
+        pytest.skip("myunglab policy fixture 없음")
+    with open(POLICY_FIXTURE, encoding="utf-8") as f:
+        return json.load(f)["legalTimeCases"]
+
+
+def _to_parts(s, add_minutes=0):
+    y, m, d = map(int, s.split("-"))
+    parts = {"year": y, "month": m, "day": d,
+             "hour": 0, "minute": 0, "second": 0}
+    if add_minutes:
+        from engine.calendar import _shift_utc
+        shifted = _shift_utc(parts, add_minutes)
+        return shifted
+    return parts
+
+
+def test_legal_time_matches_policy_cases(legal_time_cases):
+    # myunglab manseryeok-policy-cases.json — 법정시간 케이스 재사용
+    # DST 케이스는 sampleDate, 구간 케이스는 from (전환일 00:00은 경계 라벨 —
+    # 1954/1961 전환은 +30분 직후 시각으로 검증)
+    checked = 0
+    for case in legal_time_cases:
+        if "sampleDate" in case:
+            date = _to_parts(case["sampleDate"])
+        elif "dateRange" in case:
+            add = 30 if case["dateRange"]["from"] in (
+                "1954-03-21", "1961-08-10") else 0
+            date = _to_parts(case["dateRange"]["from"], add)
+        else:
+            continue
+        result = resolve_korean_legal_time(date)
+        assert result["standard_offset_minutes"] == case["legalOffsetMinutes"], case["id"]
+        assert result["daylight_offset_minutes"] == case.get("dstOffsetMinutes", 0), case["id"]
+        assert result["total_offset_minutes"] == case["effectiveOffsetMinutes"], case["id"]
+        assert result["standard_meridian_degrees"] == case["legalOffsetMinutes"] / 4
+        checked += 1
+    assert checked >= 5  # 최소 5케이스 이상 실행
+
+
+def test_legal_time_pre_1908_raises():
+    with pytest.raises(ManseryeokPolicyError):
+        resolve_korean_legal_time(
+            {"year": 1900, "month": 1, "day": 1, "hour": 0, "minute": 0, "second": 0})
+
+
+def test_legal_time_transition_labels():
+    # 1954-03-21 00:00~00:30 — 반복(모호) 라벨
+    with pytest.raises(AmbiguousCivilTimeError):
+        resolve_korean_legal_time(
+            {"year": 1954, "month": 3, "day": 21, "hour": 0, "minute": 10, "second": 0})
+    # 1961-08-10 00:00~00:30 — 스킵(부재) 라벨
+    with pytest.raises(NonexistentCivilTimeError):
+        resolve_korean_legal_time(
+            {"year": 1961, "month": 8, "day": 10, "hour": 0, "minute": 10, "second": 0})
+    # 전환 직후 00:30 — 정상 해석 (표준 +9)
+    result = resolve_korean_legal_time(
+        {"year": 1961, "month": 8, "day": 10, "hour": 0, "minute": 30, "second": 0})
+    assert result["total_offset_minutes"] == 540
+
+
+def test_legal_time_dst():
+    # DST 기간(1957년 여름) — +1h 반영 / 비DST(1957년 겨울) — 표준만
+    summer = resolve_korean_legal_time(
+        {"year": 1957, "month": 6, "day": 1, "hour": 12, "minute": 0, "second": 0})
+    assert summer["daylight_offset_minutes"] == 60
+    assert summer["total_offset_minutes"] == 510 + 60
+    winter = resolve_korean_legal_time(
+        {"year": 1957, "month": 12, "day": 1, "hour": 12, "minute": 0, "second": 0})
+    assert winter["daylight_offset_minutes"] == 0
+    assert winter["total_offset_minutes"] == 510
+
+
+def test_legal_time_modern_is_kst():
+    # 1961-08-10 00:30 이후 +9 고정 (일운·월운 시나리오)
+    result = resolve_korean_legal_time(
+        {"year": 2026, "month": 8, "day": 11, "hour": 12, "minute": 0, "second": 0})
+    assert result["total_offset_minutes"] == 540
+    assert result["transition_status"] == "standard"
+
+
+def test_ganji_legal_time_historical_smoke():
+    # 과거 날짜(1957 DST 여름)에서 get_ganji가 legal time 반영 경로로 동작
+    # (DST +1h → 벽시계 shift 후 기둥 계산 — 크래시 없이 4기둥 산출)
+    summer = get_ganji(1957, 6, 1, 12, 0)
+    winter = get_ganji(1957, 12, 1, 12, 0)
+    assert summer["year"]["ganji"] == winter["year"]["ganji"]  # 같은 해 → 같은 년주
+    assert all(p["ganji"] for p in (summer["day"], summer["hour"],
+                                    winter["day"], winter["hour"]))
+    # legal_time 비활성과 결과 일치 여부는 보장하지 않음 — 활성 경로 무결성만 확인
