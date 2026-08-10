@@ -397,6 +397,50 @@ def make_big_app(tmp_path, n=24):
                        "manual_budget_seconds": 45, "env": "development"})
 
 
+def make_upcoming_app(tmp_path, n=24):
+    # v20: '곧 뜰' 프리셋 픽스처 — demand_idx는 i 증가, opportunity는 역방향,
+    # demand_growth는 모두 양수(상승 반전): i<12가 "수요 낮음 & 기회 높음" 교집합
+    dbfile = f"sqlite:///{tmp_path / 'upcoming.db'}"
+    d = db.Database(dbfile)
+    d.init()
+    for i in range(n):
+        kid = d.upsert_keyword(f"키워드{i:02d}", day="2026-08-01")
+        d.insert_daily_stats(kid, "2026-08-02", {
+            "total_sim": 100,
+            "ai_cite_idx": i / 100.0,
+            "demand_idx": round(i * 0.0004, 4),   # P50 = 0.0048
+            "opportunity": float(n - 1 - i),        # 역방향 — P50 = 11.5 → i<12는 12+
+            "demand_growth": 0.02,                  # 전부 상승 반전
+        })
+    d.close()
+    return create_app({"db_url": dbfile, "dashboard_token": "sekret",
+                       "manual_budget_seconds": 45, "env": "development"})
+
+
+def test_upcoming_preset_picks_low_demand_rising(tmp_path):
+    # v20: 곧 뜰 키워드 — demand_growth>0 & demand<P50(선점) & opportunity≥P50(경쟁 미포화)
+    client = TestClient(make_upcoming_app(tmp_path))
+    body = client.get("/keywords?preset=upcoming").json()
+    assert body["count"] == 12  # i<12: demand<P50 & opp=23-i≥12
+    for item in body["items"]:
+        assert item["demand_idx"] < 0.0048
+        assert item["opportunity"] >= 12.0
+        assert item["demand_growth"] > 0
+    # 대조: rising은 demand≥P50 요구라 교집합이 다름 (i≥12·growth 0.02는 상승 미달)
+    rising = client.get("/keywords?preset=rising").json()
+    assert rising["count"] == 0  # growth 0.02 < 0.1
+    # 대조: ai_pick은 demand≥P50 (i≥12)
+    ai_pick = client.get("/keywords?preset=ai_pick").json()
+    assert ai_pick["count"] == 12  # ai_cite ≥ P50(0.12) & demand ≥ 0.0048 → i≥12
+
+
+def test_upcoming_preset_with_show_inactive(tmp_path):
+    # v20: 제외 목록 포함 시 점수 필터가 비활성 키워드에도 함께 적용 (기존 규칙 유지)
+    client = TestClient(make_upcoming_app(tmp_path))
+    body = client.get("/keywords?preset=upcoming&show_inactive=1").json()
+    assert body["count"] == 12
+
+
 def test_percentile_presets_with_enough_sample(tmp_path):
     # v14 §3: 표본 ≥ 20이면 백분위 임계 — ai픽 = ai_cite≥P50 & demand≥P50,
     # 유망 = opportunity≥P75 & demand≥P50, 상승 = growth≥0.1 & demand≥P50

@@ -354,20 +354,29 @@ def create_app(cfg):
         #     promising = opportunity≥P75 & demand≥P50) — 폴백은 v13 절대값.
         #     thresholds 필드로 대시보드에 노출해 배지·툴팁이 같은 임계를 쓴다.
         #     rising = demand_growth≥0.1 & demand≥P50 (성공 기준 ② 검증용).
+        #     v20: upcoming(곧 뜰) = demand_growth>0(상승 반전) & demand<P50(아직
+        #     수요 낮음 = 선점 가능) & opportunity≥P50(경쟁 아직 안 붙음) — '오르기
+        #     전 주식' 후보. 성과 실적이 쌓이면 이 프리셋의 적중률을 데이터로 검증.
         thresholds, threshold_source = run_db(resolve_thresholds)
-        opportunity_min, demand_min, ai_cite_min, growth_min = 0.0, 0.0, 0.0, None
+        opportunity_min, demand_min, demand_max, ai_cite_min, growth_min = (
+            0.0, 0.0, None, 0.0, None)
         if preset == "promising":
             opportunity_min, demand_min = thresholds["opportunity"], thresholds["demand"]
         elif preset == "ai_pick":
             ai_cite_min, demand_min = thresholds["ai_cite"], thresholds["demand"]
         elif preset == "rising":
             demand_min, growth_min = thresholds["demand"], RISING_GROWTH_MIN
+        elif preset == "upcoming":
+            _, opp_pct = run_db(lambda d: d.percentiles("opportunity"))
+            opportunity_min = opp_pct.get(0.5, 20.0)
+            demand_max = thresholds["demand"]
+            growth_min = 0.0
         filters = dict(category=category, commercial_min=commercial_min, q=q,
                        discovered_since=discovered_since,
                        active=None if show_inactive else 1,
                        opportunity_min=opportunity_min, demand_min=demand_min,
-                       click_min=click_min, ai_cite_min=ai_cite_min,
-                       growth_min=growth_min)
+                       demand_max=demand_max, click_min=click_min,
+                       ai_cite_min=ai_cite_min, growth_min=growth_min)
         items = run_db(lambda d: d.query_keywords(
             sort=sort, sort_dir=sort_dir, limit=page_size,
             offset=(page - 1) * page_size, **filters))

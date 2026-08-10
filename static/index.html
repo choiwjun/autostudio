@@ -329,6 +329,7 @@
         <button type="button" id="presetAi" onclick="togglePreset('ai_pick')">AI픽</button>
         <button type="button" id="presetProm" onclick="togglePreset('promising')">유망</button>
         <button type="button" id="presetRise" onclick="togglePreset('rising')">상승</button>
+        <button type="button" id="presetUpcoming" onclick="togglePreset('upcoming')">곧 뜰</button>
         <button type="button" id="presetAll" onclick="togglePreset('')">전체</button>
       </div>
       <span id="thInfo" title="현재 적용 중인 임계 — 활성 키워드 최신 스냅샷의 백분위로 자동 보정 (표본 부족 시 절대값 폴백)"></span>
@@ -684,6 +685,7 @@ function updatePresetBtn() {
   document.getElementById('presetAi').classList.toggle('on', preset === 'ai_pick');
   document.getElementById('presetProm').classList.toggle('on', preset === 'promising');
   document.getElementById('presetRise').classList.toggle('on', preset === 'rising');
+  document.getElementById('presetUpcoming').classList.toggle('on', preset === 'upcoming');
   document.getElementById('presetAll').classList.toggle('on', preset === '');
 }
 function onSearchInput() { clearTimeout(qTimer); qTimer = setTimeout(resetAndLoad, 300); }

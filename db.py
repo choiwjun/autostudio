@@ -822,8 +822,8 @@ ORDER BY k.id"""
         return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
     def _keyword_where(self, category, commercial_min, q, discovered_since, active,
-                       opportunity_min=0.0, demand_min=0.0, click_min=0.0,
-                       ai_cite_min=0.0, growth_min=None):
+                       opportunity_min=0.0, demand_min=0.0, demand_max=None,
+                       click_min=0.0, ai_cite_min=0.0, growth_min=None):
         where, params = [], []
         if active is not None:
             where.append("k.active = ?")
@@ -851,6 +851,9 @@ ORDER BY k.id"""
         if demand_min:       # v3: 유망 프리셋용
             score.append("ds.demand_idx >= ?")
             score_params.append(demand_min)
+        if demand_max is not None:  # v20: '곧 뜰' 프리셋 — 수요 아직 P50 미만(선점)
+            score.append("ds.demand_idx <= ?")
+            score_params.append(demand_max)
         if click_min:        # v4: 쇼핑 클릭 지수 최소 (유망 프리셋·필터)
             score.append("ds.shop_click_idx >= ?")
             score_params.append(click_min)
@@ -871,13 +874,15 @@ ORDER BY k.id"""
 
     def query_keywords(self, sort="opportunity", sort_dir="desc", category="",
                        commercial_min=0.0, q="", discovered_since="", active=1,
-                       opportunity_min=0.0, demand_min=0.0, click_min=0.0,
-                       ai_cite_min=0.0, growth_min=None, limit=50, offset=0):
+                       opportunity_min=0.0, demand_min=0.0, demand_max=None,
+                       click_min=0.0, ai_cite_min=0.0, growth_min=None,
+                       limit=50, offset=0):
         col = self.SORT_COLUMNS.get(sort, "ds.opportunity")
         order = "ASC" if sort_dir == "asc" else "DESC"  # v3: 정렬 토글 (UX §6)
         where_sql, params = self._keyword_where(
             category, commercial_min, q, discovered_since, active,
-            opportunity_min, demand_min, click_min, ai_cite_min, growth_min)
+            opportunity_min, demand_min, demand_max, click_min, ai_cite_min,
+            growth_min)
         sql = f"""
 SELECT k.id, k.keyword, k.active, k.first_seen, ds.day,
        COALESCE(NULLIF(ds.shop_category, ''), k.category) AS category,
@@ -893,11 +898,12 @@ LIMIT ? OFFSET ?"""
 
     def count_keywords(self, category="", commercial_min=0.0, q="",
                        discovered_since="", active=1,
-                       opportunity_min=0.0, demand_min=0.0, click_min=0.0,
-                       ai_cite_min=0.0, growth_min=None):
+                       opportunity_min=0.0, demand_min=0.0, demand_max=None,
+                       click_min=0.0, ai_cite_min=0.0, growth_min=None):
         where_sql, params = self._keyword_where(
             category, commercial_min, q, discovered_since, active,
-            opportunity_min, demand_min, click_min, ai_cite_min, growth_min)
+            opportunity_min, demand_min, demand_max, click_min, ai_cite_min,
+            growth_min)
         sql = f"SELECT COUNT(*) AS c {self._KEYWORD_BASE}{where_sql}"
         return self._qd(sql, tuple(params), fetch=True)[0]["c"]
 
