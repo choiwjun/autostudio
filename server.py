@@ -168,6 +168,9 @@ THRESHOLD_SPECS = (
     ("opportunity", "opportunity", 0.75, 20.0),
 )
 RISING_GROWTH_MIN = 0.1  # 상승 프리셋: 최근 7일 평균이 이전 23일 대비 +10% 이상
+# v20.1: '곧 뜰' 프리셋 상승 반전 최소 임계 — 0 초과면 0.1% 미세 상승(노이즈)도
+# 잡혀 실측 43개(활성의 21%)가 선점 후보로 나옴. 2% 이상 반전 + 콜드스타트(1.0)만.
+UPCOMING_GROWTH_MIN = 0.02
 
 
 def resolve_thresholds(d):
@@ -370,7 +373,7 @@ def create_app(cfg):
             _, opp_pct = run_db(lambda d: d.percentiles("opportunity"))
             opportunity_min = opp_pct.get(0.5, 20.0)
             demand_max = thresholds["demand"]
-            growth_min = 0.0
+            growth_min = UPCOMING_GROWTH_MIN
         filters = dict(category=category, commercial_min=commercial_min, q=q,
                        discovered_since=discovered_since,
                        active=None if show_inactive else 1,
