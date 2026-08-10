@@ -29,6 +29,13 @@
   서버리스 60초 한도 내 안전 동작. AdPost 리포트 CSV 임포트(`/adpost/import`)가
   수익·노출·클릭을 초안에 매칭해 성과 점수·priority를 자동 보정하고, 게시용 마크다운
   내보내기(`/drafts/{id}/export`)로 복붙 게시를 지원합니다.
+- **수익 최적화 (v18)** — AdPost 실측 지표로 카테고리별 CPC/RPM을 집계
+  (`category_cpc_stats`)해 표본 3건 이상부터 priority의 CPC 항을 실측 등급으로 보정
+  (정적 등급 절충, 표본 부족은 폴백). 게시 플래너(`/planner`)가 미게시 초안을
+  이미지 완성 + priority 순으로 추천하고, 게시 14일 이상·성과 50 미만 글은
+  리프레시(`/drafts/{id}/refresh`)로 재작성 대상이 됩니다. 성과 상위(≥70) 초안 10개
+  이상이 쌓이면 제목·본문 길이·H2·표·FAQ 패턴을 생성 프롬프트에 자동 주입하고,
+  `/revenue-insights`에서 월별 수익·키워드 기여·카테고리 실측을 확인합니다.
 
 ## 로컬 실행
 
@@ -110,7 +117,7 @@ python -m pytest tests -q                                # 테스트
 | `collect.py` | 배치 오케스트레이션 (발굴→스냅샷→수요→쇼핑클릭→은퇴→보존, 실행 잠금·예산) |
 | `autocomplete.py` / `refine.py` | 자동완성 BFS 확장 / 노이즈 정제 |
 | `analyzer.py` / `outline.py` | 블로그 검색 신호 추출 / 상위글 골격 구조화 |
-| `scoring.py` / `db.py` | 점수 공식 / 저장소(SQLite↔Postgres 이중 SQL, 백분위, priority SQL) |
+| `scoring.py` / `db.py` | 점수 공식 / 저장소(SQLite↔Postgres 이중 SQL, 백분위, priority, v18 실측 CPC/RPM·플래너·인사이트 집계) |
 | `draft_pipeline.py` / `draft_generator.py` / `image_gen.py` | 2패스 초안 + 검수 / LLM 호출 / 이미지 |
 | `content_batch.py` | 스케줄 수집의 초안·이미지 배치 생성 (이미지 백필 + 신규 초안) |
 | `adpost.py` / `publish.py` | AdPost 리포트 CSV 파싱·점수 환산 / 게시용 마크다운 내보내기 |

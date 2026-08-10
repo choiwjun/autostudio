@@ -98,6 +98,40 @@
   .btn-primary:hover { background: linear-gradient(135deg, #818cf8, #a78bfa); box-shadow: 0 6px 20px rgba(99,102,241,.4); }
   .btn-sm { height: 26px; padding: 0 10px; font-size: 12px; border-radius: 8px; }
 
+  /* v18: 탭 네비게이션 */
+  .tabs { display: inline-flex; border: 1px solid var(--border); border-radius: 12px;
+    overflow: hidden; margin-bottom: 14px; background: rgba(15, 23, 42, .5); }
+  .tabs button { height: 34px; padding: 0 18px; border: 0; border-right: 1px solid var(--border);
+    background: transparent; font-size: 13px; font-weight: 700; color: var(--muted);
+    cursor: pointer; font-family: inherit; transition: all .15s ease; }
+  .tabs button:last-child { border-right: 0; }
+  .tabs button:hover { color: var(--text); }
+  .tabs button.on { background: linear-gradient(135deg, rgba(99,102,241,.35), rgba(139,92,246,.35));
+    color: #c7d2fe; }
+  .tabpane { display: none; }
+  .tabpane.on { display: block; }
+  .panel-card { padding: 16px; margin-bottom: 14px; }
+  .panel-card h3 { margin: 0 0 4px; font-size: 14px; letter-spacing: -0.01em; }
+  .panel-card h3 .dim { font-size: 12px; font-weight: 500; }
+  .planner-item { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .planner-item:last-child { border-bottom: 0; }
+  .planner-item .grow { flex: 1; min-width: 220px; }
+  .planner-item .title { font-weight: 600; }
+  .planner-item .sub { font-size: 12px; color: var(--muted); }
+  .ok { color: var(--success); font-weight: 600; }
+  .no { color: var(--danger); font-weight: 600; }
+  .warn-txt { color: var(--warning); }
+  .url-input { height: 30px; padding: 0 10px; border: 1px solid var(--border);
+    border-radius: 8px; background: rgba(15, 23, 42, .6); font-size: 12px; color: var(--text);
+    font-family: inherit; width: 300px; max-width: 100%; }
+  .mini-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .mini-table th, .mini-table td { padding: 8px 10px; font-size: 12.5px; text-align: left;
+    border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .mini-table th { font-size: 11px; color: var(--muted); font-weight: 700; text-transform: uppercase; }
+  .revenue-bar { display: inline-block; height: 16px; border-radius: 4px;
+    background: linear-gradient(90deg, #34d399, #38bdf8); vertical-align: middle; min-width: 2px; }
+
   /* 프리셋 세그먼트 */
   .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   .seg button { height: 32px; padding: 0 12px; border: 0; border-right: 1px solid var(--border);
@@ -305,6 +339,14 @@
       </div>
     </section>
 
+    <!-- v18: 탭 — 키워드 목록 / 게시 플래너 / 수익 인사이트 -->
+    <div class="tabs" role="tablist">
+      <button type="button" id="tabBtnKeywords" class="on" onclick="switchTab('keywords')">키워드 목록</button>
+      <button type="button" id="tabBtnPlanner" onclick="switchTab('planner')">게시 플래너</button>
+      <button type="button" id="tabBtnInsights" onclick="switchTab('insights')">수익 인사이트</button>
+    </div>
+
+    <div id="tabKeywords" class="tabpane on">
     <section class="card" aria-label="키워드 목록">
       <div class="table-wrap">
         <table>
@@ -330,6 +372,61 @@
         <button class="btn btn-sm" onclick="prevPage()">이전</button>
         <span id="pageInfo"></span>
         <button class="btn btn-sm" onclick="nextPage()">다음</button>
+      </div>
+    </section>
+    </div>
+
+    <!-- v18: 게시 플래너 — 미게시 초안 게시 추천 + 저성과 글 리프레시 -->
+    <section id="tabPlanner" class="tabpane" aria-label="게시 플래너">
+      <div class="card panel-card">
+        <h3>게시 추천 대기열 <span class="dim">— 이미지 완성 우선 + priority 순, 미게시 초안만</span></h3>
+        <div id="planQueue"></div>
+      </div>
+      <div class="card panel-card">
+        <h3>리프레시 추천 <span class="dim">— 게시 14일 이상 &amp; 성과 점수 50 미만</span></h3>
+        <div id="refreshList"></div>
+      </div>
+      <div class="card panel-card">
+        <h3>성과 상위 패턴 <span class="dim">— 초안 생성 시 자동 주입 (표본 10개 이상)</span></h3>
+        <div id="patternInfo"></div>
+      </div>
+    </section>
+
+    <!-- v18: 수익 인사이트 — AdPost 실측 기준 -->
+    <section id="tabInsights" class="tabpane" aria-label="수익 인사이트">
+      <div class="kpis">
+        <div class="kpi">
+          <div class="kpi-label">총 수익 (AdPost 실측)</div>
+          <div class="kpi-value" id="insRevenue">-</div>
+          <div class="kpi-sub" id="insRevenueSub">게시물 기준</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">지표 집계 게시물</div>
+          <div class="kpi-value" id="insPosts">-</div>
+          <div class="kpi-sub">수익·노출·클릭 모두 있는 글</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">평균 CPC</div>
+          <div class="kpi-value" id="insCpc">-</div>
+          <div class="kpi-sub">수익 ÷ 클릭</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">RPM</div>
+          <div class="kpi-value" id="insRpm">-</div>
+          <div class="kpi-sub">노출 1000회당 수익</div>
+        </div>
+      </div>
+      <div class="card panel-card">
+        <h3>월별 수익 추이</h3>
+        <canvas id="revenueChart" height="220"></canvas>
+      </div>
+      <div class="card panel-card">
+        <h3>키워드 기여 상위 10 <span class="dim">— 게시물 수·수익 합계</span></h3>
+        <div id="topKwTable"></div>
+      </div>
+      <div class="card panel-card">
+        <h3>카테고리 실측 CPC/RPM <span class="dim">— 표본 3건 이상부터 priority 보정 반영</span></h3>
+        <div id="catTable"></div>
       </div>
     </section>
 
@@ -1150,6 +1247,166 @@ async function addSeed() {
 async function deleteSeed(id) {
   await api(`/seeds/${id}`, { method: 'DELETE', headers: authHeaders() });
   await renderSeeds();
+}
+
+// v18: 탭 전환 — 플래너/인사이트는 첫 표시 시 1회 로드
+let plannerLoaded = false, insightsLoaded = false;
+
+function switchTab(name) {
+  document.getElementById('tabKeywords').classList.toggle('on', name === 'keywords');
+  document.getElementById('tabPlanner').classList.toggle('on', name === 'planner');
+  document.getElementById('tabInsights').classList.toggle('on', name === 'insights');
+  document.getElementById('tabBtnKeywords').classList.toggle('on', name === 'keywords');
+  document.getElementById('tabBtnPlanner').classList.toggle('on', name === 'planner');
+  document.getElementById('tabBtnInsights').classList.toggle('on', name === 'insights');
+  if (name === 'planner' && !plannerLoaded) { plannerLoaded = true; loadPlanner(); }
+  if (name === 'insights' && !insightsLoaded) { insightsLoaded = true; loadInsights(); }
+}
+
+async function loadPlanner() {
+  let data;
+  try { data = await api('/planner'); }
+  catch (e) { if (String(e.message) !== '401') setStatus('플래너를 불러오지 못했습니다', true); return; }
+  const queue = document.getElementById('planQueue');
+  if (!data.publish_queue.length) {
+    queue.innerHTML = '<p class="empty">미게시 초안이 없습니다 — 키워드 목록에서 "글 생성"으로 초안을 만들어 게시하세요</p>';
+  } else {
+    queue.innerHTML = data.publish_queue.map(q => {
+      const sec = q.section_images_needed > 0
+        ? `${q.section_images_ready}/${q.section_images_needed}` : '-';
+      const imgOk = q.has_main_image
+        ? `<span class="ok">대표 ✓</span>` : `<span class="no">대표 ✗</span>`;
+      const secOk = q.section_images_needed > 0 && q.section_images_ready >= q.section_images_needed
+        ? `<span class="ok">섹션 ${sec} ✓</span>`
+        : `<span class="warn-txt">섹션 ${sec}</span>`;
+      const prio = q.priority === null ? '-' : q.priority.toFixed(1);
+      return `<div class="planner-item">
+        <div class="grow">
+          <div class="title">${esc(q.title)}</div>
+          <div class="sub">${esc(q.keyword)} · priority ${esc(prio)} · ${imgOk} ${secOk} · 생성 ${esc((q.created_at || '').slice(0, 10))}</div>
+        </div>
+        <input class="url-input" id="url-${q.draft_id}" placeholder="게시 후 URL 붙여넣기" aria-label="게시 URL">
+        <button class="btn btn-sm" onclick="registerUrl(${q.draft_id})">URL 등록</button>
+        <button class="btn btn-sm" onclick="exportDraft(${q.draft_id})">내보내기</button>
+      </div>`;
+    }).join('');
+  }
+  const refresh = document.getElementById('refreshList');
+  if (!data.refresh_candidates.length) {
+    refresh.innerHTML = '<p class="empty">리프레시 대상 없음 — 성과 점수 50 미만 &amp; 게시 14일 이상 글이 대상입니다</p>';
+  } else {
+    refresh.innerHTML = data.refresh_candidates.map(c => `<div class="planner-item">
+      <div class="grow">
+        <div class="title">${esc(c.title)}</div>
+        <div class="sub">${esc(c.keyword)} · 성과 ${esc(c.performance_score)} · 게시 ${esc((c.published_at || '').slice(0, 10))} · priority ${esc(c.priority === null ? '-' : c.priority.toFixed(1))}</div>
+      </div>
+      <button class="btn btn-sm btn-gen" onclick="refreshDraft(${c.id})">재작성</button>
+      <button class="btn btn-sm" onclick="exportDraft(${c.id})">원본 내보내기</button>
+    </div>`).join('');
+  }
+  const pat = document.getElementById('patternInfo');
+  if (!data.pattern) {
+    pat.innerHTML = '<p class="empty">표본 부족 (성과 70점 이상 초안 10개 필요) — 데이터가 쌓이면 자동 활성화</p>';
+  } else {
+    pat.innerHTML = `<p>성과 상위 ${data.pattern.sample}개 평균 — 제목 <b>${data.pattern.title_len_avg}자</b>, 첫문단 <b>${data.pattern.first_paragraph_len_avg}자</b>, 본문 <b>${Number(data.pattern.body_len_avg).toLocaleString()}자</b>, H2 <b>${data.pattern.h2_count_avg}개</b>, 표 포함 <b>${data.pattern.table_pct}%</b>, FAQ <b>${data.pattern.faq_pct}%</b></p>`;
+  }
+}
+
+// v18: 게시 URL 등록 — AdPost 리포트 매칭 기준키 (게시 후 성과 자동 수집)
+async function registerUrl(did) {
+  const url = document.getElementById(`url-${did}`).value.trim();
+  if (!url) { setStatus('게시 URL을 입력하세요', true); return; }
+  try {
+    await api(`/drafts/${did}/published-url`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ url }),
+    });
+    setStatus('게시 URL이 등록되었습니다 — AdPost 리포트 임포트 시 자동 매칭됩니다');
+  } catch (e) {
+    if (String(e.message) === '401') return;
+    setStatus('URL 등록 실패: ' + e.message, true);
+  }
+}
+
+// v18: 저성과 글 리프레시 — 같은 키워드로 새 초안 생성 (원본은 이력 보존)
+async function refreshDraft(did) {
+  draftCurrent = null;
+  draftStepEl = document.getElementById('draftStep');
+  document.getElementById('draftError').style.display = 'none';
+  document.getElementById('draftTitle').textContent = '글 재작성';
+  showDraftPanel(true);
+  draftStepEl.innerHTML = draftSteps('draft') + '<div class="spinner"></div> 재작성 중... (약 40~80초, 원본 성과는 이력으로 보존)';
+  try {
+    const d = await api(`/drafts/${did}/refresh`, { method: 'POST', headers: authHeaders() });
+    draftCurrent = d;
+    await renderDraftStep(d);
+    await loadPlanner();
+  } catch (e) {
+    if (String(e.message) === '401') return;
+    draftStepEl.innerHTML = draftErrorHtml('재작성에 실패했습니다 (골격 분석이 필요할 수 있음)');
+  }
+}
+
+// v18: 수익 인사이트 — 월별 추이 차트 + 키워드/카테고리 실측 표
+let revenueChart = null;
+
+async function loadInsights() {
+  let data;
+  try { data = await api('/revenue-insights'); }
+  catch (e) { if (String(e.message) !== '401') setStatus('수익 인사이트를 불러오지 못했습니다', true); return; }
+  const t = data.totals || {};
+  document.getElementById('insRevenue').textContent = '₩' + Number(t.revenue || 0).toLocaleString();
+  document.getElementById('insPosts').textContent = Number(t.posts || 0).toLocaleString();
+  const cpc = t.clicks > 0 ? t.revenue / t.clicks : 0;
+  const rpm = t.impressions > 0 ? t.revenue / t.impressions * 1000 : 0;
+  document.getElementById('insCpc').textContent = '₩' + cpc.toLocaleString('ko-KR', { maximumFractionDigits: 0 });
+  document.getElementById('insRpm').textContent = '₩' + rpm.toLocaleString('ko-KR', { maximumFractionDigits: 0 });
+  const months = data.monthly || [];
+  const ctx = document.getElementById('revenueChart');
+  if (revenueChart) revenueChart.destroy();
+  revenueChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: months.map(m => m.month),
+      datasets: [{
+        label: '수익(원)', data: months.map(m => m.revenue),
+        backgroundColor: 'rgba(52,211,153,.65)', borderColor: '#34d399', borderWidth: 1,
+        borderRadius: 6,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: { labels: { color: '#cbd5e1' } },
+        tooltip: { callbacks: { label: (i) => '수익: ₩' + Number(i.parsed.y).toLocaleString() } },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#94a3b8' } },
+        y: { grid: { color: 'rgba(148,163,184,.14)' }, ticks: { color: '#94a3b8',
+          callback: v => '₩' + Number(v).toLocaleString() } },
+      },
+    },
+  });
+  const top = data.top_keywords || [];
+  document.getElementById('topKwTable').innerHTML = top.length
+    ? `<table class="mini-table"><thead><tr><th>키워드</th><th>분야</th><th>게시물</th><th>수익</th></tr></thead><tbody>`
+      + top.map(r => `<tr><td class="td-kw">${esc(r.keyword)}</td><td>${esc(r.category)}</td>
+        <td class="num">${Number(r.posts).toLocaleString()}</td>
+        <td class="num">₩${Number(r.revenue).toLocaleString()}</td></tr>`).join('')
+      + `</tbody></table>`
+    : '<p class="empty">AdPost 리포트를 임포트하면 실측 수익이 표시됩니다 — 게시 플래너에서 URL 등록 후 /adpost/import</p>';
+  const cats = data.categories || [];
+  document.getElementById('catTable').innerHTML = cats.length
+    ? `<table class="mini-table"><thead><tr><th>분야</th><th>게시물</th><th>수익</th><th>CPC</th><th>RPM</th><th>측정 등급</th></tr></thead><tbody>`
+      + cats.map(c => `<tr><td>${esc(c.category)}</td><td class="num">${Number(c.posts).toLocaleString()}</td>
+        <td class="num">₩${Number(c.revenue).toLocaleString()}</td>
+        <td class="num">${c.cpc === null ? '-' : '₩' + c.cpc.toLocaleString('ko-KR', { maximumFractionDigits: 0 })}</td>
+        <td class="num">${c.rpm === null ? '-' : '₩' + c.rpm.toLocaleString('ko-KR', { maximumFractionDigits: 0 })}</td>
+        <td class="num">${c.measured_tier === null ? '<span class="dim">표본 부족</span>' : c.measured_tier.toFixed(2)}</td></tr>`).join('')
+      + `</tbody></table>`
+    : '<p class="empty">아직 실측 데이터가 없습니다 — AdPost 리포트 임포트 후 표시됩니다</p>';
 }
 
 document.getElementById('token').value = localStorage.getItem('dashboard_token') || '';

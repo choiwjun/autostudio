@@ -91,7 +91,8 @@ def _create_draft(d, cfg, client, keyword_row, today, now, deadline):
     d.upsert_outline(keyword_row["id"], today, structure)
     draft, failed = generate_two_pass(
         keyword, structure, current_date=reference_date,
-        search_evidence=evidence, hard_budget_seconds=HARD_DRAFT_BUDGET_SECONDS)
+        search_evidence=evidence, hard_budget_seconds=HARD_DRAFT_BUDGET_SECONDS,
+        pattern_guidance=d.top_performer_pattern())
     if failed:
         logger.warning("batch draft qc warnings kw=%s: %s", keyword, failed)
     draft_id = d.insert_draft(

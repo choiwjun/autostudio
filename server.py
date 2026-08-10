@@ -229,6 +229,78 @@ def create_app(cfg):
                 state["db"] = None
                 return fn(get_db())
 
+    def _generate_and_store_draft(keyword_id, refresh_of=None):
+        """초안 생성 공통 경로 — 골격 분석 → 최신 검색 근거 → 2패스 생성 → 저장.
+        v18: 성과 상위 글 패턴(top_performer_pattern)을 가이드로 주입.
+        refresh_of가 있으면 리프레시 초안으로 기록. 반환: 저장된 초안 dict."""
+        import draft_pipeline
+        kw = run_db(lambda d: d.get_keyword(keyword_id))
+        if not kw:
+            raise HTTPException(status_code=404, detail="not found")
+        outline = run_db(lambda d: d.get_outline(keyword_id))
+        if not outline:
+            raise HTTPException(
+                status_code=400,
+                detail="먼저 상위글 골격 분석이 필요합니다 — '글 생성' 플로우에서 골격 분석 후 다시 시도하세요",
+            )
+        reference_date = config_mod.today_kst()
+        snap, search_evidence = _latest_search_snapshot(
+            cfg, kw["keyword"], reference_date)
+        quality_warnings = []
+        if snap:
+            import outline as outline_mod
+            structure = outline_mod.build_outline_structure(
+                snap["top_descriptions"], search_evidence)
+            run_db(lambda d: d.upsert_outline(
+                keyword_id, reference_date.isoformat(), structure))
+        else:
+            try:
+                parsed = json.loads(outline["structure"])
+            except (TypeError, json.JSONDecodeError):
+                parsed = {}
+            structure = json.dumps({
+                "questions": parsed.get("questions", []),
+                "comparisons": parsed.get("comparisons", []),
+                "facts": [],
+                "headings": parsed.get("headings", []),
+                "search_evidence": search_evidence,
+            }, ensure_ascii=False)
+            quality_warnings.append("search_evidence_unavailable")
+        if search_evidence.get("status") == "empty":
+            quality_warnings.append("search_evidence_empty")
+        try:
+            # v16: 생성 직전 최신 검색 근거·KST 기준일을 2패스 전체에 전달
+            # v17.1: 25초 재생성 예산+55초 하드 예산은 Vercel 60초 한도 전용.
+            # 로컬(ENV=development)은 서버리스 한도가 없어 예산 해제 — 2패스
+            # 1사이클이 25초를 항상 초과해 검수 미달 재생성이 실제로는 한 번도
+            # 실행되지 않고 경고만 반환되던 문제를 개발 환경에서 제거.
+            # v18: 성과 상위 글 패턴 가이드 주입 (표본 부족 시 None → 미주입)
+            serverless = cfg.get("env") != "development"
+            draft, failed_checks = draft_pipeline.generate_two_pass(
+                kw["keyword"], structure,
+                retry_budget_seconds=25 if serverless else None,
+                current_date=reference_date, search_evidence=search_evidence,
+                hard_budget_seconds=(draft_pipeline.HARD_BUDGET_SECONDS
+                                     if serverless else None),
+                pattern_guidance=run_db(lambda d: d.top_performer_pattern()))
+
+        except draft_pipeline.DraftGenerationError as e:
+            # v15: 구조화 로그 — 배포 환경에서 초안 실패 원인을 추적할 수 있게
+            logger.warning("draft generation failed kw_id=%s kw=%s: %s",
+                           keyword_id, kw["keyword"], e)
+            raise HTTPException(status_code=503, detail=str(e))
+        created_at = config_mod.now_kst_iso()
+        draft_id = run_db(lambda d: d.insert_draft(
+            keyword_id, draft["title"], draft["first_paragraph"],
+            draft["body"], created_at=created_at,
+            tags=json.dumps(draft.get("tags") or [], ensure_ascii=False),
+            refresh_of=refresh_of))
+        result = _with_parsed_tags(run_db(lambda d: d.get_draft(draft_id)))
+        all_warnings = quality_warnings + failed_checks
+        if all_warnings:
+            result["quality_warnings"] = all_warnings
+        return result
+
     def require_token(authorization: str = Header(default="")):
         # v6: 로컬 개발(development)은 토큰이 설정돼 있어도 인증 생략 — README
         # "로컬 개발만 인증 생략"과 일치. .env.local에 DASHBOARD_TOKEN이 있어도
@@ -373,71 +445,8 @@ def create_app(cfg):
     @app.post("/drafts", dependencies=[Depends(require_token)])
     def create_draft(body: DraftIn):
         # v7: 글 초안 생성 — 골격 기반 (v9: Token Plan HTTP API, v10: 2패스+검수)
-        import draft_pipeline
-        kw = run_db(lambda d: d.get_keyword(body.keyword_id))
-        if not kw:
-            raise HTTPException(status_code=404, detail="not found")
-        outline = run_db(lambda d: d.get_outline(body.keyword_id))
-        # v9: 골격 없이 초안 생성 금지 — 빈 구조로 진행하면 모델 상상의 글이 됨 (독창성·어뷰징 위험)
-        if not outline:
-            raise HTTPException(
-                status_code=400,
-                detail="먼저 상위글 골격 분석이 필요합니다 — '글 생성' 플로우에서 골격 분석 후 다시 시도하세요",
-            )
-        reference_date = config_mod.today_kst()
-        snap, search_evidence = _latest_search_snapshot(
-            cfg, kw["keyword"], reference_date)
-        quality_warnings = []
-        if snap:
-            import outline as outline_mod
-            structure = outline_mod.build_outline_structure(
-                snap["top_descriptions"], search_evidence)
-            run_db(lambda d: d.upsert_outline(
-                body.keyword_id, reference_date.isoformat(), structure))
-        else:
-            try:
-                parsed = json.loads(outline["structure"])
-            except (TypeError, json.JSONDecodeError):
-                parsed = {}
-            structure = json.dumps({
-                "questions": parsed.get("questions", []),
-                "comparisons": parsed.get("comparisons", []),
-                "facts": [],
-                "headings": parsed.get("headings", []),
-                "search_evidence": search_evidence,
-            }, ensure_ascii=False)
-            quality_warnings.append("search_evidence_unavailable")
-        if search_evidence.get("status") == "empty":
-            quality_warnings.append("search_evidence_empty")
-        try:
-            # v16: 생성 직전 최신 검색 근거·KST 기준일을 2패스 전체에 전달
-            # v17.1: 25초 재생성 예산+55초 하드 예산은 Vercel 60초 한도 전용.
-            # 로컬(ENV=development)은 서버리스 한도가 없어 예산 해제 — 2패스
-            # 1사이클이 25초를 항상 초과해 검수 미달 재생성이 실제로는 한 번도
-            # 실행되지 않고 경고만 반환되던 문제를 개발 환경에서 제거.
-            serverless = cfg.get("env") != "development"
-            draft, failed_checks = draft_pipeline.generate_two_pass(
-                kw["keyword"], structure,
-                retry_budget_seconds=25 if serverless else None,
-                current_date=reference_date, search_evidence=search_evidence,
-                hard_budget_seconds=(draft_pipeline.HARD_BUDGET_SECONDS
-                                     if serverless else None))
-
-        except draft_pipeline.DraftGenerationError as e:
-            # v15: 구조화 로그 — 배포 환경에서 초안 실패 원인을 추적할 수 있게
-            logger.warning("draft generation failed kw_id=%s kw=%s: %s",
-                           body.keyword_id, kw["keyword"], e)
-            raise HTTPException(status_code=503, detail=str(e))
-        created_at = config_mod.now_kst_iso()
-        draft_id = run_db(lambda d: d.insert_draft(
-            body.keyword_id, draft["title"], draft["first_paragraph"],
-            draft["body"], created_at=created_at,
-            tags=json.dumps(draft.get("tags") or [], ensure_ascii=False)))
-        result = _with_parsed_tags(run_db(lambda d: d.get_draft(draft_id)))
-        all_warnings = quality_warnings + failed_checks
-        if all_warnings:
-            result["quality_warnings"] = all_warnings
-        return result
+        # v18: 생성 로직은 _generate_and_store_draft로 추출 (리프레시와 공용)
+        return _generate_and_store_draft(body.keyword_id)
 
     @app.get("/drafts/{draft_id}", dependencies=[Depends(require_token)])
     def get_draft(draft_id: int):
@@ -565,6 +574,8 @@ def create_app(cfg):
         run_db(lambda d: d.record_draft_feedback(
             draft_id, draft["keyword_id"], published, score, body.note,
             config_mod.now_kst_iso(), delta))
+        # v18: 성과 기록은 AdPost 지표와 함께 실측 CPC 통계 원료 — 재집계
+        run_db(lambda d: d.refresh_category_cpc_stats(config_mod.now_kst_iso()))
         return run_db(lambda d: d.get_draft(draft_id))
 
     # ---------- v17: 게시 파이프라인 + AdPost 피드백 자동화 ----------
@@ -640,6 +651,8 @@ def create_app(cfg):
                 r["clicks"], s, now, now, dl))
             matched.append({"draft_id": draft["id"], "title": draft["title"],
                             "revenue": row["revenue"], "performance_score": score})
+        # v18: 임포트된 실측 지표로 카테고리별 CPC/RPM 재집계 — priority 반영
+        run_db(lambda d: d.refresh_category_cpc_stats(now))
         result = {"matched": len(matched), "unmatched": unmatched,
                   "results": matched}
         if skipped:
@@ -648,6 +661,37 @@ def create_app(cfg):
             result["message"] = (f"시간 예산 내 {len(rows) - skipped}/{len(rows)}행 처리 — "
                                  "같은 CSV 재업로드로 나머지를 반영하세요")
         return result
+
+    # ---------- v18: 게시 플래너 · 리프레시 · 수익 인사이트 ----------
+
+    @app.get("/planner", dependencies=[Depends(require_token)])
+    def planner():
+        # v18: 게시 플래너 — 미게시 초안 게시 추천 대기열(이미지 완성 우선) +
+        # 저성과 글 리프레시 추천 + 성과 상위 패턴(가이드 주입 현황).
+        return {
+            "publish_queue": run_db(lambda d: d.publish_plan(10)),
+            "refresh_candidates": run_db(lambda d: d.refresh_candidates(5)),
+            "pattern": run_db(lambda d: d.top_performer_pattern()),
+        }
+
+    @app.post("/drafts/{draft_id}/refresh", dependencies=[Depends(require_token)])
+    def refresh_draft(draft_id: int):
+        # v18: 저성과 글 리프레시 — 같은 키워드로 새 초안을 생성하고 원본에
+        # refreshed_at 기록 (재추천 방지). 원본 성과는 남겨 비교 지표로 활용.
+        old = run_db(lambda d: d.get_draft(draft_id))
+        if not old:
+            raise HTTPException(status_code=404, detail="not found")
+        if old["refreshed_at"]:
+            raise HTTPException(status_code=400, detail="이미 리프레시된 초안입니다")
+        result = _generate_and_store_draft(old["keyword_id"], refresh_of=old["id"])
+        run_db(lambda d: d.mark_draft_refreshed(
+            old["id"], config_mod.now_kst_iso()))
+        return result
+
+    @app.get("/revenue-insights", dependencies=[Depends(require_token)])
+    def revenue_insights():
+        # v18: 수익 인사이트 — AdPost 실측 기준 월별 추이·키워드 기여·카테고리 실측.
+        return run_db(lambda d: d.revenue_insights())
 
     @app.get("/")
     def index():

@@ -130,6 +130,26 @@ def _grounding_section(facts, comparisons):
     return "\n".join(lines)
 
 
+def _pattern_section(pattern_guidance):
+    """v18: 성과 상위 글 패턴 가이드 — 실측 성과 분포를 프롬프트에 주입.
+    빈 값(표본 부족 등)이면 아무것도 주입하지 않는다 (동작 불변)."""
+    if not pattern_guidance:
+        return ""
+    try:
+        p = pattern_guidance if isinstance(pattern_guidance, dict) else json.loads(
+            pattern_guidance)
+    except (TypeError, json.JSONDecodeError):
+        return ""
+    return (
+        "\n## 성과 상위 글 패턴 (실측 — 이번 작성에 참고)\n"
+        f"- 성과 상위 {p.get('sample', '?')}개 초안의 평균 구조: "
+        f"제목 {p.get('title_len_avg', '?')}자, 첫문단 {p.get('first_paragraph_len_avg', '?')}자, "
+        f"본문 {p.get('body_len_avg', '?')}자, H2 {p.get('h2_count_avg', '?')}개.\n"
+        f"- {p.get('table_pct', '?')}%가 표를, {p.get('faq_pct', '?')}%가 FAQ 섹션을 포함.\n"
+        "- 위 평균에서 크게 벗어나지 않는 범위에서 작성하고, 검수 기준이 더 엄격하면 검수 기준을 우선할 것.\n"
+    )
+
+
 def _search_evidence_context(search_evidence):
     evidence = search_evidence if isinstance(search_evidence, dict) else {}
     status = evidence.get("status", "unavailable")
@@ -173,12 +193,14 @@ def _search_evidence_context(search_evidence):
 
 
 def pass1_outline(keyword, structure, runner=None, current_date=None,
-                  search_evidence=None, timeout=90):
+                  search_evidence=None, timeout=90, pattern_guidance=None):
     """1패스: H2 골격 + 섹션별 핵심 불릿을 생성한다 (구조 검증용).
-    v17: timeout 인자 노출 + facts·comparisons 참고 근거 주입 (고도화 2)."""
+    v17: timeout 인자 노출 + facts·comparisons 참고 근거 주입 (고도화 2).
+    v18: pattern_guidance — 성과 상위 글 패턴 주입 (표본 충분 시)."""
     qs = _outline_questions(structure)[:5]
     facts, comparisons = _outline_grounding(structure)
     evidence_context = _search_evidence_context(search_evidence)
+    pattern = _pattern_section(pattern_guidance)
     q_text = "\n".join(f"- {q}" for q in qs) if qs else "- (골격 질문 없음 — 주제에서 추론)"
     grounding_hint = ""
     if facts or comparisons:
@@ -195,7 +217,7 @@ def pass1_outline(keyword, structure, runner=None, current_date=None,
 - 현재 시점에 맞는 정보가 없으면 특정 월을 단정하지 말고 '여행 시기 선택 기준'처럼 일반화할 것.
 
 {evidence_context}
-
+{pattern}
 상위글 골격 질문:
 {q_text}
 {grounding_hint}
@@ -226,18 +248,20 @@ def pass1_outline(keyword, structure, runner=None, current_date=None,
 
 def pass2_expand(keyword, h2s, intent, facts=None, comparisons=None, runner=None,
                  qc_feedback="", current_date=None, search_evidence=None,
-                 timeout=120):
+                 timeout=120, pattern_guidance=None):
     """2패스: 1패스 H2 골격을 섹션별로 확장해 최종 초안을 만든다.
     v14.1: qc_feedback — 1차 검수 미달 시 실측 수치·교정 지시를 주입해
     재생성이 같은 실패를 반복하지 않도록 함 (기존은 동일 프롬프트 맹재시도).
     v17: facts·comparisons 실제 주입 — 기존 has_facts는 생성 경로가 없는
-    verified_facts를 보느라 항상 '수치 금지' 경로였음 (버그 5 + 고도화 2)."""
+    verified_facts를 보느라 항상 '수치 금지' 경로였음 (버그 5 + 고도화 2).
+    v18: pattern_guidance — 성과 상위 글 패턴 주입."""
     skeleton = "\n".join(
         f"## {h['title']}\n" + "\n".join(f"- {b}" for b in h.get("bullets", []))
         for h in h2s)
     intent_section = intent_template(intent)
     evidence_context = _search_evidence_context(search_evidence)
     grounding = _grounding_section(facts or [], comparisons or [])
+    pattern = _pattern_section(pattern_guidance)
     prompt = f"""키워드 '{keyword}' 블로그 글을 아래 골격을 확장해 {BODY_PROMPT_MIN}~{BODY_PROMPT_MAX}자로 작성해줘.
 
 ## 최신성 기준
@@ -249,7 +273,7 @@ def pass2_expand(keyword, h2s, intent, facts=None, comparisons=None, runner=None
 - 과거 시점을 언급해야 한다면 회고·비교·다음 시즌 준비임을 문장에 명시할 것.
 
 {evidence_context}
-
+{pattern}
 ## H2 골격 (각 섹션을 500~900자로 확장)
 {skeleton}
 
@@ -398,7 +422,8 @@ def validate_draft(draft, keyword, current_date=None):
 
 def generate_two_pass(keyword, structure, runner=None, retry_budget_seconds=None,
                       current_date=None, search_evidence=None,
-                      hard_budget_seconds=HARD_BUDGET_SECONDS):
+                      hard_budget_seconds=HARD_BUDGET_SECONDS,
+                      pattern_guidance=None):
     """[3]+[4] 2패스 생성 + 검수. 미달 시 1회 재생성. 그래도 미달이면 최종 결과 반환.
 
     v11: retry_budget_seconds — 1회차 사이클이 예산을 넘겼으면 재생성을 건너뛰고
@@ -431,13 +456,14 @@ def generate_two_pass(keyword, structure, runner=None, retry_budget_seconds=None
             break  # 하드 예산 소진 — 이미 만든 초안이 있으면 그걸로 반환
         try:
             h2s = pass1_outline(keyword, structure, runner, current_date,
-                                search_evidence, timeout=timeout1)
+                                search_evidence, timeout=timeout1,
+                                pattern_guidance=pattern_guidance)
             timeout2 = call_timeout(120)
             if timeout2 is None:
                 break
             draft = pass2_expand(keyword, h2s, intent, facts, comparisons, runner,
                                  qc_feedback, current_date, search_evidence,
-                                 timeout=timeout2)
+                                 timeout=timeout2, pattern_guidance=pattern_guidance)
         except DraftGenerationError:
             if attempt == 1:
                 continue

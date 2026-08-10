@@ -106,12 +106,27 @@ CREATE TABLE IF NOT EXISTS drafts (
     published_url TEXT NOT NULL DEFAULT '',
     adpost_revenue REAL,
     adpost_impressions INTEGER,
-    adpost_clicks INTEGER
+    adpost_clicks INTEGER,
+    refresh_of INTEGER,
+    refreshed_at TEXT NOT NULL DEFAULT ''
 );
 -- v17.3: 게시 URL·제목 매칭(AdPost 임포트)과 키워드별 초안 조회 인덱스
 CREATE INDEX IF NOT EXISTS idx_drafts_keyword ON drafts(keyword_id);
 CREATE INDEX IF NOT EXISTS idx_drafts_published_url ON drafts(published_url);
 CREATE INDEX IF NOT EXISTS idx_drafts_title ON drafts(title);
+-- v18: 실측 CPC/RPM — AdPost 리포트 집계로 priority CPC 항을 보정 (고정 등급의
+-- 실측 교정). 표본 부족(클릭 0)은 measured_tier NULL → SQL이 정적 등급 폴백.
+CREATE TABLE IF NOT EXISTS category_cpc_stats (
+    category TEXT PRIMARY KEY,
+    posts INTEGER NOT NULL DEFAULT 0,
+    revenue REAL NOT NULL DEFAULT 0,
+    impressions INTEGER NOT NULL DEFAULT 0,
+    clicks INTEGER NOT NULL DEFAULT 0,
+    cpc REAL,
+    rpm REAL,
+    measured_tier REAL,
+    updated_at TEXT NOT NULL DEFAULT ''
+);
 """,
     "postgres": """
 CREATE TABLE IF NOT EXISTS seed_keywords (
@@ -208,12 +223,27 @@ CREATE TABLE IF NOT EXISTS drafts (
     published_url TEXT NOT NULL DEFAULT '',
     adpost_revenue DOUBLE PRECISION,
     adpost_impressions INTEGER,
-    adpost_clicks INTEGER
+    adpost_clicks INTEGER,
+    refresh_of INTEGER,
+    refreshed_at TEXT NOT NULL DEFAULT ''
 );
 -- v17.3: 게시 URL·제목 매칭(AdPost 임포트)과 키워드별 초안 조회 인덱스
 CREATE INDEX IF NOT EXISTS idx_drafts_keyword ON drafts(keyword_id);
 CREATE INDEX IF NOT EXISTS idx_drafts_published_url ON drafts(published_url);
 CREATE INDEX IF NOT EXISTS idx_drafts_title ON drafts(title);
+-- v18: 실측 CPC/RPM — AdPost 리포트 집계로 priority CPC 항을 보정 (고정 등급의
+-- 실측 교정). 표본 부족(클릭 0)은 measured_tier NULL → SQL이 정적 등급 폴백.
+CREATE TABLE IF NOT EXISTS category_cpc_stats (
+    category TEXT PRIMARY KEY,
+    posts INTEGER NOT NULL DEFAULT 0,
+    revenue DOUBLE PRECISION NOT NULL DEFAULT 0,
+    impressions INTEGER NOT NULL DEFAULT 0,
+    clicks INTEGER NOT NULL DEFAULT 0,
+    cpc DOUBLE PRECISION,
+    rpm DOUBLE PRECISION,
+    measured_tier DOUBLE PRECISION,
+    updated_at TEXT NOT NULL DEFAULT ''
+);
 """,
 }
 
@@ -244,6 +274,18 @@ class Database:
         "WHEN k.category IN ('반려동물','일상','취미') THEN 0.3 "
         "ELSE 0.5 END"
     )
+    # v18: 실측 CPC 보정 — category_cpc_stats(AdPost 리포트 집계)가 표본 3건 이상
+    # 클릭으로 계산한 measured_tier를 갖고 있으면 정적 등급 대신 사용. 실측이
+    # 수익에 직결되므로 우선하되 표본 부족·클릭 0이면 정적 등급 폴백.
+    EFFECTIVE_CPC_SQL = (
+        "CASE WHEN EXISTS (SELECT 1 FROM category_cpc_stats cs "
+        "WHERE cs.category = k.category AND cs.posts >= 3 "
+        "AND cs.measured_tier IS NOT NULL) "
+        "THEN (SELECT cs.measured_tier FROM category_cpc_stats cs "
+        "WHERE cs.category = k.category AND cs.posts >= 3 "
+        "AND cs.measured_tier IS NOT NULL) "
+        f"ELSE {CPC_TIER_SQL} END"
+    )
     GROWTH_NORM_SQL = (
         "CASE WHEN ds.demand_growth IS NULL THEN 0.0 "
         "WHEN ds.demand_growth / 0.05 >= 1.0 THEN 1.0 "
@@ -260,7 +302,7 @@ class Database:
         "WHEN COALESCE(ds.demand_idx, 0) <= 0.0 THEN 0.0 "
         "ELSE COALESCE(ds.demand_idx, 0) / 0.01 END "
         f"+ 15.0 * {GROWTH_NORM_SQL} "
-        f"+ 30.0 * {CPC_TIER_SQL} "
+        f"+ 30.0 * {EFFECTIVE_CPC_SQL} "
         "+ COALESCE(k.performance_boost, 0) AS NUMERIC), 1)"
     )
     # v14: performance_boost 누적 클램프 — 다수 초안 피드백의 무한 누적/상쇄 왜곡 방지
@@ -387,6 +429,10 @@ LEFT JOIN daily_stats ds
         ("drafts", "adpost_clicks", "INTEGER", "INTEGER"),
         # v17.2: 네이버 블로그 태그 — JSON 배열 문자열 (section_images와 동일 관례)
         ("drafts", "tags", "TEXT NOT NULL DEFAULT ''",
+         "TEXT NOT NULL DEFAULT ''"),
+        # v18: 저성과 글 리프레시 — 원본 초안 참조 + 리프레시 완료 시각
+        ("drafts", "refresh_of", "INTEGER", "INTEGER"),
+        ("drafts", "refreshed_at", "TEXT NOT NULL DEFAULT ''",
          "TEXT NOT NULL DEFAULT ''"),
     )
 
@@ -887,20 +933,23 @@ LIMIT ? OFFSET ?"""
     # ---------- v7: 글 초안 (drafts) ----------
 
     def insert_draft(self, keyword_id, title, first_paragraph, body,
-                     image_url="", status="draft", created_at="", tags=""):
+                     image_url="", status="draft", created_at="", tags="",
+                     refresh_of=None):
         # v15: id는 RETURNING/lastrowid로 취득 — 기존 'INSERT 후 ORDER BY id DESC
         # LIMIT 1 재읽기'는 다중 인스턴스에서 그 사이 끼어든 타 실행의 초안 ID를
         # 반환할 수 있는 레이스였음
+        # v18: refresh_of — 리프레시 초안의 원본 초안 id
         values = (keyword_id, title, first_paragraph, body, image_url, status,
-                  created_at, created_at, tags)
+                  created_at, created_at, tags, refresh_of)
         if self.dialect == "postgres":
             for attempt in (0, 1):
                 try:
                     with self.conn.cursor() as cur:
                         cur.execute(
                             "INSERT INTO drafts (keyword_id, title, first_paragraph, "
-                            "body, image_url, status, created_at, updated_at, tags) "
-                            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                            "body, image_url, status, created_at, updated_at, tags, "
+                            "refresh_of) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                            "RETURNING id",
                             values)
                         draft_id = cur.fetchone()["id"]
                         self.conn.commit()
@@ -911,7 +960,8 @@ LIMIT ? OFFSET ?"""
                     self._connect()
         cur = self.conn.execute(
             "INSERT INTO drafts (keyword_id, title, first_paragraph, body, image_url, "
-            "status, created_at, updated_at, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "status, created_at, updated_at, tags, refresh_of) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             values)
         self.conn.commit()
         return cur.lastrowid
@@ -1027,6 +1077,12 @@ LIMIT ?"""
             (url, updated_at, draft_id),
         )
 
+    def mark_draft_refreshed(self, draft_id, refreshed_at):
+        self._qd(
+            "UPDATE drafts SET refreshed_at = ?, updated_at = ? WHERE id = ?",
+            (refreshed_at, refreshed_at, draft_id),
+        )
+
     def find_draft_by_published_url(self, url):
         rows = self._qd(
             "SELECT * FROM drafts WHERE published_url = ? ORDER BY id DESC LIMIT 1",
@@ -1084,6 +1140,195 @@ LIMIT ?"""
                 if attempt == 1:
                     raise
                 self._connect()
+
+    # ---------- v18: 실측 CPC/RPM · 게시 플래너 · 리프레시 · 수익 인사이트 ----------
+
+    # 실측 CPC 만점 기준 — 애드포스트 CPC 스케일(수백~수천원)의 보수적 상한.
+    # measured_tier = 0.5×정적 등급 + 0.5×clamp(cpc/3000) — 실측과 정적의 절충.
+    CPC_FULL_SCALE = 3000.0
+    MEASURED_TIER_MIN_POSTS = 3
+
+    def refresh_category_cpc_stats(self, updated_at):
+        """AdPost 실측 지표 → category_cpc_stats 재집계 (전량 교체, 표는 소형).
+        클릭/노출 0인 카테고리는 cpc/rpm NULL — measured_tier도 NULL이 되어
+        priority SQL이 정적 등급으로 폴백한다 (표본 부족 = 실측 불신)."""
+        import config as config_mod
+        rows = self._qd(
+            "SELECT k.category AS category, COUNT(*) AS posts, "
+            "COALESCE(SUM(d.adpost_revenue), 0) AS revenue, "
+            "COALESCE(SUM(d.adpost_impressions), 0) AS impressions, "
+            "COALESCE(SUM(d.adpost_clicks), 0) AS clicks "
+            "FROM drafts d JOIN keywords k ON k.id = d.keyword_id "
+            "WHERE d.adpost_revenue IS NOT NULL "
+            "AND d.adpost_impressions IS NOT NULL "
+            "AND d.adpost_clicks IS NOT NULL "
+            "AND k.category != '' "
+            "GROUP BY k.category",
+            (), fetch=True,
+        )
+        tiers = config_mod.DEFAULT_CPC_TIERS
+        computed = []
+        for r in rows:
+            cpc = (r["revenue"] / r["clicks"]
+                   if r["clicks"] > 0 else None)
+            rpm = (r["revenue"] / r["impressions"] * 1000.0
+                   if r["impressions"] > 0 else None)
+            static = tiers.get(r["category"], tiers.get("", 0.5))
+            measured = None
+            if cpc is not None:
+                measured = round(
+                    0.5 * static
+                    + 0.5 * max(0.0, min(1.0, cpc / self.CPC_FULL_SCALE)), 3)
+            computed.append((r["category"], r["posts"], r["revenue"],
+                             r["impressions"], r["clicks"], cpc, rpm,
+                             measured, updated_at))
+        self._qd("DELETE FROM category_cpc_stats", ())
+        for row in computed:
+            self._qd(
+                "INSERT INTO category_cpc_stats (category, posts, revenue, "
+                "impressions, clicks, cpc, rpm, measured_tier, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                row,
+            )
+        return len(computed)
+
+    def category_cpc_stats_list(self):
+        return self._qd(
+            "SELECT * FROM category_cpc_stats ORDER BY revenue DESC", (), fetch=True)
+
+    def publish_plan(self, limit=10):
+        """미게시 초안 게시 추천 대기열 — 이미지 완성 상태가 우선, 동일하면
+        키워드 priority 순. 섹션 이미지 부족분은 Python에서 계산해 표시."""
+        import json as json_mod
+        import re as re_mod
+        rows = self._qd(
+            f"SELECT d.id, d.title, d.body, d.keyword_id, d.image_url, "
+            f"d.section_images, d.created_at, k.keyword, k.active, "
+            f"{self.PRIORITY_SQL} AS priority "
+            f"FROM drafts d JOIN keywords k ON k.id = d.keyword_id "
+            f"LEFT JOIN daily_stats ds ON ds.keyword_id = k.id "
+            f"AND ds.day = (SELECT MAX(day) FROM daily_stats d2 "
+            f"WHERE d2.keyword_id = k.id) "
+            "WHERE d.status = 'draft' "
+            "ORDER BY CASE WHEN d.image_url = '' THEN 1 ELSE 0 END, "
+            "priority DESC, d.id DESC LIMIT ?",
+            (limit,), fetch=True,
+        )
+        plan = []
+        for r in rows:
+            h2s = [h for h in re_mod.findall(r"^##\s+(.+)$", r["body"] or "", re_mod.M)
+                   if "자주 묻는 질문" not in h][:8]
+            have = []
+            if r["section_images"]:
+                try:
+                    parsed = json_mod.loads(r["section_images"])
+                    have = parsed if isinstance(parsed, list) else []
+                except (TypeError, json_mod.JSONDecodeError):
+                    have = []
+            plan.append({
+                "draft_id": r["id"], "title": r["title"],
+                "keyword": r["keyword"], "priority": r["priority"],
+                "has_main_image": bool(r["image_url"]),
+                "section_images_ready": len(have),
+                "section_images_needed": len(h2s),
+                "created_at": r["created_at"],
+            })
+        return plan
+
+    def refresh_candidates(self, limit=5, min_age_days=14, score_lt=50):
+        """리프레시 추천 — 게시 후 일정 기간 지나고 성과 저조(score < 50)인
+        초안. 이미 리프레시한 원본(refreshed_at)은 제외, 키워드 비활성 제외."""
+        import config as config_mod
+        from datetime import timedelta
+        cutoff = (config_mod.today_kst()
+                  - timedelta(days=min_age_days)).isoformat()
+        rows = self._qd(
+            f"SELECT d.id, d.title, d.keyword_id, d.published_at, "
+            f"d.performance_score, d.adpost_revenue, k.keyword, "
+            f"{self.PRIORITY_SQL} AS priority "
+            f"FROM drafts d JOIN keywords k ON k.id = d.keyword_id "
+            f"LEFT JOIN daily_stats ds ON ds.keyword_id = k.id "
+            f"AND ds.day = (SELECT MAX(day) FROM daily_stats d2 "
+            f"WHERE d2.keyword_id = k.id) "
+            "WHERE d.status = 'published' AND d.refreshed_at = '' "
+            "AND d.published_at != '' AND d.published_at <= ? "
+            "AND d.performance_score IS NOT NULL AND d.performance_score < ? "
+            "AND k.active = 1 "
+            "ORDER BY d.performance_score ASC, d.id DESC LIMIT ?",
+            (cutoff, score_lt, limit), fetch=True,
+        )
+        return rows
+
+    def top_performer_pattern(self, sample_min=10, top_n=30):
+        """성과 상위(score ≥ 70) 초안 패턴 — 제목/첫문단/본문 길이, H2 수,
+        표·FAQ 포함률. 표본 미달이면 None (패턴 가이드 비활성)."""
+        import re as re_mod
+        rows = self._qd(
+            "SELECT title, first_paragraph, body FROM drafts "
+            "WHERE status = 'published' AND performance_score >= 70 "
+            "ORDER BY performance_score DESC, id DESC LIMIT ?",
+            (top_n,), fetch=True,
+        )
+        if len(rows) < sample_min:
+            return None
+        title_lens, fp_lens, body_lens, h2_counts = [], [], [], []
+        with_table = with_faq = 0
+        for r in rows:
+            title_lens.append(len(r["title"] or ""))
+            fp_lens.append(len(r["first_paragraph"] or ""))
+            body = r["body"] or ""
+            body_lens.append(len(body))
+            h2s = [h for h in re_mod.findall(r"^##\s+(.+)$", body, re_mod.M)
+                   if "자주 묻는 질문" not in h]
+            h2_counts.append(len(h2s))
+            if "|" in body:
+                with_table += 1
+            if "자주 묻는 질문" in body:
+                with_faq += 1
+        n = len(rows)
+
+        def avg(vals):
+            return round(sum(vals) / n, 1)
+        return {
+            "sample": n,
+            "title_len_avg": avg(title_lens),
+            "first_paragraph_len_avg": avg(fp_lens),
+            "body_len_avg": int(round(sum(body_lens) / n)),
+            "h2_count_avg": round(sum(h2_counts) / n, 1),
+            "table_pct": round(100.0 * with_table / n),
+            "faq_pct": round(100.0 * with_faq / n),
+        }
+
+    def revenue_insights(self):
+        """수익 인사이트 — 전체 합계, 월별 추이, 키워드 기여, 카테고리 실측."""
+        totals = self._qd(
+            "SELECT COUNT(*) AS posts, "
+            "COALESCE(SUM(adpost_revenue), 0) AS revenue, "
+            "COALESCE(SUM(adpost_impressions), 0) AS impressions, "
+            "COALESCE(SUM(adpost_clicks), 0) AS clicks "
+            "FROM drafts WHERE adpost_revenue IS NOT NULL "
+            "AND adpost_impressions IS NOT NULL AND adpost_clicks IS NOT NULL",
+            (), fetch=True)[0]
+        monthly = self._qd(
+            "SELECT substr(published_at, 1, 7) AS month, COUNT(*) AS posts, "
+            "SUM(adpost_revenue) AS revenue "
+            "FROM drafts WHERE adpost_revenue IS NOT NULL AND published_at != '' "
+            "GROUP BY month ORDER BY month",
+            (), fetch=True)
+        top_keywords = self._qd(
+            "SELECT k.keyword, k.category, COUNT(d.id) AS posts, "
+            "SUM(d.adpost_revenue) AS revenue "
+            "FROM drafts d JOIN keywords k ON k.id = d.keyword_id "
+            "WHERE d.adpost_revenue IS NOT NULL "
+            "GROUP BY k.id, k.keyword, k.category "
+            "ORDER BY revenue DESC LIMIT 10",
+            (), fetch=True)
+        return {
+            "totals": totals,
+            "monthly": monthly,
+            "top_keywords": top_keywords,
+            "categories": self.category_cpc_stats_list(),
+        }
 
     def close(self):
         if self.conn:
