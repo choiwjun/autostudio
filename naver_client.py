@@ -69,3 +69,10 @@ class NaverClient:
             "query": query, "sort": sort,
             "display": display, "start": start,
         })
+
+    # v21(B.1): 네이버 쇼핑 검색 API — 기존 NAVER_CLIENT_ID/SECRET 재사용
+    # (네이버쇼핑커넥트 상품 블록의 상품 소스)
+    def search_shop(self, query, display=5, start=1, sort="sim"):
+        return self._get("shop.json", {
+            "query": query, "display": display, "start": start, "sort": sort,
+        })

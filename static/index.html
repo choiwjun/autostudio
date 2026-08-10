@@ -377,8 +377,18 @@
     <!-- v18: 게시 플래너 — 미게시 초안 게시 추천 + 저성과 글 리프레시 -->
     <section id="tabPlanner" class="tabpane" aria-label="게시 플래너">
       <div class="card panel-card">
-        <h3>게시 추천 대기열 <span class="dim">— 이미지 완성 우선 + priority 순, 미게시 초안만</span></h3>
+        <h3>게시 추천 대기열 <span class="dim">— 이미지 완성 우선 + priority 순, 미게시 초안만 (3일+ 미발행 강조)</span></h3>
+        <div class="draft-block" style="padding:10px 14px">
+          <h4 style="margin:0 0 6px;font-size:12px;color:var(--muted)">발행 절차 체크리스트</h4>
+          <p style="margin:0;font-size:12.5px;line-height:1.9">
+            ① <b>내보내기</b> 버튼으로 문서 다운로드 → ② 네이버 블로그에 붙여넣기 게시 → ③ 게시 URL 붙여넣고 <b>URL 등록</b> → ④ (나중에) AdPost 리포트 임포트로 성과 반영
+          </p>
+        </div>
         <div id="planQueue"></div>
+      </div>
+      <div class="card panel-card">
+        <h3>게시 로그 <span class="dim">— 최근 발행 5건 (소진 추적)</span></h3>
+        <div id="publishLog"></div>
       </div>
       <div class="card panel-card">
         <h3>리프레시 추천 <span class="dim">— 게시 14일 이상 &amp; 성과 점수 50 미만</span></h3>
@@ -1308,9 +1318,12 @@ async function loadPlanner() {
         : `<span class="warn-txt">섹션 ${sec}</span>`;
       const prio = q.priority === null ? '-' : q.priority.toFixed(1);
       const plat = PLATFORM_LABELS[q.platform] || '네이버';
+      // v21(A.1): 발행 리마인더 — 3일+ 미발행 초안 강조
+      const stale = q.age_days >= 3
+        ? `<span class="badge b-warn" title="생성 후 ${q.age_days}일 경과 — 게시 대상">⚠ ${q.age_days}일</span>` : '';
       return `<div class="planner-item">
         <div class="grow">
-          <div class="title">${esc(q.title)} <span class="badge b-blue">${esc(plat)}</span></div>
+          <div class="title">${esc(q.title)} <span class="badge b-blue">${esc(plat)}</span> ${stale}</div>
           <div class="sub">${esc(q.keyword)} · priority ${esc(prio)} · ${imgOk} ${secOk} · 생성 ${esc((q.created_at || '').slice(0, 10))}</div>
         </div>
         <input class="url-input" id="url-${q.draft_id}" placeholder="게시 후 URL 붙여넣기" aria-label="게시 URL">
@@ -1318,6 +1331,18 @@ async function loadPlanner() {
         <button class="btn btn-sm" onclick="exportDraft(${q.draft_id})">내보내기</button>
       </div>`;
     }).join('');
+  }
+  const log = document.getElementById('publishLog');
+  if (!data.recent_published || !data.recent_published.length) {
+    log.innerHTML = '<p class="empty">아직 발행 이력이 없습니다 — 대기열에서 첫 글을 게시하세요</p>';
+  } else {
+    log.innerHTML = data.recent_published.map(p => `<div class="planner-item">
+      <div class="grow">
+        <div class="title">${esc(p.title)} <span class="badge b-green">${esc(PLATFORM_LABELS[p.platform] || '네이버')}</span></div>
+        <div class="sub">발행 ${esc((p.published_at || '').slice(0, 10))} · ${esc(p.keyword)}${p.performance_score !== null ? ' · 성과 ' + esc(p.performance_score) : ''}</div>
+      </div>
+      ${p.published_url ? `<a class="btn btn-sm" href="${esc(p.published_url)}" target="_blank" rel="noopener">글 보기</a>` : ''}
+    </div>`).join('');
   }
   const refresh = document.getElementById('refreshList');
   if (!data.refresh_candidates.length) {

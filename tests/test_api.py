@@ -749,3 +749,18 @@ def test_section_images_incremental(tmp_path, monkeypatch):
     calls.clear()
     client.post(f"/drafts/{did}/section-images")
     assert calls == []
+
+
+def test_planner_publish_log_and_age(tmp_path, monkeypatch):
+    # v21(A.1): 게시 로그 + 발행 리마인더(age_days) — 발행 후 로그에 표시
+    client = TestClient(make_app(tmp_path))
+    did = _create_draft(client, monkeypatch)
+    body = client.get("/planner").json()
+    assert body["publish_queue"][0]["age_days"] == 0
+    assert body["recent_published"] == []
+    # 성과 기록(피드백) = 게시 확정 → 로그에 노출
+    client.post(f"/drafts/{did}/feedback", json={"performance_score": 80})
+    body2 = client.get("/planner").json()
+    assert body2["publish_queue"] == []
+    assert body2["recent_published"][0]["draft_id"] == did
+    assert body2["recent_published"][0]["published_at"] != ""

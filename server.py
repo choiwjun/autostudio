@@ -715,10 +715,12 @@ def create_app(cfg):
     def planner():
         # v18: 게시 플래너 — 미게시 초안 게시 추천 대기열(이미지 완성 우선) +
         # 저성과 글 리프레시 추천 + 성과 상위 패턴(가이드 주입 현황).
+        # v21(A.1): age_days(발행 리마인더) + recent_published(게시 로그) 추가
         return {
             "publish_queue": run_db(lambda d: d.publish_plan(10)),
             "refresh_candidates": run_db(lambda d: d.refresh_candidates(5)),
             "pattern": run_db(lambda d: d.top_performer_pattern()),
+            "recent_published": run_db(lambda d: d.recent_published(5)),
         }
 
     @app.post("/drafts/{draft_id}/refresh", dependencies=[Depends(require_token)])

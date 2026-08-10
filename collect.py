@@ -113,11 +113,30 @@ def discover(d, cfg, today, now, trigger, result, budget_seconds=None):
         reason = "총량 상한 도달" if daily_cap <= 0 else "일일/총량 상한 도달"
         d.log_collection("(seed)", "skip", reason, now)
         return
+    # v21(A.3): 카테고리 비중 가드 — 상한(기본 30%) 초과 카테고리의 시드는
+    # BFS 경유지에서 제외 (요리 42% 같은 CPC 병목 재발 방지). 신규만 제한 —
+    # 기존 키워드는 그대로 수익 자산(쇼핑커넥트 실험)으로 유지.
+    cap_ratio = cfg.get("category_cap_ratio", 0.3)
+    active_total = d.count_active()
+    cat_counts = d.count_active_by_category()
+    blocked_cats = {c for c, n in cat_counts.items()
+                    if active_total > 0 and n / active_total >= cap_ratio}
+    usable_seeds = seeds
+    if blocked_cats:
+        usable_seeds = [s for s in seeds if s["category"] not in blocked_cats]
+        for c in sorted(blocked_cats):
+            d.log_collection(
+                f"(seed:{c})", "skip",
+                f"카테고리 비중 {cat_counts[c]}/{active_total} 상한({cap_ratio:.0%}) 초과 — 신규 발굴 제한",
+                now)
+        if not usable_seeds:
+            d.log_collection("(seed)", "skip", "발굴 가능 시드 없음 (전 카테고리 비중 상한)", now)
+            return
     try:
         # v3: 예산을 발굴에도 적용(잔여 예산 기반 타임아웃·중단), 유래 키워드(origins) 추적
         # v14: exclude — 정제에서 버려질 노이즈는 BFS 경유지에서도 제외 (팬아웃 차단)
         found, origins, stopped = expand_keywords(
-            [s["keyword"] for s in seeds], url=cfg["autocomplete_url"],
+            [s["keyword"] for s in usable_seeds], url=cfg["autocomplete_url"],
             known=d.all_keyword_names(), max_new=remaining,
             max_depth=cfg["autocomplete_max_depth"], max_requests=max_requests,
             budget_seconds=budget_seconds,
