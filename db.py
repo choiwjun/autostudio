@@ -116,6 +116,8 @@ CREATE TABLE IF NOT EXISTS drafts (
 CREATE INDEX IF NOT EXISTS idx_drafts_keyword ON drafts(keyword_id);
 CREATE INDEX IF NOT EXISTS idx_drafts_published_url ON drafts(published_url);
 CREATE INDEX IF NOT EXISTS idx_drafts_title ON drafts(title);
+-- v20: percentiles/datalab_targets MAX(day) 커버링 — UNIQUE만으론 풀스캔
+CREATE INDEX IF NOT EXISTS idx_daily_stats_keyword_day ON daily_stats(keyword_id, day);
 -- v18: 실측 CPC/RPM — AdPost 리포트 집계로 priority CPC 항을 보정 (고정 등급의
 -- 실측 교정). 표본 부족(클릭 0)은 measured_tier NULL → SQL이 정적 등급 폴백.
 CREATE TABLE IF NOT EXISTS category_cpc_stats (
@@ -235,6 +237,8 @@ CREATE TABLE IF NOT EXISTS drafts (
 CREATE INDEX IF NOT EXISTS idx_drafts_keyword ON drafts(keyword_id);
 CREATE INDEX IF NOT EXISTS idx_drafts_published_url ON drafts(published_url);
 CREATE INDEX IF NOT EXISTS idx_drafts_title ON drafts(title);
+-- v20: percentiles/datalab_targets MAX(day) 커버링 — UNIQUE만으론 풀스캔
+CREATE INDEX IF NOT EXISTS idx_daily_stats_keyword_day ON daily_stats(keyword_id, day);
 -- v18: 실측 CPC/RPM — AdPost 리포트 집계로 priority CPC 항을 보정 (고정 등급의
 -- 실측 교정). 표본 부족(클릭 0)은 measured_tier NULL → SQL이 정적 등급 폴백.
 CREATE TABLE IF NOT EXISTS category_cpc_stats (
@@ -278,33 +282,34 @@ class Database:
         "WHEN k.category IN ('반려동물','일상','취미') THEN 0.3 "
         "ELSE 0.5 END"
     )
-    # v18: 실측 CPC 보정 — category_cpc_stats(AdPost 리포트 집계)가 표본 3건 이상
-    # 클릭으로 계산한 measured_tier를 갖고 있으면 정적 등급 대신 사용. 실측이
-    # 수익에 직결되므로 우선하되 표본 부족·클릭 0이면 정적 등급 폴백.
+    # v18: 실측 CPC 보정 — category_cpc_stats(AdPost 리포트 집계)가 실측 tier를
+    # 갖고 있으면 정적 등급 대신 사용. v20: 베이지안 스무딩(prior=3)으로 표본
+    # 1~2건도 반영 — posts≥3이면 실측 비중↑, 미만이면 정적 쪽으로 수렴. NULL 폴백.
     EFFECTIVE_CPC_SQL = (
         "CASE WHEN EXISTS (SELECT 1 FROM category_cpc_stats cs "
-        "WHERE cs.category = k.category AND cs.posts >= 3 "
-        "AND cs.measured_tier IS NOT NULL) "
-        "THEN (SELECT cs.measured_tier FROM category_cpc_stats cs "
-        "WHERE cs.category = k.category AND cs.posts >= 3 "
-        "AND cs.measured_tier IS NOT NULL) "
+        "WHERE cs.category = k.category AND cs.measured_tier IS NOT NULL) "
+        f"THEN (SELECT (3.0 * ({CPC_TIER_SQL}) + cs.posts * cs.measured_tier) "
+        "/ (3.0 + cs.posts) FROM category_cpc_stats cs "
+        "WHERE cs.category = k.category AND cs.measured_tier IS NOT NULL) "
         f"ELSE {CPC_TIER_SQL} END"
     )
+    # v20: 0.05 포화로 변별력 상실 — scoring.GROWTH_NORM_MAX(0.15)와 정합.
     GROWTH_NORM_SQL = (
         "CASE WHEN ds.demand_growth IS NULL THEN 0.0 "
-        "WHEN ds.demand_growth / 0.05 >= 1.0 THEN 1.0 "
-        "WHEN ds.demand_growth / 0.05 <= -0.5 THEN -0.5 "
-        "ELSE ds.demand_growth / 0.05 END"
+        "WHEN ds.demand_growth / 0.15 >= 1.0 THEN 1.0 "
+        "WHEN ds.demand_growth / 0.15 <= -0.5 THEN -0.5 "
+        "ELSE ds.demand_growth / 0.15 END"
     )
+    # v20: 0.01은 앵커 비수기 포화로 변별력 상실 — 0.02로 완화 (scoring.DEMAND_NORM_MAX와 정합).
     PRIORITY_SQL = (
         # v15: ai_cite도 [0,1] 클램프 — scoring.v6_priority의 max/min과 동일 수식.
         # (ai_cite_idx는 구조상 ≤1이지만 오염 데이터에도 정합 유지)
         "ROUND(CAST(30.0 * CASE WHEN COALESCE(ds.ai_cite_idx, 0) >= 1.0 THEN 1.0 "
         "WHEN COALESCE(ds.ai_cite_idx, 0) <= 0.0 THEN 0.0 "
         "ELSE COALESCE(ds.ai_cite_idx, 0) END "
-        "+ 25.0 * CASE WHEN COALESCE(ds.demand_idx, 0) >= 0.01 THEN 1.0 "
+        "+ 25.0 * CASE WHEN COALESCE(ds.demand_idx, 0) >= 0.02 THEN 1.0 "
         "WHEN COALESCE(ds.demand_idx, 0) <= 0.0 THEN 0.0 "
-        "ELSE COALESCE(ds.demand_idx, 0) / 0.01 END "
+        "ELSE COALESCE(ds.demand_idx, 0) / 0.02 END "
         f"+ 15.0 * {GROWTH_NORM_SQL} "
         f"+ 30.0 * {EFFECTIVE_CPC_SQL} "
         "+ COALESCE(k.performance_boost, 0) AS NUMERIC), 1)"
@@ -631,7 +636,7 @@ ORDER BY 1"""
 
     def top_by_opportunity(self, day, limit):
         sql = """
-SELECT k.id, k.keyword FROM daily_stats ds
+SELECT k.id, k.keyword, k.category FROM daily_stats ds
 JOIN keywords k ON k.id = ds.keyword_id
 WHERE ds.day = ? AND ds.opportunity IS NOT NULL AND k.active = 1
 ORDER BY ds.opportunity DESC LIMIT ?"""
@@ -648,21 +653,28 @@ ORDER BY ds.opportunity DESC LIMIT ?"""
         if rotate_n <= 0:
             return priority_rows
         seen = {r["id"] for r in priority_rows}
+        # v20: 기존 EXISTS(day=today)는 partial로 오늘 스냅샷을 못 받은 키워드를
+        # 수요/쇼핑 갱신 대상에서 영구 배제해 사각지대가 누적됐다.
+        # 최근 7일 스냅샷 존재 여부로 완화해 partial 반복 시에도 커버리지를 유지한다.
+        # (cutoff는 Python에서 계산 — date(?, '-7 days')는 Postgres 비호환)
+        from datetime import date as date_mod, timedelta
+        cutoff_day = (date_mod.fromisoformat(day) - timedelta(days=7)).isoformat()
         # NULLS FIRST를 CASE로 표현 (SQLite/Postgres 공통)
         sql = """
-SELECT k.id, k.keyword FROM keywords k
+SELECT k.id, k.keyword, k.category FROM keywords k
 WHERE k.active = 1
   AND EXISTS (SELECT 1 FROM daily_stats ds
-              WHERE ds.keyword_id = k.id AND ds.day = ?)
+              WHERE ds.keyword_id = k.id AND ds.day >= ?)
 ORDER BY CASE WHEN (SELECT MAX(day) FROM daily_stats d2
-                    WHERE d2.keyword_id = k.id
-                      AND d2.demand_idx IS NOT NULL) IS NULL
-              THEN 0 ELSE 1 END,
-         (SELECT MAX(day) FROM daily_stats d2
-          WHERE d2.keyword_id = k.id AND d2.demand_idx IS NOT NULL) ASC,
-         k.id
+                     WHERE d2.keyword_id = k.id
+                       AND d2.demand_idx IS NOT NULL) IS NULL
+               THEN 0 ELSE 1 END,
+          (SELECT MAX(day) FROM daily_stats d2
+           WHERE d2.keyword_id = k.id AND d2.demand_idx IS NOT NULL) ASC,
+          k.id
 LIMIT ?"""
-        rows = self._qd(sql, (day, rotate_n + len(seen)), fetch=True)
+        rows = self._qd(
+            sql, (cutoff_day, rotate_n + len(seen)), fetch=True)
         rotate_rows = [r for r in rows if r["id"] not in seen][:rotate_n]
         return priority_rows + rotate_rows
 
@@ -790,12 +802,15 @@ LIMIT ?"""
         clickless 열은 은퇴 사유 로그 구분용 (collect.retire가 참조)."""
         has_clicks = ("EXISTS (SELECT 1 FROM daily_stats h "
                       "WHERE h.keyword_id = k.id AND h.shop_click_idx IS NOT NULL)")
+        # v20: 최근 7일 스냅샷이 3개 미만이면 변동성으로 과은퇴 — COUNT(*) >= 3 가드로 보호.
         sql = f"""
 SELECT k.id, k.keyword,
        CASE WHEN NOT {has_clicks} THEN 1 ELSE 0 END AS clickless
 FROM keywords k
 WHERE k.active = 1 AND k.first_seen <= ?
   AND COALESCE(k.performance_boost, 0) < 10
+  AND (SELECT COUNT(*) FROM daily_stats ds
+       WHERE ds.keyword_id = k.id AND ds.day >= ?) >= 3
   AND EXISTS (
     SELECT 1 FROM daily_stats ds WHERE ds.keyword_id = k.id AND ds.day >= ?
       AND ds.opportunity IS NOT NULL
@@ -806,7 +821,10 @@ WHERE k.active = 1 AND k.first_seen <= ?
            OR ds.shop_click_idx >= ?
            OR (ds.shop_click_idx IS NULL AND {has_clicks})))
 ORDER BY k.id"""
-        return self._qd(sql, (first_seen_before, since_day, since_day, opp_lt, click_lt), fetch=True)
+        return self._qd(
+            sql,
+            (first_seen_before, since_day, since_day, since_day, opp_lt, click_lt),
+            fetch=True)
 
     def cleanup(self, stats_before_day, top_before_day, log_before_ts):
         self._qd("DELETE FROM daily_stats WHERE day < ?", (stats_before_day,))

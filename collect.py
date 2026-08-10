@@ -7,14 +7,13 @@ from datetime import date, datetime, timedelta
 
 import config as config_mod
 import db
-from analyzer import analyze_keyword
+from analyzer import FRESH_WINDOW_BY_CATEGORY, DEFAULT_FRESH_WINDOW, analyze_keyword
 from autocomplete import expand_keywords
 from datalab import DatalabError, fetch_demand_ratios
 from naver_client import NaverAPIError, NaverClient
 from refine import refine_keywords, reject_reason
 from scoring import ai_citation_score, growth_rate, opportunity_score
-from shopping_insight import fetch_click_ratios
-
+from shopping_insight import fetch_click_ratios, resolve_shopping_category
 RUN_LOCK_STALE_MINUTES = 60  # v3: GH Actions timeout-minutes(60)와 정합 (기본값, cfg로 조정)
 MANUAL_DISCOVERY_MAX_NEW = 30       # 첫 실행(활성 0개)의 수동 발굴 축소 상한
 MANUAL_DISCOVERY_MAX_REQUESTS = 40
@@ -45,15 +44,19 @@ def compute_scores(d, keyword_id, day, stats):
     v3: 증감률·기회점수는 전일(day-1) 스냅샷 대비만 산출 — 공백(2일 이상)이면
     NULL ("데이터 쌓는 중"). 최근 과거 스냅샷으로 며칠치 증가율을 하루치로 계산하지 않음.
     v4: 쇼핑 검색 API 종료로 상업성은 항상 NULL — 쇼핑 클릭 지수는 배치 단계에서 갱신.
-    v6: ai_cite_idx는 키워드·카테고리·신선도 기반 프록시 — 스냅샷 시점에 사전계산 저장."""
+    v6: ai_cite_idx는 키워드·카테고리·신선도 기반 프록시 — 스냅샷 시점에 사전계산 저장.
+    v20: 카테고리별 fresh_window를 스코어에도 반영해 기회점수 왜곡 완화."""
     prev = d.get_prev_stats(keyword_id, day)
     growth = opportunity = None
+    # v20: fresh_ratio는 스냅샷 시점에 카테고리별 window로 이미 계산·저장됨 — 원시값 사용
+    fresh_ratio = stats.get("fresh_ratio", 0.0)
     prev_day = (date.fromisoformat(day) - timedelta(days=1)).isoformat()
     if prev and prev["day"] == prev_day:
         growth = growth_rate(prev["total_date"], stats["total_date"])
         opportunity = opportunity_score(
-            stats["fresh_ratio"], growth, stats["total_sim"])
-    ai_cite = ai_citation_score(stats["keyword"], stats["fresh_ratio"], stats.get("category", ""))
+            fresh_ratio, growth, stats["total_sim"])
+    ai_cite = ai_citation_score(
+        stats["keyword"], fresh_ratio, stats.get("category", ""))
     return growth, opportunity, None, ai_cite
 
 
@@ -165,10 +168,14 @@ def snapshot(d, cfg, client, today, now, started, budget_seconds, result):
             client.timeout = max(
                 1.0, min(getattr(client, "timeout", 10.0) or 10.0, remaining / 2))
         try:
-            stats = analyze_keyword(client, kw["keyword"], base_date)
+            # v20: 키워드 카테고리별 fresh window를 스냅샷에 반영
+            cat = kw.get("category", "")
+            window = FRESH_WINDOW_BY_CATEGORY.get(cat, DEFAULT_FRESH_WINDOW)
+            stats = analyze_keyword(client, kw["keyword"], base_date,
+                                    fresh_window_days=window)
             # v6: ai_citation_score가 키워드·카테고리를 참조하므로 stats에 주입
             stats["keyword"] = kw["keyword"]
-            stats["category"] = kw.get("category", "")
+            stats["category"] = cat
             growth, opportunity, commercial, ai_cite = compute_scores(
                 d, kw["id"], today, stats)
             stats.update({"growth": growth, "opportunity": opportunity,
@@ -240,30 +247,39 @@ def update_shop_clicks(d, cfg, today, now, budget_seconds=None, started=None):
         return 0
     start = (date.fromisoformat(today)
              - timedelta(days=DATALAB_WINDOW_DAYS)).isoformat()
-    category = cfg.get("shopping_insight_category", "50000000")
+    fallback_category = cfg.get("shopping_insight_category", "50000000")
     updated = 0
     # v17: 수요 단계와 동일한 대상 목록 — 지표 간 커버리지 정합
+    # v20: 키워드별 쇼핑 카테고리 매핑 — 전체로 묶으면 요리/패션 희석
     targets = d.datalab_targets(today, DATALAB_PRIORITY_N, DATALAB_ROTATE_N)
+    # id → kw category 맵 (배치 내 그룹별 카테고리 분기용)
+    cat_map = {t["id"]: t.get("category", "") for t in targets}
     for batch in _chunks(targets, 4):
         if _budget_exhausted(budget_seconds, started):
             d.log_collection("(shopping)", "partial",
                              "시간 예산 초과로 쇼핑 클릭 단계 중단", now)
             break
-        timeout = _budget_timeout(budget_seconds, started, DATALAB_TIMEOUT)
-        try:
-            ratios = fetch_click_ratios(
-                cfg["client_id"], cfg["client_secret"],
-                [b["keyword"] for b in batch], cfg["datalab_anchor"],
-                category, start, today, timeout=timeout)
-        except DatalabError as e:
-            d.log_collection("(shopping)", "error", str(e), now)
-            break  # 쇼핑 클릭 단계만 중단 — 나머지 파이프라인은 정상 (스펙 §4.4)
+        # 배치 내 카테고리별 그룹 — 같은 쇼핑 카테고리끼리 한 요청으로 묶음
+        cat_groups: dict[str, list] = {}
         for b in batch:
-            val = ratios.get(b["keyword"])
-            if val is not None:  # None = 분야 미매칭 → NULL 유지 (v17)
-                d.update_shop_click_idx(b["id"], today, val)
-                updated += 1
-        time.sleep(0.2)
+            cat = resolve_shopping_category(cat_map.get(b["id"], ""), fallback_category)
+            cat_groups.setdefault(cat, []).append(b)
+        for cat, group in cat_groups.items():
+            timeout = _budget_timeout(budget_seconds, started, DATALAB_TIMEOUT)
+            try:
+                ratios = fetch_click_ratios(
+                    cfg["client_id"], cfg["client_secret"],
+                    [b["keyword"] for b in group], cfg["datalab_anchor"],
+                    cat, start, today, timeout=timeout)
+            except DatalabError as e:
+                d.log_collection("(shopping)", "error", str(e), now)
+                break  # 쇼핑 클릭 단계만 중단 — 나머지 파이프라인은 정상 (스펙 §4.4)
+            for b in group:
+                val = ratios.get(b["keyword"])
+                if val is not None:  # None = 분야 미매칭 → NULL 유지 (v17)
+                    d.update_shop_click_idx(b["id"], today, val)
+                    updated += 1
+            time.sleep(0.2)
     return updated
 
 

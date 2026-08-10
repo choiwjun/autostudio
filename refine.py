@@ -6,7 +6,11 @@ BLACKLIST_SUBSTRINGS = {
 }
 
 # 토큰: 단독 단어일 때만 차단 → "성인병 예방", "전세대출 금리"는 통과
-BLACKLIST_TOKENS = {"성인", "도박", "대출", "불법", "사기", "토토"}
+# v20: "대출" 토큰 단독 차단은 "주택 대출 금리" 같은 정상 금융 키워드를 오탈락
+# (고CPC 1.0 카테고리 직격). 불법 대출은 substring("작업대출") + 조합 토큰
+# ("불법"+"대출", "사기" 단독)으로 충분히 차단되어 토큰 "대출"은 제거.
+BLACKLIST_TOKENS = {"성인", "도박", "불법", "사기", "토토"}
+LOAN_RISKY_COMBO_TOKENS = {"작업대출", "대환대출사기", "대출사기"}
 
 # 포털/플랫폼명이 토큰으로 포함된 브랜드 검색어 제거
 PORTAL_TOKENS = {
@@ -61,6 +65,8 @@ def reject_reason(w):
     tokens = set(w.split())
     if tokens & BLACKLIST_TOKENS:
         return "token"
+    if tokens & LOAN_RISKY_COMBO_TOKENS:
+        return "substring"
     if tokens & PORTAL_TOKENS:
         return "portal"
     if w in STOPWORDS:

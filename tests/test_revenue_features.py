@@ -58,13 +58,17 @@ def test_measured_cpc_tier_updates_priority(tmp_path):
     assert row["posts"] == 3 and row["cpc"] == 3000.0
     assert row["rpm"] == 3000.0  # 3000/1000*1000
     assert row["measured_tier"] == 0.65  # 0.5*0.3 + 0.5*min(1, 3000/3000)
+    # v20: 베이지안 스무딩 (prior=3) — (3*0.3 + 3*0.65)/(3+3)=0.475 → 14.25
+    # SQL ROUND는 half-away(14.3), Python round는 banker's(14.2) — SQL 값 기준
     after = d.query_keywords(sort="priority", active=1)[0]["priority"]
-    assert after == round(30.0 * 0.65, 1)  # 19.5 > 9.0
+    assert after == 14.3
     d.close()
 
 
 def test_measured_tier_needs_min_posts(tmp_path):
-    # v18: 표본 3건 미만이면 measured_tier가 있어도 priority는 정적 등급 유지
+    # v18: 표본 3건 미만이어도 v20 베이지안 스무딩으로 일부 반영
+    # v20: (prior=3) posts=2 → (3*0.4 + 2*0.7)/(3+2)=0.52 → priority 15.6
+    # 여행 measured_tier = 0.5*0.4+0.5*1.0=0.7
     d = _open(tmp_path)
     k = d.upsert_keyword("여행 후기", category="여행", day="2026-08-01")
     for _ in range(2):
@@ -75,7 +79,7 @@ def test_measured_tier_needs_min_posts(tmp_path):
     row = d.category_cpc_stats_list()[0]
     assert row["posts"] == 2 and row["measured_tier"] is not None
     priority = d.query_keywords(sort="priority", active=1)[0]["priority"]
-    assert priority == round(30.0 * 0.4, 1)  # 여행 정적 등급 0.4 (스냅샷 없음)
+    assert priority == round(30.0 * 0.52, 1)  # 베이지안 스무딩 (3*0.4+2*0.7)/5
     d.close()
 
 

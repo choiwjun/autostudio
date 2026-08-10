@@ -7,6 +7,22 @@ import requests
 
 SHOPPING_INSIGHT_URL = "https://openapi.naver.com/v1/datalab/shopping/category/keywords"
 
+# v20: 카테고리별 쇼핑인사이트 category 매핑 — 전체(50000000)로 묶으면
+# 요리/패션처럼 카테고리 특화 클릭이 희석됨. 키워드 카테고리 → 쇼핑 카테고리 매핑.
+CATEGORY_SHOPPING_MAP = {
+    "요리": "50000006", "맛집": "50000006",
+    "패션": "50000008", "뷰티": "50000007",
+    "인테리어": "50000003",
+    "건강": "50000009", "의료": "50000009",
+    "IT": "50000002", "디지털": "50000002",
+    "여행": "50000010",
+    "반려동물": "50000011",
+}
+
+def resolve_shopping_category(keyword_category, fallback="50000000"):
+    """키워드 카테고리 → 쇼핑인사이트 category. 매핑 없으면 fallback(전체)."""
+    return CATEGORY_SHOPPING_MAP.get(keyword_category or "", fallback)
+
 # 오류 정규화 + 재시도 재사용 — graceful degradation (수요 단계와 동일 복원력)
 from datalab import DatalabError, post_with_retry  # noqa: E402
 

@@ -169,7 +169,9 @@ def test_retire_candidates_and_cleanup(tmp_path):
     good = d.upsert_keyword("낡지만좋음", day="2026-07-01")
     d.upsert_keyword("수집끊김", day="2026-07-01")  # 최근 스냅샷 없음 → 은퇴 보호
     # v4: 은퇴는 기회점수 + 쇼핑 클릭 지수로 판정 (쇼핑 검색 API 종료)
-    d.insert_daily_stats(bad, "2026-08-01", {"opportunity": 10.0, "shop_click_idx": 0.1})
+    # v20: COUNT>=3 가드 — 최근 7일 창에 스냅샷 3개 이상 보유
+    for day in ("2026-07-28", "2026-07-30", "2026-08-01"):
+        d.insert_daily_stats(bad, day, {"opportunity": 10.0, "shop_click_idx": 0.1})
     d.insert_daily_stats(good, "2026-08-01", {"opportunity": 80.0, "shop_click_idx": 0.1})
     victims = d.find_retire_candidates("2026-07-20", "2026-07-27", 35.0, 0.5)
     assert [v["keyword"] for v in victims] == ["낡고나쁨"]
@@ -216,10 +218,12 @@ def test_retire_clickless_by_opportunity_alone(tmp_path):
     # v17 (버그 1): 클릭 데이터가 한 번도 수집되지 않은 키워드(상위 200 슬롯 밖·
     # 분야 미매칭)는 기회점수 단독 판정으로 은퇴 — 기존 EXISTS(클릭 비NULL)는
     # 이들을 영구 보호해 500 상한 도달 시 발견이 영구 정지했음
+    # v20: COUNT>=3 가드 추가 — 클릭미수집도 3개 스냅샷 보유 필요
     d = make_db(tmp_path)
     clickless = d.upsert_keyword("클릭미수집", day="2026-07-01")
-    d.insert_daily_stats(clickless, "2026-08-01",
-                         {"opportunity": 10.0, "shop_click_idx": None})
+    for day in ("2026-07-28", "2026-07-30", "2026-08-01"):
+        d.insert_daily_stats(clickless, day,
+                             {"opportunity": 10.0, "shop_click_idx": None})
     victims = d.find_retire_candidates("2026-07-20", "2026-07-27", 35.0, 0.5)
     assert [v["keyword"] for v in victims] == ["클릭미수집"]
     assert victims[0]["clickless"] == 1  # 은퇴 로그 구분용 플래그
@@ -240,13 +244,15 @@ def test_retire_protects_recent_null_with_click_history(tmp_path):
 
 def test_retire_protects_performance_boost(tmp_path):
     # v11: 게시 성과 피드백 보너스(≥10) 키워드는 지표 저조에도 은퇴 보호
+    # v20: COUNT>=3 가드 — 3개 스냅샷으로 은퇴 판정 충족
     d = make_db(tmp_path)
     boosted = d.upsert_keyword("성과확인됨", day="2026-07-01")
     plain = d.upsert_keyword("그냥저조", day="2026-07-01")
-    d.insert_daily_stats(boosted, "2026-08-01",
-                         {"opportunity": 10.0, "shop_click_idx": 0.1})
-    d.insert_daily_stats(plain, "2026-08-01",
-                         {"opportunity": 10.0, "shop_click_idx": 0.1})
+    for day in ("2026-07-28", "2026-07-30", "2026-08-01"):
+        d.insert_daily_stats(boosted, day,
+                             {"opportunity": 10.0, "shop_click_idx": 0.1})
+        d.insert_daily_stats(plain, day,
+                             {"opportunity": 10.0, "shop_click_idx": 0.1})
     d.set_performance_boost(boosted, 10)
     victims = d.find_retire_candidates("2026-07-20", "2026-07-27", 35.0, 0.5)
     assert [v["keyword"] for v in victims] == ["그냥저조"]
@@ -485,11 +491,13 @@ def test_priority_sql_matches_v6_priority(tmp_path):
     d.insert_daily_stats(b, "2026-08-02", {
         "ai_cite_idx": 0.5, "demand_idx": 0.002, "demand_growth": -0.2})
     d.insert_daily_stats(c, "2026-08-02", {
-        "ai_cite_idx": 0.4, "demand_idx": 0.001})  # demand_growth NULL
+        "ai_cite_idx": 0.4, "demand_idx": 0.003})  # demand_growth NULL
     rows = {r["keyword"]: r["priority"] for r in d.query_keywords()}
     assert rows["보험 비교 방법"] == scoring.v6_priority(0.8, 0.004, 1.0, 0.02)
     assert rows["하락 키워드"] == scoring.v6_priority(0.5, 0.002, 0.4, -0.2)
-    assert rows["성장 미수집"] == scoring.v6_priority(0.4, 0.001, 0.5, None)
+    # v20: 0.001→0.003 — 0.001/0.02=0.05가 반올림 경계(28.25: SQL 28.3 vs
+    # Python banker's 28.2)를 만들던 값 회피
+    assert rows["성장 미수집"] == scoring.v6_priority(0.4, 0.003, 0.5, None)
     d.close()
 
 
@@ -567,16 +575,17 @@ def test_datalab_targets_priority_plus_rotation(tmp_path):
 
 
 def test_datalab_targets_excludes_unsnapshotted_and_inactive(tmp_path):
+    # v20: 7일 창 완화 — 어제 스냅샷도 수요 갱신 대상 (partial 보정). 어제만 있어도 포함
     d = make_db(tmp_path)
     a = d.upsert_keyword("활성스냅샷", day="2026-08-01")
     b = d.upsert_keyword("비활성", day="2026-08-01")
     c = d.upsert_keyword("오늘미스냅샷", day="2026-08-01")
     d.insert_daily_stats(a, "2026-08-02", {"opportunity": 90.0})
     d.insert_daily_stats(b, "2026-08-02", {"opportunity": 80.0})
-    d.insert_daily_stats(c, "2026-08-01", {"opportunity": 70.0})  # 어제만
+    d.insert_daily_stats(c, "2026-08-01", {"opportunity": 70.0})  # 어제만 → 7일 내 통과
     d.set_active(b, 0)
     targets = d.datalab_targets("2026-08-02", priority_n=5, rotate_n=5)
-    assert [t["keyword"] for t in targets] == ["활성스냅샷"]
+    assert [t["keyword"] for t in targets] == ["활성스냅샷", "오늘미스냅샷"]
 
 
 # ---------- v17: 콘텐츠 배치·AdPost용 초안 조회 ----------
@@ -595,6 +604,7 @@ def test_list_drafts_missing_images(tmp_path):
     d4 = d.insert_draft(kid, "t4", "fp", "H2 없는 본문", created_at="n")  # 대표만 필요
     rows = d.list_drafts_missing_images(10)
     assert [r["id"] for r in rows] == [d1, d3, d4]
+    # v20 회귀: postgres 분기 LIKE 와일드카드가 psycopg2 마커로 오인되지 않아야 함
 
 
 def test_list_drafts_missing_images_pg_like_escape():

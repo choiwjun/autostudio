@@ -131,8 +131,10 @@ def test_schedule_run_retires_and_cleans(tmp_path, monkeypatch):
     d = db.Database(cfg["db_url"])
     d.init()
     bad = d.upsert_keyword("낡고나쁨", day="2026-07-01")
-    d.insert_daily_stats(bad, "2026-08-01", {
-        "total_date": 100, "opportunity": 10.0, "shop_click_idx": 0.1})
+    # v20: retire COUNT>=3 가드 — 8/1 창에 스냅샷 3개로 은퇴 충족 (나머지는 창 밖)
+    for day in ("2026-07-28", "2026-07-30", "2026-08-01"):
+        d.insert_daily_stats(bad, day, {
+            "total_date": 100, "opportunity": 10.0, "shop_click_idx": 0.1})
     d.insert_daily_stats(bad, "2026-01-15", {"total_sim": 1})  # 90일 보존 초과분
     d.insert_top_results(bad, "2026-01-15", ["20260101"])      # 30일 보존 초과분
 
@@ -142,7 +144,9 @@ def test_schedule_run_retires_and_cleans(tmp_path, monkeypatch):
         return 1
 
     # v14: total_sim 포화(경쟁 만점)라 8/2 기회점수 0 — 은퇴 폴백 임계(12) 하회
-    monkeypatch.setattr(collect, "analyze_keyword", lambda client, kw, today: {
+    # v20: analyze_keyword에 fresh_window_days 키워드 인자 전달 — mock 시그니처 수용
+    monkeypatch.setattr(collect, "analyze_keyword",
+                        lambda client, kw, today, **kw2: {
         "total_sim": 100000, "total_date": 100, "fresh_ratio": 0.0,
         "top_post_dates": [], "top_bloggers": [], "top_descriptions": []})
     monkeypatch.setattr(collect, "update_shop_clicks", fake_shop_clicks)
@@ -360,17 +364,20 @@ def test_retire_uses_percentile_threshold(tmp_path):
     # v14: 은퇴 기회점수 임계 = 활성 최신 스냅샷 P25 (자가보정).
     # 고정 35.0은 실측 기회점수 최대(~24)보다 높아 은퇴가 쇼핑클릭 조건으로
     # 퇴화하던 버그 — 표본 20개+에서 P25가 실제로 적용되는지 회귀 방지.
+    # v20: retire COUNT>=3 가드로 각 키워드가 7일 창에 스냅샷 3개 보유 필요.
     cfg = make_cfg(tmp_path)
     d = db.Database(cfg["db_url"])
     d.init()
     now = "2026-08-02T07:00:00+09:00"
     for i in range(20):
         kid = d.upsert_keyword(f"집단{i:02d}", day="2026-07-01")
-        d.insert_daily_stats(kid, "2026-08-01",
-                             {"opportunity": 20.0 + i, "shop_click_idx": 0.9})
+        for day in ("2026-07-27", "2026-07-28", "2026-08-01"):
+            d.insert_daily_stats(kid, day,
+                                 {"opportunity": 20.0 + i, "shop_click_idx": 0.9})
     victim = d.upsert_keyword("저성과", day="2026-07-01")
-    d.insert_daily_stats(victim, "2026-08-01",
-                         {"opportunity": 5.0, "shop_click_idx": 0.1})
+    for day in ("2026-07-27", "2026-07-28", "2026-08-01"):
+        d.insert_daily_stats(victim, day,
+                             {"opportunity": 5.0, "shop_click_idx": 0.1})
     # n=21 → P25 = 24.0 — 집단(클릭 0.9)은 보호되고 저성과(5.0 < 24, 클릭 0.1)만 은퇴
     assert collect.retire(d, "2026-08-02", now) == 1
     assert d.count_active() == 20
@@ -379,13 +386,15 @@ def test_retire_uses_percentile_threshold(tmp_path):
 
 def test_retire_fallback_when_sample_small(tmp_path):
     # v14: 표본 < 20이면 폴백 절대값(12.0) — 빈곤 표본에서 백분위 노이즈 방지
+    # v20: COUNT>=3 가드 — 스냅샷 3개로 은퇴 판정 충족
     cfg = make_cfg(tmp_path)
     d = db.Database(cfg["db_url"])
     d.init()
     now = "2026-08-02T07:00:00+09:00"
     bad = d.upsert_keyword("저성과", day="2026-07-01")
-    d.insert_daily_stats(bad, "2026-08-01",
-                         {"opportunity": 10.0, "shop_click_idx": 0.1})
+    for day in ("2026-07-27", "2026-07-28", "2026-08-01"):
+        d.insert_daily_stats(bad, day,
+                             {"opportunity": 10.0, "shop_click_idx": 0.1})
     assert collect.retire(d, "2026-08-02", now) == 1  # 10.0 < 폴백 12.0
     assert d.count_active() == 0
     d.close()

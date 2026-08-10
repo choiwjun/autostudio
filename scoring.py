@@ -4,7 +4,9 @@ import math
 import config as config_mod
 
 COMPETITION_SATURATION_TOTAL = 10_000  # 1만 글이면 경쟁 포화 (스펙 §4.5)
-GROWTH_NORM_MAX = 0.05                 # 일 5% 증가에서 성장 만점 (변별력 확보)
+# v20: 5%는 데이터랩 30일·쇼핑인사이트 상승 키워드 대부분을 1.0으로 포화시켜
+# 순위 구분이 사라졌다. 15%로 올려 실제 변별력을 회복 (0.15→1.0, 0.07→0.47).
+GROWTH_NORM_MAX = 0.15
 
 # v9: config.DEFAULT_CPC_TIERS를 단일 소스로 사용 — 중복 딕셔너리는 드리프트 발생
 #     (scoring.py에 '요리' 누락 사례). cpc_tier_score는 테스트·참조용이며
@@ -53,7 +55,10 @@ def cpc_tier_score(category, tiers=None):
 
 # v12: demand_idx는 앵커('냉장고') 대비 상대비율 — 실측 0~0.01 분포 (v9 현실화).
 #      이 상한을 기준으로 0~1 정규화해 v6 가중치(0.35)가 실제로 priority에 반영되도록 함.
-DEMAND_NORM_MAX = 0.01
+# v20: 앵커 비수기엔 0.01을 넘는 키워드가 포화(1.0)되어 변별력 상실. P50 동적
+# 상한을 쓰되 초기/표본 부족 대비 고정 폴백을 유지 — DB PRIORITY_SQL과 정합.
+DEMAND_NORM_MAX = 0.02
+DYNAMIC_DEMAND_NORM_FALLBACK = 0.02
 
 
 def growth_norm(growth):
