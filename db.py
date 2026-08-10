@@ -132,6 +132,17 @@ CREATE TABLE IF NOT EXISTS category_cpc_stats (
     measured_tier REAL,
     updated_at TEXT NOT NULL DEFAULT ''
 );
+-- v22.2(3.3): 운세 콘텐츠 생성 멱등 — (기준일, 타입) 당 1건. 발행 대기 큐 겸용.
+CREATE TABLE IF NOT EXISTS fortune_generations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ref_date TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    content TEXT NOT NULL,
+    grounding TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'generated',
+    created_at TEXT NOT NULL,
+    UNIQUE(ref_date, content_type)
+);
 """,
     "postgres": """
 CREATE TABLE IF NOT EXISTS seed_keywords (
@@ -253,6 +264,17 @@ CREATE TABLE IF NOT EXISTS category_cpc_stats (
     rpm DOUBLE PRECISION,
     measured_tier DOUBLE PRECISION,
     updated_at TEXT NOT NULL DEFAULT ''
+);
+-- v22.2(3.3): 운세 콘텐츠 생성 멱등 — (기준일, 타입) 당 1건. 발행 대기 큐 겸용.
+CREATE TABLE IF NOT EXISTS fortune_generations (
+    id SERIAL PRIMARY KEY,
+    ref_date TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    content TEXT NOT NULL,
+    grounding TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'generated',
+    created_at TEXT NOT NULL,
+    UNIQUE(ref_date, content_type)
 );
 """,
 }
@@ -1419,6 +1441,35 @@ LIMIT ?"""
             "top_keywords": top_keywords,
             "categories": self.category_cpc_stats_list(),
         }
+
+    # ---------- v22.2(3.3): 운세 콘텐츠 생성 (멱등 큐) ----------
+
+    def get_fortune_generation(self, ref_date, content_type):
+        rows = self._qd(
+            "SELECT * FROM fortune_generations WHERE ref_date = ? AND content_type = ?",
+            (ref_date, content_type), fetch=True)
+        return rows[0] if rows else None
+
+    def upsert_fortune_generation(self, ref_date, content_type, content,
+                                  grounding="", status="generated"):
+        """생성 멱등 — 같은 (기준일, 타입)은 INSERT, 이미 있으면 스킵(False)."""
+        if self.get_fortune_generation(ref_date, content_type):
+            return False
+        import config as config_mod
+        self._qd(
+            "INSERT INTO fortune_generations (ref_date, content_type, content, "
+            "grounding, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (ref_date, content_type, content, grounding, status,
+             config_mod.now_kst_iso()),
+        )
+        return True
+
+    def list_fortune_generations(self, ref_date=None, limit=50):
+        sql = ("SELECT * FROM fortune_generations "
+               + ("WHERE ref_date = ? " if ref_date else "")
+               + "ORDER BY ref_date DESC, id DESC LIMIT ?")
+        params = (ref_date, limit) if ref_date else (limit,)
+        return self._qd(sql, params, fetch=True)
 
     def close(self):
         if self.conn:
