@@ -2,6 +2,8 @@
 import os
 import sqlite3
 
+import config as config_mod
+
 try:
     import psycopg2
     CONNECTION_ERRORS = (psycopg2.OperationalError, psycopg2.InterfaceError)
@@ -1463,10 +1465,18 @@ LIMIT ?"""
 
     def upsert_fortune_generation(self, ref_date, content_type, content,
                                   grounding="", status="generated"):
-        """생성 멱등 — 같은 (기준일, 타입)은 INSERT, 이미 있으면 스킵(False)."""
-        if self.get_fortune_generation(ref_date, content_type):
-            return False
-        import config as config_mod
+        """생성 멱등 키 — 같은 (기준일·타입) 이미 생성 시 스킵(False).
+        단, content가 빈 placeholder(생성 실패 잔재)면 재시도 허용 — 기존 행 갱신."""
+        existing = self.get_fortune_generation(ref_date, content_type)
+        if existing:
+            if existing["content"]:
+                return False
+            self._qd(
+                "UPDATE fortune_generations SET grounding = ?, updated_at = ? "
+                "WHERE ref_date = ? AND content_type = ?",
+                (grounding, config_mod.now_kst_iso(), ref_date, content_type),
+            )
+            return True
         self._qd(
             "INSERT INTO fortune_generations (ref_date, content_type, content, "
             "grounding, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",

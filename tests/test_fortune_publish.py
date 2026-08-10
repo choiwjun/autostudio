@@ -149,6 +149,20 @@ def test_fortune_publish_failed_retries_next_run(monkeypatch, tmp_path):
     d.close()
 
 
+def test_upsert_retries_empty_placeholder(tmp_path):
+    # LLM 실패로 빈 content가 남은 행 — 다음 실행에서 재시도 허용 (멱등 블록 방지)
+    d = _open(tmp_path)
+    assert d.upsert_fortune_generation("2026-08-10", "daily_blog", "", grounding="g")
+    assert d.upsert_fortune_generation("2026-08-10", "daily_blog", "", grounding="g")
+    row = d.get_fortune_generation("2026-08-10", "daily_blog")
+    assert row["content"] == ""
+    # content 채워지면 멱등 스킵
+    d.update_fortune_generation("2026-08-10", "daily_blog",
+                                json.dumps(_blog_content(), ensure_ascii=False))
+    assert not d.upsert_fortune_generation("2026-08-10", "daily_blog", "", grounding="g")
+    d.close()
+
+
 def test_fortune_qc_failed_not_published(monkeypatch, tmp_path):
     import collect
 
@@ -189,7 +203,7 @@ def test_fixed_content_generated_and_published(monkeypatch, tmp_path):
     assert n == 3  # 일주 1 + 별자리 1 + 띠 1 (순차 상한)
     # 결정적 생성 — LLM 키 없이도 동작
     assert d.get_fortune_generation("01", "day_pillar_blog")["status"] == "published"
-    assert "fortune-day_pillar-01" in published
+    assert "fortune-day-pillar-01" in published
     assert "fortune-zodiac-01" in published
     assert "fortune-animal-01" in published
     # 멱등 — 같은 ref(01)는 재생성 없음 (quota가 남으면 02부터 순차 생성)

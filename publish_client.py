@@ -101,7 +101,8 @@ def fortune_slug(fortune_type, ref):
         return f"fortune-week-{ref}"
     if fortune_type == "monthly":
         return f"fortune-month-{ref}"
-    return f"fortune-{fortune_type}-{ref}"
+    # 고정 콘텐츠 — type은 [a-z0-9-]+ 제약에 맞춰 밑줄 제거 (day_pillar → day-pillar)
+    return f"fortune-{fortune_type.replace('_', '-')}-{ref}"
 
 
 FORTUNE_TAGS = {
