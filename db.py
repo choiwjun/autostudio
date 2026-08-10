@@ -1133,6 +1133,15 @@ WHERE image_url = ''
 ORDER BY id LIMIT ?"""
         return self._qd(sql, (limit,), fetch=True)
 
+    def list_drafts_unpublished(self, limit, platform=""):
+        """별도 블로그 미발행 초안 (published_url 비어 있음) — 발행 클라이언트 대상."""
+        where = "WHERE published_url = '' AND body != ''"
+        if platform:
+            where += " AND platform = ?"
+        sql = (f"SELECT * FROM drafts {where} ORDER BY id LIMIT ?")
+        params = (platform,) if platform else ()
+        return self._qd(sql, params + (limit,), fetch=True)
+
     def keywords_without_drafts(self, limit, upcoming_growth_min=0.02):
         """초안이 없는 활성 키워드를 우선순위 순으로 — 콘텐츠 배치 신규 대상.
         스냅샷 없는 키워드는 priority 산출이 불가하므로 뒤로 밀어낸다.

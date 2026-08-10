@@ -453,14 +453,17 @@ def test_retire_fallback_when_sample_small(tmp_path):
 
 
 def test_fortune_step_skips_without_llm_key(tmp_path, monkeypatch):
-    # v22.2(3.3): LLM 키 없으면 운세 생성 생략 (수집 성과 보존)
+    # v22.2(3.3): LLM 키 없으면 LLM 운세 생성 생략 — 단, 규칙 기반 고정
+    # 콘텐츠(일주/별자리/띠)는 LLM 없이도 생성 (3.1 확장 — 유입 훅 축적)
     monkeypatch.delenv("BAILIAN_TOKEN_PLAN_API_KEY", raising=False)
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
     cfg = make_cfg(tmp_path)
     d = db.Database(cfg["db_url"])
     d.init()
-    assert collect.fortune_generate_step(d, cfg, "2026-08-11") == 0
+    n = collect.fortune_generate_step(d, cfg, "2026-08-11")
+    assert n == 2  # 고정 콘텐츠 2건 (일주·별자리 순환)
     assert d.get_fortune_generation("2026-08-11", "daily_sns") is None
+    assert d.get_fortune_generation("01", "day_pillar_blog") is not None
     logs = [l for l in d.get_logs() if l["keyword"] == "(fortune)"]
     assert any("LLM 키 없음" in l["note"] for l in logs)
     d.close()
@@ -491,10 +494,11 @@ def test_fortune_step_generates_and_idempotent(tmp_path, monkeypatch):
     monkeypatch.setattr(fc, "generate_sns_summary", fake_sns)
     monkeypatch.setattr(fc, "generate_blog_detail", fake_blog)
 
-    assert collect.fortune_generate_step(d, cfg, "2026-08-11") == 2
+    # daily 2건 + 고정 콘텐츠 2건 (quota 기본 2) = 4
+    assert collect.fortune_generate_step(d, cfg, "2026-08-11") == 4
     assert calls["n"] == 2
-    # 멱등 — 재실행 시 스킵 (업서트 반환 False)
-    assert collect.fortune_generate_step(d, cfg, "2026-08-11") == 0
+    # 같은 실행 재호출 — daily는 멱등 스킵, 고정 콘텐츠는 02번 순환 생성
+    assert collect.fortune_generate_step(d, cfg, "2026-08-11") == 2
     assert calls["n"] == 2
     sns = d.get_fortune_generation("2026-08-11", "daily_sns")
     assert sns is not None and "2026-08-11" in sns["content"]

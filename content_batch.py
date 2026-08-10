@@ -15,6 +15,7 @@ from datetime import date
 
 import config as config_mod
 import llm_client
+import publish_client
 from analyzer import analyze_keyword
 from draft_pipeline import generate_two_pass
 from image_gen import (
@@ -146,7 +147,7 @@ def _create_draft(d, cfg, client, keyword_row, today, now, deadline,
     except ImageGenerationError as e:
         logger.warning("batch main image kw=%s: %s", keyword, e)
     if platform == "naver":
-        return created_images  # v19: 네이버 플레인 텍스트는 섹션 이미지 없음
+        return draft_id, created_images  # v19: 네이버 플레인 텍스트는 섹션 이미지 없음
     sections = _section_titles(draft["body"])
     if sections:
         try:
@@ -164,7 +165,7 @@ def _create_draft(d, cfg, client, keyword_row, today, now, deadline,
                 created_images += len(urls)
         except ImageGenerationError as e:
             logger.warning("batch section images kw=%s: %s", keyword, e)
-    return created_images
+    return draft_id, created_images
 
 
 def run_content_batch(d, cfg, today, now, client=None):
@@ -193,11 +194,25 @@ def run_content_batch(d, cfg, today, now, client=None):
                              "시간 예산 초과로 콘텐츠 배치 중단", now)
             break
         try:
-            created_images = _create_draft(
+            draft_id, created_images = _create_draft(
                 d, cfg, client, keyword_row, today, now, deadline,
                 platform=batch_platform)
             result["drafts_created"] += 1
             result["draft_images_created"] += created_images
+            # v22.3(2.x): 발행 활성 시 생성 초안을 별도 블로그에 자동 발행
+            if cfg.get("blog_publish_enabled"):
+                draft = d.get_draft(draft_id)
+                try:
+                    url = publish_client.publish_draft(
+                        cfg, d, draft, keyword_row)
+                    result.setdefault("blog_published", []).append(url)
+                    d.log_collection(keyword_row["keyword"], "publish",
+                                     f"별도 블로그 발행: {url}", now)
+                except publish_client.BlogPublishError as e:
+                    logger.warning("batch publish failed kw=%s: %s",
+                                   keyword_row["keyword"], e)
+                    d.log_collection(keyword_row["keyword"], "error",
+                                     f"블로그 발행 실패: {e}", now)
         except (NaverAPIError, ImageGenerationError) as e:
             logger.warning("batch draft failed kw=%s: %s",
                            keyword_row["keyword"], e)

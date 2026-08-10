@@ -5,13 +5,16 @@
 #   3. generate_blog_detail()   — 프롬프트 B (블로그 상세본, 2,500~3,500자)
 #   4. 검수                     — 금지어·전문용어·기준일·SNS 길이
 # 발행(Phase 2 발행 API)은 별도 — 생성물은 fortune_generations 큐에 저장.
+import datetime
 import json
 
 import config as config_mod
 import llm_client
 from engine.calendar import get_daily_fortune, get_ganji, get_monthly_rhythm
 from engine.day_pillar import day_pillar_profile, to_hangul_pillar
-from engine.fortune_extra import field_fortunes, lucky_elements
+from engine.fortune_extra import (
+    field_fortunes, lucky_elements, zodiac_animal_fortune, zodiac_fortune,
+)
 
 BANNED_WORDS = ("반드시", "무조건", "100%")
 # 블로그 상세본 전용: 일반 독자가 모르는 전문용어 — 포함 시 재생성 지시
@@ -209,3 +212,137 @@ def validate_content(content, ref_date, content_type):
     if content_type == "sns" and not check_sns_length(text):
         checks.append(f"SNS 길이 초과({len(text)}자 > {SNS_MAX_LEN})")
     return (not checks), checks
+
+
+# ---------- 3.1 확장: 주간·월간·일주·별자리·띠 (유입 훅 콘텐츠) ----------
+# 일주·별자리·띠는 규칙 기반 결정적 생성 (LLM 미사용 — "엔진 = 데이터").
+# 주간·월간은 엔진 데이터를 LLM이 서사로 풀어쓰기 (주 1회·월 1회만 — 비용 절감).
+
+FIXED_CONTENT_NAMES = {
+    "day_pillar": ("일주", "갑자", 60),
+    "zodiac": ("별자리", "물병자리", 12),
+    "animal": ("띠", "쥐", 12),
+}
+
+_CTA_FIXED = ("\n\n---\n\n매일 달라지는 오늘의 운세가 궁금하다면 "
+              "블로그의 다른 운세 글도 확인해보세요.")
+
+
+def _day_brief(d):
+    """하루 일진·문구 요약 (주간 그라운딩 재료)."""
+    ganji = get_ganji(d.year, d.month, d.day, 12, 0)
+    day_gan = _gan_hangul(ganji["day"]["ganji"])
+    fortune = get_daily_fortune(day_gan, d.year, d.month, d.day)
+    return {"date": d.isoformat(), "weekday": WEEKDAY_NAMES[d.weekday()],
+            "energy": fortune["energy"], "fortune_text": fortune["text"]}
+
+
+WEEKDAY_NAMES = ("월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일")
+
+
+def build_weekly_grounding(today=None):
+    """이번 주 (월~일) 7일 일진·문구 — 주간 운세 그라운딩."""
+    today = today or config_mod.today_kst()
+    monday = today - datetime.timedelta(days=today.weekday())
+    return {"content_type": "weekly", "reference": monday.isoformat(),
+            "days": [_day_brief(monday + datetime.timedelta(days=i))
+                     for i in range(7)]}
+
+
+def build_monthly_grounding(today=None):
+    """이번 달 월운(monthly-rhythm) — 월간 운세 그라운딩."""
+    today = today or config_mod.today_kst()
+    ganji = get_ganji(today.year, today.month, 1, 12, 0)
+    day_gan = _gan_hangul(ganji["day"]["ganji"])
+    m = get_monthly_rhythm(day_gan, today.year, today.month)
+    return {"content_type": "monthly", "reference": today.strftime("%Y-%m"),
+            "month_rhythm_summary": m["summary"],
+            "month_rhythm_energy": m["energy"],
+            "month_rhythm_recommendation": m["recommendation"]}
+
+
+def build_fixed_grounding(content_type, index):
+    """고정 콘텐츠 그라운딩 — index 1~N (일주 60·별자리 12·띠 12)."""
+    if content_type == "day_pillar":
+        from engine.calendar import BRANCHES, STEMS
+        hanja = STEMS[(index - 1) % 10] + BRANCHES[(index - 1) % 12]
+        hangul = to_hangul_pillar(hanja)
+        keyword, summary = day_pillar_profile(hanja)
+        return {"content_type": "day_pillar", "reference": f"{index:02d}",
+                "key": hangul, "keyword": keyword, "summary": summary}
+    if content_type == "zodiac":
+        from engine.fortune_extra import ZODIAC_PROFILES
+        names = list(ZODIAC_PROFILES)
+        name = names[(index - 1) % len(names)]
+        prof = zodiac_fortune(name, 2026)
+        return {"content_type": "zodiac", "reference": f"{index:02d}",
+                "key": name, "profile": prof["profile"]}
+    from engine.fortune_extra import ZODIAC_ANIMAL_PROFILES
+    names = list(ZODIAC_ANIMAL_PROFILES)
+    name = names[(index - 1) % len(names)]
+    prof = zodiac_animal_fortune(name, 2026)
+    return {"content_type": "animal", "reference": f"{index:02d}",
+            "key": name, "profile": prof["profile"]}
+
+
+def build_fixed_blog_content(g, ref_date):
+    """고정 콘텐츠(일주·별자리·띠) — 규칙 기반 결정적 조립 (LLM 미사용)."""
+    ctype = g["content_type"]
+    title = {
+        "day_pillar": f"{ref_date} {g['key']}일의 운세와 성향",
+        "zodiac": f"{ref_date} {g['key']} 오늘의 운세",
+        "animal": f"{ref_date} {g['key']}띠 오늘의 운세",
+    }[ctype]
+    if ctype == "day_pillar":
+        body = (f"## 오늘의 운세\n\n{g['keyword']} — {g['summary']}\n\n"
+                f"이 날 태어난 분들의 대표 성향과 오늘의 흐름을 정리했습니다. "
+                f"다른 운세 글과 함께 보시면 오늘 하루를 준비하는 데 도움이 됩니다.")
+    else:
+        body = (f"## 오늘의 운세\n\n{g['profile']}\n\n"
+                f"오늘 하루를 긍정적인 마음으로 시작해보세요. "
+                f"행운은 준비된 사람에게 찾아옵니다.")
+    return {"title": title, "summary": "", "body": body + _CTA_FIXED}
+
+
+def build_extended_blog_prompt(g):
+    """주간·월간 — 서사형 블로그 본문 프롬프트."""
+    if g["content_type"] == "weekly":
+        days = "\n".join(
+            f"- {d['weekday']}({d['date']}): {d['energy']} — {d['fortune_text']}"
+            for d in g["days"])
+        return (
+            f"## 엔진 데이터 (변형 금지)\n- 기준 주: {g['reference']} (월~일)\n"
+            f"{days}\n\n"
+            "## 주간 운세 블로그 글 규칙\n"
+            "1. 제목(주간+키워드) → 한줄 요약 → 주간 총평 → 요일별 하이라이트 "
+            "→ 분야별(재물/애정/건강/일) 주간 흐름 → 실천 팁 → 마무리 CTA\n"
+            "2. 총 2,000~3,000자 — 일반인이 읽는 친근한 존댓말\n"
+            "3. 금지: 반드시/무조건/100%, 전문용어(일간/간지/십신/오행 등)\n"
+            f"4. 기준 주 {g['reference']}이 제목·본문에 명확히 드러나야 한다\n"
+            "## 출력 형식 (JSON만)\n"
+            '{"title": "...", "summary": "...", "body": "..."}\n')
+    return (
+        f"## 엔진 데이터 (변형 금지)\n- 기준 월: {g['reference']}\n"
+        f"- 월간 에너지: {g['month_rhythm_energy']}\n"
+        f"- 월간 흐름: {g['month_rhythm_summary']}\n"
+        f"- 추천: {g['month_rhythm_recommendation']}\n\n"
+        "## 월간 운세 블로그 글 규칙\n"
+        "1. 제목(월+키워드) → 한줄 요약 → 월간 총평 → 분야별(재물/애정/건강/일) "
+        "월간 흐름 → 이달의 실천 전략 → 마무리 CTA\n"
+        "2. 총 2,000~3,000자 — 일반인이 읽는 친근한 존댓말\n"
+        "3. 금지: 반드시/무조건/100%, 전문용어(일간/간지/십신/오행 등)\n"
+        f"4. 기준 월 {g['reference']}이 제목·본문에 명확히 드러나야 한다\n"
+        "## 출력 형식 (JSON만)\n"
+        '{"title": "...", "summary": "...", "body": "..."}\n')
+
+
+def generate_extended_blog(g, runner=None):
+    """주간·월간 블로그 상세본 — 프롬프트 B 확장판."""
+    run = runner or _run_llm
+    raw = run(build_extended_blog_prompt(g))
+    data = _parse_json_output(raw)
+    return {
+        "title": str(data.get("title", "")).strip(),
+        "summary": str(data.get("summary", "")).strip(),
+        "body": str(data.get("body", "")).strip(),
+    }

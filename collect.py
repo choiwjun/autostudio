@@ -325,55 +325,160 @@ def retire(d, today, now):
 
 
 def fortune_generate_step(d, cfg, today):
-    """v22.2(3.3): 오늘의 운세 콘텐츠 생성 — SNS 요약본 + 블로그 상세본.
-    - LLM 키 없으면 조용히 생략 (수집 전용 환경 호환 — 콘텐츠 배치와 동일 철학)
-    - 멱등: 같은 기준일 이미 생성 시 스킵
-    - 실패해도 수집 성과는 보존 — 로그만 기록 (운세는 유입 훅이라 부수적)
+    """v22.2(3.3): 운세 콘텐츠 생성 — daily(매일)·weekly(월요일)·monthly(1일)
+    + 고정 콘텐츠(일주 60·별자리 12·띠 12 — 하루 상한만큼 순차).
+    - LLM 키 없으면 생성은 생략하되 발행 실패분 재시도는 수행
+    - 멱등: 같은 (기준일, 타입) 이미 생성 시 스킵
+    - 실패해도 수집 성과는 보존 — 로그만 기록
     반환: 생성 건수 (0 = 스킵/생략/실패)"""
     import llm_client
-    if not llm_client.has_api_key():
-        d.log_collection("(fortune)", "skip", "LLM 키 없음 — 운세 생성 생략", now_kst())
-        return 0
+    has_llm = llm_client.has_api_key()
+    if not has_llm:
+        d.log_collection("(fortune)", "skip", "LLM 키 없음 — LLM 운세 생성 생략", now_kst())
     import json as json_mod
     from datetime import date as date_mod
-    from engine.fortune_content import (
-        build_daily_grounding, generate_blog_detail, generate_sns_summary,
-        validate_content,
-    )
+    import engine.fortune_content as fc
     ref = today
+    created = 0
     try:
-        grounding = build_daily_grounding(date_mod.fromisoformat(ref))
+        grounding = fc.build_daily_grounding(date_mod.fromisoformat(ref))
+        grounding_json = json_mod.dumps(grounding, ensure_ascii=False)
     except Exception as e:
         d.log_collection("(fortune)", "error", f"그라운딩 실패: {e}", now_kst())
-        return 0
-    grounding_json = json_mod.dumps(grounding, ensure_ascii=False)
-    created = 0
-    for ctype, generator, validator in (
-        ("daily_sns", generate_sns_summary,
-         lambda c: validate_content(c, ref, "sns")),
-        ("daily_blog", generate_blog_detail,
-         lambda c: validate_content(c, ref, "blog")),
+        grounding_json = "{}"
+        grounding = None
+    if has_llm and grounding is not None:
+        for ctype, generator, validator in (
+            ("daily_sns", fc.generate_sns_summary,
+             lambda c: fc.validate_content(c, ref, "sns")),
+            ("daily_blog", fc.generate_blog_detail,
+             lambda c: fc.validate_content(c, ref, "blog")),
+        ):
+            if not d.upsert_fortune_generation(ref, ctype, "",
+                                               grounding=grounding_json):
+                continue  # 이미 생성됨 (멱등)
+            try:
+                content = generator(grounding)
+                ok, fails = validator(content)
+                status = "generated"
+                if not ok:
+                    status = "qc_failed"
+                    d.log_collection("(fortune)", "error",
+                                     f"{ctype} 검수 실패: {', '.join(fails)}",
+                                     now_kst())
+                stored = json_mod.dumps(content, ensure_ascii=False)
+            except Exception as e:
+                d.log_collection("(fortune)", "error", f"{ctype} 생성 실패: {e}",
+                                 now_kst())
+                continue
+            d.update_fortune_generation(ref, ctype, stored, status=status)
+            created += 1
+    # 주간(월요일)·월간(1일) — LLM 생성 (주 1회·월 1회 — 비용 절감)
+    today_dt = date_mod.fromisoformat(ref)
+    for ctype, ftype, ref_key, builder in (
+        ("weekly_blog", "weekly",
+         (today_dt - timedelta(days=today_dt.weekday())).isoformat(),
+         fc.build_weekly_grounding),
+        ("monthly_blog", "monthly", today_dt.strftime("%Y-%m"),
+         fc.build_monthly_grounding),
     ):
-        if not d.upsert_fortune_generation(ref, ctype, "",
+        due = (ftype == "weekly" and today_dt.weekday() == 0) or \
+              (ftype == "monthly" and today_dt.day == 1)
+        if not due or not has_llm:
+            continue
+        if not d.upsert_fortune_generation(ref_key, ctype, "",
                                            grounding=grounding_json):
-            continue  # 이미 생성됨 (멱등)
+            continue
         try:
-            content = generator(grounding)
-            ok, fails = validator(content)
-            status = "generated"
+            g = builder(today_dt)
+            content = fc.generate_extended_blog(g)
+            ok, fails = fc.validate_content(content, ref_key, "blog")
+            status = "generated" if ok else "qc_failed"
             if not ok:
-                # 검수 실패도 저장하되 status로 표시 — 수동 검토 대상 (v22.2.1)
-                status = "qc_failed"
                 d.log_collection("(fortune)", "error",
                                  f"{ctype} 검수 실패: {', '.join(fails)}", now_kst())
-            stored = json_mod.dumps(content, ensure_ascii=False)
+            d.update_fortune_generation(
+                ref_key, ctype, json_mod.dumps(content, ensure_ascii=False),
+                status=status)
+            created += 1
         except Exception as e:
             d.log_collection("(fortune)", "error", f"{ctype} 생성 실패: {e}",
                              now_kst())
-            continue
-        d.update_fortune_generation(ref, ctype, stored, status=status)
-        created += 1
+    # 고정 콘텐츠 (일주 60·별자리 12·띠 12) — 규칙 기반 결정적 생성.
+    # LLM 키와 무관하게 동작. 타입 순환 분배 — 한 타입이 병목이 되지 않도록.
+    fixed_quota = cfg.get("fortune_fixed_per_day", 2)
+    fixed_types = (("day_pillar_blog", 60), ("zodiac_blog", 12),
+                   ("animal_blog", 12))
+    while fixed_quota > 0:
+        progressed = False
+        for ctype, count in fixed_types:
+            if fixed_quota <= 0:
+                break
+            for i in range(1, count + 1):
+                ref_key = f"{i:02d}"
+                if d.get_fortune_generation(ref_key, ctype):
+                    continue
+                try:
+                    g = fc.build_fixed_grounding(ctype.replace("_blog", ""), i)
+                    content = fc.build_fixed_blog_content(g, ref)
+                    d.upsert_fortune_generation(
+                        ref_key, ctype,
+                        json_mod.dumps(content, ensure_ascii=False),
+                        grounding=grounding_json)
+                    created += 1
+                    fixed_quota -= 1
+                    progressed = True
+                except Exception as e:
+                    d.log_collection("(fortune)", "error",
+                                     f"{ctype} 생성 실패: {e}", now_kst())
+                break  # 타입당 1개씩 순환
+        if not progressed:
+            break
+    # 발행 — 생성·검수 통과분과 실패 재시도분 전부
+    _publish_all_fortune(d, cfg, today)
     return created
+
+
+def _publish_all_fortune(d, cfg, today):
+    """모든 운세 글 발행 대상 (daily/weekly/monthly/고정) — 발행·재시도.
+    qc_failed는 수동 검토 대상 — 자동 발행 안 함."""
+    if not cfg.get("blog_publish_enabled") or not cfg.get("blog_api_url"):
+        return
+    import json as json_mod
+    import publish_client
+    today_dt = date.fromisoformat(today)
+    monday = (today_dt - timedelta(days=today_dt.weekday())).isoformat()
+    candidates = [("daily_blog", "daily", today)]
+    if today_dt.weekday() == 0:
+        candidates.append(("weekly_blog", "weekly", monday))
+    if today_dt.day == 1:
+        candidates.append(("monthly_blog", "monthly",
+                           today_dt.strftime("%Y-%m")))
+    for ctype, count in (("day_pillar_blog", 60), ("zodiac_blog", 12),
+                         ("animal_blog", 12)):
+        for i in range(1, count + 1):
+            candidates.append((ctype, ctype.replace("_blog", ""), f"{i:02d}"))
+    for ctype, ftype, ref_key in candidates:
+        row = d.get_fortune_generation(ref_key, ctype)
+        if not row or not row["content"]:
+            continue
+        if row["status"] in ("published", "qc_failed"):
+            continue
+        try:
+            content = json_mod.loads(row["content"])
+            if not isinstance(content, dict) or not content.get("title"):
+                continue
+        except json_mod.JSONDecodeError:
+            continue
+        try:
+            publish_client.publish_fortune(cfg, d, ref_key, content, ftype)
+            d.log_collection("(fortune)", "publish",
+                             f"운세 발행: {ftype}/{ref_key}", now_kst())
+        except publish_client.BlogPublishError as e:
+            d.update_fortune_generation(
+                ref_key, ctype, row["content"], status="publish_failed")
+            d.log_collection("(fortune)", "error",
+                             f"운세 발행 실패: {e}", now_kst())
 
 
 def now_kst():

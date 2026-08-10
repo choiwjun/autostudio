@@ -173,6 +173,13 @@ def load_config(load_env=True):
         # v19: 배치 신규 초안 생성 플랫폼 (네이버/티스토리/애드센스/브랜드)
         "content_batch_platform": os.getenv(
             "CONTENT_BATCH_PLATFORM", "naver"),
+        # v22.3(2.x): 별도 블로그(autoblog) 발행 — BLOG_PUBLISH_ENABLED=1일 때
+        # 콘텐츠 배치가 생성한 초안을 발행 API로 전송 (기본 OFF — 품질 리뷰 후 활성)
+        "blog_api_url": os.getenv("BLOG_API_URL", "").rstrip("/"),
+        "blog_token": os.getenv("BLOG_TOKEN", ""),
+        "blog_publish_enabled": os.getenv("BLOG_PUBLISH_ENABLED", "0") == "1",
+        # v22.3(2.x): 고정 운세 콘텐츠(일주 60·별자리 12·띠 12) 일일 생성 상한
+        "fortune_fixed_per_day": int(os.getenv("FORTUNE_FIXED_PER_DAY", "2")),
         # v6: 시드 비어 있을 때 자동 초기화용 집중 시드 + 애드포스트 CPC 등급
         # v8: 무카테고리 키워드 자동 분류 규칙 (시드 상속 실패 시 폴백)
         "default_focus_seeds": DEFAULT_FOCUS_SEEDS,
