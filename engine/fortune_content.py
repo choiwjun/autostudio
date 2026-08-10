@@ -6,7 +6,6 @@
 #   4. 검수                     — 금지어·전문용어·기준일·SNS 길이
 # 발행(Phase 2 발행 API)은 별도 — 생성물은 fortune_generations 큐에 저장.
 import json
-import re
 
 import config as config_mod
 import llm_client

@@ -501,3 +501,25 @@ def test_fortune_step_generates_and_idempotent(tmp_path, monkeypatch):
     blog = d.get_fortune_generation("2026-08-11", "daily_blog")
     assert blog is not None and blog["grounding"]
     d.close()
+
+
+def test_schedule_run_with_budget_skips_fortune(tmp_path, monkeypatch):
+    # v22.2.1: 예산(budget_seconds) 실행(cron-job.org 45초)은 운세 생성 제외 —
+    # LLM 2회 호출이 60초 한도를 넘길 수 있어 content_batch와 동일 가드
+    monkeypatch.setenv("BAILIAN_TOKEN_PLAN_API_KEY", "test-key")
+    cfg = make_cfg(tmp_path)
+    d = db.Database(cfg["db_url"])
+    d.init()
+
+    import engine.fortune_content as fc
+
+    def boom(*a, **kw):
+        raise AssertionError("budget 실행에서 운세 생성 호출 금지")
+
+    monkeypatch.setattr(fc, "generate_sns_summary", boom)
+    result = collect.run_collection(cfg, client=FakeClient(),
+                                    today="2026-08-11", trigger="schedule",
+                                    budget_seconds=45)
+    assert result.get("fortune_created", 0) == 0
+    assert d.get_fortune_generation("2026-08-11", "daily_sns") is None
+    d.close()

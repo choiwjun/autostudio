@@ -335,7 +335,6 @@ def fortune_generate_step(d, cfg, today):
         d.log_collection("(fortune)", "skip", "LLM 키 없음 — 운세 생성 생략", now_kst())
         return 0
     import json as json_mod
-    import sys
     from datetime import date as date_mod
     from engine.fortune_content import (
         build_daily_grounding, generate_blog_detail, generate_sns_summary,
@@ -361,7 +360,10 @@ def fortune_generate_step(d, cfg, today):
         try:
             content = generator(grounding)
             ok, fails = validator(content)
+            status = "generated"
             if not ok:
+                # 검수 실패도 저장하되 status로 표시 — 수동 검토 대상 (v22.2.1)
+                status = "qc_failed"
                 d.log_collection("(fortune)", "error",
                                  f"{ctype} 검수 실패: {', '.join(fails)}", now_kst())
             stored = json_mod.dumps(content, ensure_ascii=False)
@@ -369,7 +371,7 @@ def fortune_generate_step(d, cfg, today):
             d.log_collection("(fortune)", "error", f"{ctype} 생성 실패: {e}",
                              now_kst())
             continue
-        d.update_fortune_generation(ref, ctype, stored)
+        d.update_fortune_generation(ref, ctype, stored, status=status)
         created += 1
     return created
 
@@ -432,7 +434,11 @@ def run_collection(cfg, client=None, today=None, trigger="schedule",
                     d.log_collection("(content)", "error", str(e), now)
                     result["errors"].append(f"content_batch: {e}")
             # v22.2(3.3): 오늘의 운세 콘텐츠 생성 (멱등 — LLM 키 없으면 스킵)
-            result["fortune_created"] = fortune_generate_step(d, cfg, today)
+            # v22.2.1: budget_seconds(예산) 실행은 제외 — cron-job.org(/collect
+            # trigger=schedule, 45초) 경로에서 LLM 2회 호출이 60초 한도를
+            # 넘길 수 있음 (content_batch와 동일 가드)
+            if budget_seconds is None:
+                result["fortune_created"] = fortune_generate_step(d, cfg, today)
         # v3: 상태 구분 — done(전량 성공) / partial(예산 종료·일부 오류·발굴 중단) / failed(전량 실패)
         if result["errors"] and result["snapshotted"] == 0:
             status = "failed"

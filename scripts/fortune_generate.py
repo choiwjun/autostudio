@@ -30,7 +30,8 @@ def main(argv=None):
 
     created = []
     try:
-        # SNS 요약본 (프롬프트 A)
+        # SNS 요약본 (프롬프트 A) — placeholder 후 update (upsert 재호출은
+        # '이미 있음'으로 스킵되는 버그 방지, v22.2.1)
         if d.upsert_fortune_generation(ref, "daily_sns", "",
                                        grounding=grounding_json):
             sns = generate_sns_summary(grounding)
@@ -40,8 +41,7 @@ def main(argv=None):
             content = json.dumps({"text": sns["text"],
                                   "hashtags": sns.get("hashtags", [])},
                                  ensure_ascii=False)
-            d.upsert_fortune_generation(ref, "daily_sns", content,
-                                        grounding=grounding_json)
+            d.update_fortune_generation(ref, "daily_sns", content)
             created.append("daily_sns")
         # 블로그 상세본 (프롬프트 B)
         if d.upsert_fortune_generation(ref, "daily_blog", "",
@@ -51,8 +51,7 @@ def main(argv=None):
             if not ok:
                 print(f"블로그 검수 실패: {fails}", file=sys.stderr)
             content = json.dumps(blog, ensure_ascii=False)
-            d.upsert_fortune_generation(ref, "daily_blog", content,
-                                        grounding=grounding_json)
+            d.update_fortune_generation(ref, "daily_blog", content)
             created.append("daily_blog")
     finally:
         d.close()
