@@ -1,11 +1,13 @@
 # engine/calendar_data.py — v22.2(1.1): 만세력 데이터 조회 (SQLite)
-# scripts/convert_engine_data.py가 생성한 data/engine.db를 읽는다.
+# scripts/convert_engine_data.py가 생성한 engine/data/engine.db를 읽는다.
 # 1.2(간지·절기·음양력 계산)의 데이터 계층 — 결정적 조회만 담당.
+# engine/data/engine.db는 고정 데이터(1899~2101)라 저장소에 커밋 (배치 A안) —
+# GH Actions에서 checkout만으로 사용 가능.
 import os
 import sqlite3
 
 DEFAULT_DB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                          "data", "engine.db")
+                          "engine", "data", "engine.db")
 
 
 class EngineDataError(Exception):

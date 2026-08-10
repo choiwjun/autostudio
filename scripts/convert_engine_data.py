@@ -98,8 +98,9 @@ def main(argv=None):
     argv = argv if argv is not None else sys.argv[1:]
     data_dir = source_path(next(
         (a for a in argv if not a.startswith("--")), None))
-    db_path = "data/engine.db"
-    os.makedirs("data", exist_ok=True)
+    # v22.2(A안): engine/data/에 생성 — 고정 데이터라 저장소 커밋 대상
+    db_path = "engine/data/engine.db"
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
     counts = convert(data_dir, db_path)
     print(f"변환 완료: {db_path} "
           f"(양력→음력 {counts['solar_lunar']:,} · "
