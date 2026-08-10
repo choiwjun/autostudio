@@ -61,7 +61,7 @@ def _product_block_lines(draft, platform):
         return []
     pid = os.getenv("SHOPPING_CONNECT_PID", "")
     items = []
-    for p in products[:3]:
+    for i, p in enumerate(products[:3], 1):
         title = str(p.get("title") or "").strip()
         link = to_deep_link(str(p.get("link") or ""), pid)
         if not title or not link:
@@ -72,7 +72,8 @@ def _product_block_lines(draft, platform):
             price = "가격 확인"
         mall = f" ({p['mall']})" if p.get("mall") else ""
         if platform == "naver":
-            items.append(f"- {title} — {price} ({link}){mall}")
+            # 네이버 플레인 텍스트 — '- ' 마크다운 마커 금지, 숫자 넘버링 사용
+            items.append(f"{i}. {title} — {price} ({link}){mall}")
         else:
             items.append(f"- **{title}** — {price} [(보러 가기)]({link}){mall}")
     if not items:

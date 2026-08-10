@@ -95,3 +95,7 @@ def product_block_markdown(keyword, products, pid=""):
             f"{i}. **{p['title']}** — {price} "
             f"[(보러 가기)]({link}){f' ({p['mall']})' if p['mall'] else ''}")
     return "\n".join(lines) + "\n"
+
+
+# 참고: 실제 렌더링은 publish._product_block_lines가 담당 (플랫폼별 분기).
+# product_block_markdown은 검증·참조용으로 유지한다.
