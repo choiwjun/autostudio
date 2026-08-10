@@ -110,3 +110,24 @@ def test_solar_lunar_roundtrip():
     assert (lunar["lunar_year"], lunar["lunar_month"], lunar["lunar_day"]) \
         == (1992, 9, 29)
     assert lunar_to_solar(1992, 9, 29, lunar["is_leap"]) == "1992-10-24"
+
+
+def test_midnight_boundary_no_crash():
+    # validation-100 midnightBoundaryCases 파생 — 자시(23시)에서 크래시 없이 기둥 산출
+    for y, m, d, h in ((1985, 6, 15, 23), (1985, 6, 16, 0),
+                       (1946, 9, 1, 23), (1965, 3, 15, 8)):
+        for sect in (1, 2):
+            result = get_ganji(y, m, d, h, 0, sect=sect)
+            assert result["day"]["ganji"] and result["hour"]["ganji"]
+    # sect 차이: 23시는 sect=1이면 일주가 다음 날로 shift
+    s1 = get_ganji(1985, 6, 15, 23, 0, sect=1)
+    s2 = get_ganji(1985, 6, 15, 23, 0, sect=2)
+    assert s1["day"]["ganji"] == get_ganji(1985, 6, 16, 0, 0, sect=2)["day"]["ganji"]
+    assert s2["day"]["ganji"] != s1["day"]["ganji"]
+
+
+def test_ipchun_boundary():
+    # 입춘 경계 (2026년 입춘 2/4) — 2/3은 전년도 년주, 2/4는 당해 년주
+    before = get_ganji(2026, 2, 3, 12, 0)
+    after = get_ganji(2026, 2, 4, 12, 0)
+    assert before["year"]["ganji"] != after["year"]["ganji"]
