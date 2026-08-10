@@ -36,6 +36,13 @@
   리프레시(`/drafts/{id}/refresh`)로 재작성 대상이 됩니다. 성과 상위(≥70) 초안 10개
   이상이 쌓이면 제목·본문 길이·H2·표·FAQ 패턴을 생성 프롬프트에 자동 주입하고,
   `/revenue-insights`에서 월별 수익·키워드 기여·카테고리 실측을 확인합니다.
+- **멀티 플랫폼 (v19)** — 글 생성 시 플랫폼을 선택하면 포맷·어조·태그·검수가
+  달라집니다. 네이버(플레인 텍스트 전용 — 마크다운 기호 금지 검수 포함), 티스토리
+  (마크다운 + 구글 SEO + 한줄요약/목차/FAQ), 애드센스(마크다운 + 수익 최적화),
+  브랜드(마크다운 + 신뢰 구축). 초안은 썸네일 아이디어 2개를 함께 생성해 대표
+  이미지 프롬프트에 자동 반영하고, 내보내기는 플랫폼별 문서(네이버 플레인 텍스트,
+  티스토리 마크다운 등)로 분리됩니다. 배치 신규 초안 플랫폼은
+  `CONTENT_BATCH_PLATFORM`으로 지정합니다.
 
 ## 로컬 실행
 
@@ -119,8 +126,9 @@ python -m pytest tests -q                                # 테스트
 | `analyzer.py` / `outline.py` | 블로그 검색 신호 추출 / 상위글 골격 구조화 |
 | `scoring.py` / `db.py` | 점수 공식 / 저장소(SQLite↔Postgres 이중 SQL, 백분위, priority, v18 실측 CPC/RPM·플래너·인사이트 집계) |
 | `draft_pipeline.py` / `draft_generator.py` / `image_gen.py` | 2패스 초안 + 검수 / LLM 호출 / 이미지 |
-| `content_batch.py` | 스케줄 수집의 초안·이미지 배치 생성 (이미지 백필 + 신규 초안) |
-| `adpost.py` / `publish.py` | AdPost 리포트 CSV 파싱·점수 환산 / 게시용 마크다운 내보내기 |
+| `content_batch.py` | 스케줄 수집의 초안·이미지 배치 생성 (이미지 백필 + 신규 초안, v19 플랫폼) |
+| `platforms.py` | v19 플랫폼 규칙 단일 소스 (프롬프트·검수·태그·내보내기 분기) |
+| `adpost.py` / `publish.py` | AdPost 리포트 CSV 파싱·점수 환산 / 플랫폼별 게시 문서 내보내기 |
 | `llm_client.py` | LLM 공통 레이어 (키 해석·펜스 제거·오류 정규화) |
 | `datalab.py` / `shopping_insight.py` / `naver_client.py` | 외부 API (재시도·오류 정규화) |
 | `server.py` / `static/` | FastAPI + 대시보드 SPA |

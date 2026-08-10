@@ -9,7 +9,15 @@ from draft_generator import DraftGenerationError, parse_draft
 
 def test_parse_draft_json():
     d = parse_draft('{"title": "t", "first_paragraph": "p", "body": "b"}')
-    assert d == {"title": "t", "first_paragraph": "p", "body": "b", "tags": []}
+    assert d == {"title": "t", "first_paragraph": "p", "body": "b", "tags": [],
+                 "thumbnail_ideas": []}
+
+
+def test_parse_draft_thumbnail_ideas():
+    # v19: 썸네일 아이디어 — 2개 상한, 빈 값 제거
+    d = parse_draft('{"title": "t", "first_paragraph": "p", "body": "b", '
+                    '"thumbnail_ideas": ["아이디어1", "아이디어2", "아이디어3", ""]}')
+    assert d["thumbnail_ideas"] == ["아이디어1", "아이디어2"]
 
 
 def test_parse_draft_strips_codeblock():

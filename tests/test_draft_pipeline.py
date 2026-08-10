@@ -119,7 +119,7 @@ def test_check_no_fake_experience():
 
 
 def test_validate_draft_all_pass():
-    ok, failed = validate_draft(_good_draft(), "에어프라이어")
+    ok, failed = validate_draft(_good_draft(), "에어프라이어", platform="tistory")
     assert ok
     assert failed == []
 
@@ -218,7 +218,7 @@ def test_generate_two_pass_retries_on_fail():
                     '"first_paragraph": "즉답", "body": "짧음"}')  # 검수 미달
         return _pass2_json()
 
-    draft, failed = generate_two_pass("키워드", {}, runner=fake_runner)
+    draft, failed = generate_two_pass("키워드", {}, runner=fake_runner, platform="tistory")
     assert failed == []  # 재시도로 검수 통과
     assert draft["title"] == "좋은 제목"
 
@@ -363,7 +363,7 @@ def test_generate_two_pass_injects_saved_facts(monkeypatch):
     structure = json_mod.dumps({"questions": [], "facts": ["연 4.5% 금리"],
                                 "comparisons": [], "headings": []},
                                ensure_ascii=False)
-    generate_two_pass("키워드", structure, runner=fake_runner)
+    generate_two_pass("키워드", structure, runner=fake_runner, platform="tistory")
     pass2_prompt = [p for p in prompts if "골격을 확장" in p][0]
     assert "연 4.5% 금리" in pass2_prompt
 
@@ -416,7 +416,8 @@ def test_generate_two_pass_pass1_leaves_pass2_reserve(monkeypatch):
         return _pass2_json()
 
     draft, failed = generate_two_pass("키워드", {}, runner=fake_runner,
-                                      hard_budget_seconds=55)
+                                      hard_budget_seconds=55,
+                                      platform="tistory")
     assert failed == []
     assert seen["pass1_timeout"] == 25       # 55 - PASS2_RESERVE(30)
     assert seen["pass2_timeout"] >= 30       # pass2 최소 몫 보장
@@ -464,7 +465,7 @@ def test_generate_two_pass_density_feedback_in_retry():
             "body": _good_body("에어프라이어"),
         }, ensure_ascii=False)
 
-    draft, failed = generate_two_pass("에어프라이어", {}, runner=fake_runner)
+    draft, failed = generate_two_pass("에어프라이어", {}, runner=fake_runner, platform="tistory")
     assert failed == []
     retry_prompt = [c for c in calls if "골격을 확장" in c][1]
     assert "검수 피드백" in retry_prompt
@@ -509,7 +510,7 @@ def test_generate_two_pass_density_feedback_over_direction():
             "body": _good_body("에어프라이어"),
         }, ensure_ascii=False)
 
-    draft, failed = generate_two_pass("에어프라이어", {}, runner=fake_runner)
+    draft, failed = generate_two_pass("에어프라이어", {}, runner=fake_runner, platform="tistory")
     assert failed == []
     retry_prompt = [c for c in calls if "골격을 확장" in c][1]
     assert "검수 피드백" in retry_prompt
@@ -544,7 +545,8 @@ def test_density_warning_includes_measured_count(monkeypatch):
         }, ensure_ascii=False)
 
     draft, failed = generate_two_pass("에어프라이어", {}, runner=fake_runner,
-                                      retry_budget_seconds=0)
+                                      retry_budget_seconds=0,
+                                      platform="tistory")
     assert len(failed) == 1
     assert failed[0].startswith("keyword_density ('에어프라이어' 4회·밀도")
     assert "허용 0.25%~3%" in failed[0]
@@ -577,7 +579,7 @@ def test_generate_two_pass_title_feedback_in_retry():
             }, ensure_ascii=False)
         return _pass2_json()
 
-    draft, failed = generate_two_pass("키워드", {}, runner=fake_runner)
+    draft, failed = generate_two_pass("키워드", {}, runner=fake_runner, platform="tistory")
     assert failed == []
     retry_prompt = [c for c in calls if "골격을 확장" in c][1]
     assert "검수 피드백" in retry_prompt
@@ -603,7 +605,7 @@ def test_generate_two_pass_fake_experience_feedback_in_retry():
             }, ensure_ascii=False)
         return _pass2_json()
 
-    draft, failed = generate_two_pass("키워드", {}, runner=fake_runner)
+    draft, failed = generate_two_pass("키워드", {}, runner=fake_runner, platform="tistory")
     assert failed == []
     retry_prompt = [c for c in calls if "골격을 확장" in c][1]
     assert "검수 피드백" in retry_prompt
@@ -628,7 +630,8 @@ def test_title_warning_includes_measured_length(monkeypatch):
         }, ensure_ascii=False)
 
     draft, failed = generate_two_pass("키워드", {}, runner=fake_runner,
-                                      retry_budget_seconds=0)
+                                      retry_budget_seconds=0,
+                                      platform="tistory")
     assert failed == ["title (40자 — 기준 30자 이하)"]
 
 
@@ -649,5 +652,6 @@ def test_fake_experience_warning_includes_phrase(monkeypatch):
         }, ensure_ascii=False)
 
     draft, failed = generate_two_pass("키워드", {}, runner=fake_runner,
-                                      retry_budget_seconds=0)
+                                      retry_budget_seconds=0,
+                                      platform="tistory")
     assert failed == ["no_fake_experience ('제가 직접' 포함)"]

@@ -81,6 +81,8 @@ class CollectIn(BaseModel):
 
 class DraftIn(BaseModel):
     keyword_id: int
+    # v19: 멀티 플랫폼 — 네이버/티스토리/애드센스/브랜드 (기본 네이버)
+    platform: str = "naver"
 
 
 class FeedbackIn(BaseModel):
@@ -105,14 +107,16 @@ def _unavailable_search_evidence(reference_date, searched_at):
 
 
 def _with_parsed_tags(draft):
-    """v17.2: DB의 태그 JSON 문자열 → 응답용 리스트 (대시보드가 바로 쓰게)."""
+    """v17.2: DB의 태그 JSON 문자열 → 응답용 리스트 (대시보드가 바로 쓰게).
+    v19: thumbnail_ideas도 동일 파싱."""
     if not draft:
         return draft
-    try:
-        parsed = json.loads(draft.get("tags") or "[]")
-        draft["tags"] = parsed if isinstance(parsed, list) else []
-    except (TypeError, json.JSONDecodeError):
-        draft["tags"] = []
+    for field in ("tags", "thumbnail_ideas"):
+        try:
+            parsed = json.loads(draft.get(field) or "[]")
+            draft[field] = parsed if isinstance(parsed, list) else []
+        except (TypeError, json.JSONDecodeError):
+            draft[field] = []
     return draft
 
 
@@ -229,11 +233,18 @@ def create_app(cfg):
                 state["db"] = None
                 return fn(get_db())
 
-    def _generate_and_store_draft(keyword_id, refresh_of=None):
+    def _generate_and_store_draft(keyword_id, refresh_of=None, platform="naver"):
         """초안 생성 공통 경로 — 골격 분석 → 최신 검색 근거 → 2패스 생성 → 저장.
         v18: 성과 상위 글 패턴(top_performer_pattern)을 가이드로 주입.
+        v19: platform — 플랫폼별 프롬프트·검수 분기, 썸네일 아이디어 저장.
         refresh_of가 있으면 리프레시 초안으로 기록. 반환: 저장된 초안 dict."""
         import draft_pipeline
+        import platforms as platforms_mod
+        if platform not in platforms_mod.PLATFORMS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"지원하지 않는 플랫폼입니다: {platform} (지원: "
+                       + ", ".join(platforms_mod.PLATFORMS) + ")")
         kw = run_db(lambda d: d.get_keyword(keyword_id))
         if not kw:
             raise HTTPException(status_code=404, detail="not found")
@@ -275,6 +286,7 @@ def create_app(cfg):
             # 1사이클이 25초를 항상 초과해 검수 미달 재생성이 실제로는 한 번도
             # 실행되지 않고 경고만 반환되던 문제를 개발 환경에서 제거.
             # v18: 성과 상위 글 패턴 가이드 주입 (표본 부족 시 None → 미주입)
+            # v19: 플랫폼별 프롬프트·검수
             serverless = cfg.get("env") != "development"
             draft, failed_checks = draft_pipeline.generate_two_pass(
                 kw["keyword"], structure,
@@ -282,7 +294,8 @@ def create_app(cfg):
                 current_date=reference_date, search_evidence=search_evidence,
                 hard_budget_seconds=(draft_pipeline.HARD_BUDGET_SECONDS
                                      if serverless else None),
-                pattern_guidance=run_db(lambda d: d.top_performer_pattern()))
+                pattern_guidance=run_db(lambda d: d.top_performer_pattern()),
+                platform=platform)
 
         except draft_pipeline.DraftGenerationError as e:
             # v15: 구조화 로그 — 배포 환경에서 초안 실패 원인을 추적할 수 있게
@@ -294,7 +307,9 @@ def create_app(cfg):
             keyword_id, draft["title"], draft["first_paragraph"],
             draft["body"], created_at=created_at,
             tags=json.dumps(draft.get("tags") or [], ensure_ascii=False),
-            refresh_of=refresh_of))
+            refresh_of=refresh_of, platform=platform,
+            thumbnail_ideas=json.dumps(
+                draft.get("thumbnail_ideas") or [], ensure_ascii=False)))
         result = _with_parsed_tags(run_db(lambda d: d.get_draft(draft_id)))
         all_warnings = quality_warnings + failed_checks
         if all_warnings:
@@ -446,7 +461,9 @@ def create_app(cfg):
     def create_draft(body: DraftIn):
         # v7: 글 초안 생성 — 골격 기반 (v9: Token Plan HTTP API, v10: 2패스+검수)
         # v18: 생성 로직은 _generate_and_store_draft로 추출 (리프레시와 공용)
-        return _generate_and_store_draft(body.keyword_id)
+        # v19: 플랫폼별 생성
+        return _generate_and_store_draft(
+            body.keyword_id, platform=body.platform)
 
     @app.get("/drafts/{draft_id}", dependencies=[Depends(require_token)])
     def get_draft(draft_id: int):
@@ -498,14 +515,22 @@ def create_app(cfg):
     @app.post("/drafts/{draft_id}/image", dependencies=[Depends(require_token)])
     def generate_draft_image(draft_id: int):
         # v7: 블로그 이미지 생성 — 키 미발급 시 503(명확한 안내), 텍스트 초안은 유지
+        # v19: 초안의 썸네일 아이디어를 프롬프트 재료로 사용
         import image_gen
         draft = run_db(lambda d: d.get_draft(draft_id))
         if not draft:
             raise HTTPException(status_code=404, detail="not found")
+        ideas = []
+        if draft.get("thumbnail_ideas"):
+            try:
+                parsed = json.loads(draft["thumbnail_ideas"])
+                ideas = parsed if isinstance(parsed, list) else []
+            except json.JSONDecodeError:
+                ideas = []
         try:
             url = image_gen.generate_image(
                 run_db(lambda d: d.get_keyword(draft["keyword_id"]))["keyword"],
-                draft["title"])
+                draft["title"], thumbnail_ideas=ideas)
         except image_gen.ImageGenerationError as e:
             logger.warning("image generation failed draft_id=%s: %s", draft_id, e)
             raise HTTPException(status_code=503, detail=str(e))
@@ -527,6 +552,12 @@ def create_app(cfg):
         draft = run_db(lambda d: d.get_draft(draft_id))
         if not draft:
             raise HTTPException(status_code=404, detail="not found")
+        # v19: 네이버 플레인 텍스트는 마크다운 H2가 없어 섹션 이미지 대상 불가 —
+        # 대표 이미지 1장으로 갈음 (플랫폼 특성 고지)
+        if (draft.get("platform") or "naver") == "naver":
+            raise HTTPException(
+                status_code=400,
+                detail="네이버 플레인 텍스트 글은 섹션 이미지를 지원하지 않습니다 — 대표 이미지를 생성하세요")
         h2s = re.findall(r"^##\s+(.+)$", draft["body"], flags=re.M)
         # FAQ 섹션 제외 + 길이 제한
         sections = [h for h in h2s if "자주 묻는 질문" not in h][:8]
@@ -597,16 +628,20 @@ def create_app(cfg):
     def export_draft(draft_id: int):
         # v17: 게시용 마크다운 내보내기 — 네이버 블로그는 쓰기 API가 없어
         # 복붙이 최종 단계. 이미지 포함 완성 문서로 마찰을 최소화한다 (고도화 3)
+        # v19: 플랫폼별 문서 — 네이버 플레인 / 티스토리·애드센스·브랜드 마크다운
+        import platforms as platforms_mod
         import publish
         draft = run_db(lambda d: d.get_draft(draft_id))
         if not draft:
             raise HTTPException(status_code=404, detail="not found")
-        markdown = publish.build_export_markdown(draft)
+        platform = draft.get("platform") or platforms_mod.DEFAULT_PLATFORM
+        markdown = publish.build_export_markdown(draft, platform=platform)
+        filename = platforms_mod.PLATFORM_FILENAME.get(platform, "blog")
         return Response(
             content=markdown.encode("utf-8"),
             media_type="text/markdown; charset=utf-8",
             headers={"Content-Disposition":
-                     f'attachment; filename="blog-draft-{draft_id}.md"'})
+                     f'attachment; filename="{filename}-{draft_id}.md"'})
 
     ADPOST_IMPORT_MAX_BYTES = 5 * 1024 * 1024
 
@@ -678,12 +713,15 @@ def create_app(cfg):
     def refresh_draft(draft_id: int):
         # v18: 저성과 글 리프레시 — 같은 키워드로 새 초안을 생성하고 원본에
         # refreshed_at 기록 (재추천 방지). 원본 성과는 남겨 비교 지표로 활용.
+        # v19: 원본의 플랫폼을 그대로 계승.
         old = run_db(lambda d: d.get_draft(draft_id))
         if not old:
             raise HTTPException(status_code=404, detail="not found")
         if old["refreshed_at"]:
             raise HTTPException(status_code=400, detail="이미 리프레시된 초안입니다")
-        result = _generate_and_store_draft(old["keyword_id"], refresh_of=old["id"])
+        result = _generate_and_store_draft(
+            old["keyword_id"], refresh_of=old["id"],
+            platform=old.get("platform") or "naver")
         run_db(lambda d: d.mark_draft_refreshed(
             old["id"], config_mod.now_kst_iso()))
         return result

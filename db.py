@@ -108,7 +108,9 @@ CREATE TABLE IF NOT EXISTS drafts (
     adpost_impressions INTEGER,
     adpost_clicks INTEGER,
     refresh_of INTEGER,
-    refreshed_at TEXT NOT NULL DEFAULT ''
+    refreshed_at TEXT NOT NULL DEFAULT '',
+    platform TEXT NOT NULL DEFAULT 'naver',
+    thumbnail_ideas TEXT NOT NULL DEFAULT ''
 );
 -- v17.3: 게시 URL·제목 매칭(AdPost 임포트)과 키워드별 초안 조회 인덱스
 CREATE INDEX IF NOT EXISTS idx_drafts_keyword ON drafts(keyword_id);
@@ -225,7 +227,9 @@ CREATE TABLE IF NOT EXISTS drafts (
     adpost_impressions INTEGER,
     adpost_clicks INTEGER,
     refresh_of INTEGER,
-    refreshed_at TEXT NOT NULL DEFAULT ''
+    refreshed_at TEXT NOT NULL DEFAULT '',
+    platform TEXT NOT NULL DEFAULT 'naver',
+    thumbnail_ideas TEXT NOT NULL DEFAULT ''
 );
 -- v17.3: 게시 URL·제목 매칭(AdPost 임포트)과 키워드별 초안 조회 인덱스
 CREATE INDEX IF NOT EXISTS idx_drafts_keyword ON drafts(keyword_id);
@@ -433,6 +437,11 @@ LEFT JOIN daily_stats ds
         # v18: 저성과 글 리프레시 — 원본 초안 참조 + 리프레시 완료 시각
         ("drafts", "refresh_of", "INTEGER", "INTEGER"),
         ("drafts", "refreshed_at", "TEXT NOT NULL DEFAULT ''",
+         "TEXT NOT NULL DEFAULT ''"),
+        # v19: 멀티 플랫폼 — 네이버/티스토리/애드센스/브랜드 + 썸네일 아이디어
+        ("drafts", "platform", "TEXT NOT NULL DEFAULT 'naver'",
+         "TEXT NOT NULL DEFAULT 'naver'"),
+        ("drafts", "thumbnail_ideas", "TEXT NOT NULL DEFAULT ''",
          "TEXT NOT NULL DEFAULT ''"),
     )
 
@@ -934,13 +943,15 @@ LIMIT ? OFFSET ?"""
 
     def insert_draft(self, keyword_id, title, first_paragraph, body,
                      image_url="", status="draft", created_at="", tags="",
-                     refresh_of=None):
+                     refresh_of=None, platform="naver", thumbnail_ideas=""):
         # v15: id는 RETURNING/lastrowid로 취득 — 기존 'INSERT 후 ORDER BY id DESC
         # LIMIT 1 재읽기'는 다중 인스턴스에서 그 사이 끼어든 타 실행의 초안 ID를
         # 반환할 수 있는 레이스였음
         # v18: refresh_of — 리프레시 초안의 원본 초안 id
+        # v19: platform — 생성 플랫폼 (네이버/티스토리/애드센스/브랜드), thumbnail_ideas JSON
         values = (keyword_id, title, first_paragraph, body, image_url, status,
-                  created_at, created_at, tags, refresh_of)
+                  created_at, created_at, tags, refresh_of, platform,
+                  thumbnail_ideas)
         if self.dialect == "postgres":
             for attempt in (0, 1):
                 try:
@@ -948,7 +959,8 @@ LIMIT ? OFFSET ?"""
                         cur.execute(
                             "INSERT INTO drafts (keyword_id, title, first_paragraph, "
                             "body, image_url, status, created_at, updated_at, tags, "
-                            "refresh_of) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                            "refresh_of, platform, thumbnail_ideas) "
+                            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                             "RETURNING id",
                             values)
                         draft_id = cur.fetchone()["id"]
@@ -960,8 +972,8 @@ LIMIT ? OFFSET ?"""
                     self._connect()
         cur = self.conn.execute(
             "INSERT INTO drafts (keyword_id, title, first_paragraph, body, image_url, "
-            "status, created_at, updated_at, tags, refresh_of) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "status, created_at, updated_at, tags, refresh_of, platform, "
+            "thumbnail_ideas) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             values)
         self.conn.commit()
         return cur.lastrowid
@@ -1203,7 +1215,7 @@ LIMIT ?"""
         import re as re_mod
         rows = self._qd(
             f"SELECT d.id, d.title, d.body, d.keyword_id, d.image_url, "
-            f"d.section_images, d.created_at, k.keyword, k.active, "
+            f"d.section_images, d.created_at, d.platform, k.keyword, k.active, "
             f"{self.PRIORITY_SQL} AS priority "
             f"FROM drafts d JOIN keywords k ON k.id = d.keyword_id "
             f"LEFT JOIN daily_stats ds ON ds.keyword_id = k.id "
@@ -1228,6 +1240,7 @@ LIMIT ?"""
             plan.append({
                 "draft_id": r["id"], "title": r["title"],
                 "keyword": r["keyword"], "priority": r["priority"],
+                "platform": r["platform"],
                 "has_main_image": bool(r["image_url"]),
                 "section_images_ready": len(have),
                 "section_images_needed": len(h2s),

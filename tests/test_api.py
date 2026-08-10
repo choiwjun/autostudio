@@ -428,11 +428,12 @@ def _priority_of(client, keyword):
 
 # ---------- v15.1: 이미지 다운로드 프록시 ----------
 
-def _create_draft(client, monkeypatch, body_md="## 소제목\n본문"):
+def _create_draft(client, monkeypatch, body_md="## 소제목\n본문", platform="tistory"):
     import draft_pipeline
     monkeypatch.setattr(draft_pipeline, "generate_two_pass", lambda k, s, **kw: (
         {"title": "제목", "first_paragraph": "첫문단", "body": body_md}, []))
-    return client.post("/drafts", json={"keyword_id": 1}).json()["id"]
+    return client.post("/drafts", json={"keyword_id": 1,
+                                        "platform": platform}).json()["id"]
 
 
 class _FakeImageResp:
@@ -586,12 +587,26 @@ def test_export_markdown_contains_images(tmp_path, monkeypatch):
     r = client.get(f"/drafts/{did}/export")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/markdown")
-    assert f"blog-draft-{did}.md" in r.headers["content-disposition"]
+    assert f"blog-tistory-{did}.md" in r.headers["content-disposition"]
     text = r.content.decode("utf-8")
     assert text.startswith("# 제목")
     assert "![대표 이미지](https://cdn.example.com/m.png)" in text
     assert "![섹션 이미지 1](https://cdn.example.com/s.png)" in text
     assert client.get("/drafts/999/export").status_code == 404
+
+
+def test_export_naver_plain_text_endpoint(tmp_path, monkeypatch):
+    # v19: 네이버 플랫폼 초안은 플레인 텍스트로 내보내기 — 마크다운 기호 없음
+    client = TestClient(make_app(tmp_path))
+    did = _create_draft(client, monkeypatch,
+                        body_md="소제목\n\n본문 내용입니다.\n\n자주 묻는 질문\n\nQ. 질문\nA. 답변",
+                        platform="naver")
+    r = client.get(f"/drafts/{did}/export")
+    assert r.status_code == 200
+    assert f"blog-naver-{did}.md" in r.headers["content-disposition"]
+    text = r.content.decode("utf-8")
+    assert text.startswith("[제목]")
+    assert "##" not in text and "**" not in text
 
 
 def test_adpost_import_matches_by_url_and_title(tmp_path, monkeypatch):

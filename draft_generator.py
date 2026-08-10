@@ -52,6 +52,7 @@ def _run_llm(prompt, timeout=90):
 
 
 TAGS_MAX_COUNT = 10  # 네이버 태그 상한 여유 있게 — 프롬프트는 5~8개 요구
+THUMBNAIL_IDEAS_MAX = 2  # v19: 썸네일 아이디어 — 대표 이미지 프롬프트 재료
 
 
 def _normalize_tags(raw_tags):
@@ -64,6 +65,18 @@ def _normalize_tags(raw_tags):
         if tag and tag not in tags:
             tags.append(tag)
     return tags[:TAGS_MAX_COUNT]
+
+
+def _normalize_thumbnail_ideas(raw_ideas):
+    """썸네일 아이디어 정규화 — 문자열 리스트 2개 상한, 빈 값 제거."""
+    if not isinstance(raw_ideas, list):
+        return []
+    ideas = []
+    for raw in raw_ideas:
+        idea = str(raw).strip()
+        if idea and idea not in ideas:
+            ideas.append(idea)
+    return ideas[:THUMBNAIL_IDEAS_MAX]
 
 
 def parse_draft(raw):
@@ -81,11 +94,15 @@ def parse_draft(raw):
         "body": data["body"].strip(),
         # 태그는 선택 필드 — 모델 누락 시 pass2_expand가 키워드로 보장
         "tags": _normalize_tags(data.get("tags")),
+        # v19: 썸네일 아이디어 (선택) — 대표 이미지 프롬프트 재료
+        "thumbnail_ideas": _normalize_thumbnail_ideas(data.get("thumbnail_ideas")),
     }
 
 
-def _append_faq_if_missing(draft, structure):
-    """AEO: body에 FAQ 섹션이 없으면 골격의 질문으로 보정 (모델 누락 대비)."""
+def _append_faq_if_missing(draft, structure, platform="naver"):
+    """AEO: body에 FAQ 섹션이 없으면 골격의 질문으로 보정 (모델 누락 대비).
+    v19: 플랫폼별 FAQ 포맷 — 네이버는 플레인 Q/A, 티스토리는 인용문 Q/A,
+    애드센스/브랜드는 ### H3 질문 (기존 동작)."""
     body = draft["body"]
     if "자주 묻는 질문" in body or "\n## FAQ" in body:
         return draft
@@ -94,11 +111,16 @@ def _append_faq_if_missing(draft, structure):
         questions = structure.get("questions", [])[:3]
     if not questions:
         return draft
-    faq_lines = ["", "## 자주 묻는 질문", ""]
+    faq_lines = ["", "자주 묻는 질문" if platform == "naver"
+                 else "## 자주 묻는 질문 (FAQ)" if platform == "tistory"
+                 else "## 자주 묻는 질문", ""]
     for q in questions:
         short = q[:60] + ("..." if len(q) > 60 else "")
-        faq_lines.append(f"### {short}")
-        faq_lines.append("본문에서 설명한 내용을 바탕으로 간결하게 답변합니다.")
-        faq_lines.append("")
+        if platform == "naver":
+            faq_lines += [f"Q. {short}", "A. 본문에서 설명한 내용을 바탕으로 간결하게 답변합니다.", ""]
+        elif platform == "tistory":
+            faq_lines += [f"> **Q. {short}**", "> A. 본문에서 설명한 내용을 바탕으로 간결하게 답변합니다.", ""]
+        else:
+            faq_lines += [f"### {short}", "본문에서 설명한 내용을 바탕으로 간결하게 답변합니다.", ""]
     draft["body"] = body.rstrip() + "\n" + "\n".join(faq_lines)
     return draft

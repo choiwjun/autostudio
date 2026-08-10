@@ -871,6 +871,9 @@ document.getElementById('detail').addEventListener('click',
 // v7: 콘텐츠 자동화 — 글 생성 플로우 (골격 분석 → 초안 생성 → 이미지 → 복사)
 let draftStepEl = null;
 let draftCurrent = null;  // 현재 초안 {id, keyword, title, first_paragraph, body, image_url}
+// v19: 생성 플랫폼 — 네이버(플레인)/티스토리(구글 SEO)/애드센스(수익)/브랜드(신뢰)
+let draftPlatform = 'naver';
+const PLATFORM_LABELS = { naver: '네이버', tistory: '티스토리', adsense: '애드센스', brand: '브랜드' };
 
 function showDraftPanel(open) {
   document.getElementById('draftModal').style.display = open ? 'flex' : 'none';
@@ -945,6 +948,16 @@ async function renderOutlineStep(kid, kw) {
     ? `<div class="draft-block"><h4>${label}</h4><ul class="tags">${arr.slice(0, 6).map(t => `<li>${esc(t)}</li>`).join('')}</ul></div>`
     : '';
   draftStepEl.innerHTML = draftSteps('draft') + `
+    <div class="draft-block">
+      <h4>생성 플랫폼 (포맷·어조·태그·검수가 달라집니다)</h4>
+      <select id="platformSelect" onchange="draftPlatform=this.value"
+        style="height:34px;padding:0 10px;border:1px solid var(--border);border-radius:10px;background:rgba(15,23,42,.6);font-size:13px;color:var(--text);font-family:inherit">
+        <option value="naver">네이버 블로그 (플레인 텍스트)</option>
+        <option value="tistory">티스토리 (마크다운 + 구글 SEO)</option>
+        <option value="adsense">애드센스 (마크다운 + 수익 최적화)</option>
+        <option value="brand">브랜드 블로그 (마크다운 + 신뢰 구축)</option>
+      </select>
+    </div>
     <p class="dim">상위글 골격 (분석일 ${esc(outline.day || '-')}) — 검색에서 인용되는 구조입니다</p>
     ${tags(struct.questions, '질문형 소제목')}
     ${tags(struct.comparisons, '비교/차이')}
@@ -962,7 +975,7 @@ async function createDraft(kid) {
     const d = await api('/drafts', {
       method: 'POST',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ keyword_id: kid }),
+      body: JSON.stringify({ keyword_id: kid, platform: draftPlatform }),
     });
     draftCurrent = d;
     await renderDraftStep(d);
@@ -990,6 +1003,16 @@ function tagsBlock(d) {
     </div>`;
 }
 
+// v19: 썸네일 아이디어 — 대표 이미지 생성 프롬프트 재료 + 내보내기에 포함
+function thumbnailBlock(d) {
+  const ideas = Array.isArray(d.thumbnail_ideas) ? d.thumbnail_ideas : [];
+  if (!ideas.length) return '';
+  return `<div class="draft-block">
+      <h4>썸네일 아이디어 (대표 이미지 생성에 자동 반영)</h4>
+      <ul class="tags">${ideas.map(i => `<li>${esc(i)}</li>`).join('')}</ul>
+    </div>`;
+}
+
 async function renderDraftStep(d) {
   // v11: 검수 경고 표시 — 8항목 QC 미달 시 재생성 대신 경고 노출
   const warnings = (Array.isArray(d.quality_warnings) && d.quality_warnings.length)
@@ -998,7 +1021,7 @@ async function renderDraftStep(d) {
     : '';
   draftStepEl.innerHTML = draftSteps('image') + warnings + `
     <div class="draft-block">
-      <h4>제목</h4><p class="draft-title">${esc(d.title)}</p>
+      <h4>제목 <span class="dim">(${esc(PLATFORM_LABELS[d.platform] || '네이버')} 포맷)</span></h4><p class="draft-title">${esc(d.title)}</p>
     </div>
     <div class="draft-block">
       <h4>첫문단 (즉답 구조)</h4><p>${esc(d.first_paragraph)}</p>
@@ -1007,6 +1030,7 @@ async function renderDraftStep(d) {
       <h4>본문</h4><div class="draft-body">${esc(d.body).replace(/\n/g, '<br>')}</div>
     </div>
     ${tagsBlock(d)}
+    ${thumbnailBlock(d)}
     <div class="draft-block" id="imgWrap">
       <h4>블로그 이미지</h4>
       <div id="imgArea"></div>
@@ -1026,7 +1050,7 @@ async function renderDraftStep(d) {
     <div class="draft-actions">
       <button class="btn" id="genImgBtn">대표 이미지</button>
       <button class="btn" id="genSecImgBtn">섹션 이미지 (30초씩 이어서 생성)</button>
-      <button class="btn" id="exportBtn">마크다운 내보내기</button>
+      <button class="btn" id="exportBtn">${esc(PLATFORM_LABELS[d.platform] || '네이버')} 내보내기</button>
       <button class="btn btn-primary" id="copyBtn">복사</button>
     </div>`;
   document.getElementById('genImgBtn').onclick = () => generateDraftImage(d.id);
@@ -1034,6 +1058,13 @@ async function renderDraftStep(d) {
   document.getElementById('exportBtn').onclick = () => exportDraft(d.id);
   document.getElementById('copyBtn').onclick = () => copyDraft(d);
   document.getElementById('fbBtn').onclick = () => recordFeedback(d.id);
+  // v19: 네이버 플레인 텍스트는 섹션 이미지 미지원 — 버튼 숨김
+  const secBtn = document.getElementById('genSecImgBtn');
+  if ((d.platform || 'naver') === 'naver') {
+    secBtn.style.display = 'none';
+    const secWrap = document.getElementById('secImgWrap');
+    if (secWrap) secWrap.style.display = 'none';
+  }
   const tagsCopyBtn = document.getElementById('tagsCopyBtn');
   if (tagsCopyBtn) tagsCopyBtn.onclick = () => copyTags(d);
   if (d.image_url) showDraftImage(d.id, d.image_url);
@@ -1280,9 +1311,10 @@ async function loadPlanner() {
         ? `<span class="ok">섹션 ${sec} ✓</span>`
         : `<span class="warn-txt">섹션 ${sec}</span>`;
       const prio = q.priority === null ? '-' : q.priority.toFixed(1);
+      const plat = PLATFORM_LABELS[q.platform] || '네이버';
       return `<div class="planner-item">
         <div class="grow">
-          <div class="title">${esc(q.title)}</div>
+          <div class="title">${esc(q.title)} <span class="badge b-blue">${esc(plat)}</span></div>
           <div class="sub">${esc(q.keyword)} · priority ${esc(prio)} · ${imgOk} ${secOk} · 생성 ${esc((q.created_at || '').slice(0, 10))}</div>
         </div>
         <input class="url-input" id="url-${q.draft_id}" placeholder="게시 후 URL 붙여넣기" aria-label="게시 URL">

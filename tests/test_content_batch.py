@@ -16,6 +16,8 @@ def make_cfg(tmp_path):
         "db_url": f"sqlite:///{tmp_path / 't.db'}",
         "client_id": "cid", "client_secret": "csec",
         "content_batch_max_new": 2, "content_batch_budget_seconds": 600,
+        # v19: 마크다운 본문·섹션 이미지 경로 검증 — 티스토리 플랫폼 사용
+        "content_batch_platform": "tistory",
     }
 
 
@@ -92,7 +94,8 @@ def test_backfills_missing_images_only(tmp_path, monkeypatch):
     monkeypatch.setenv("BAILIAN_TOKEN_PLAN_API_KEY", "test-key")
     d = make_db(tmp_path)
     kid = d.upsert_keyword("키워드", day="2026-08-01")
-    did = d.insert_draft(kid, "기존 초안", "fp", "## 섹션1\n본문", created_at="n")
+    did = d.insert_draft(kid, "기존 초안", "fp", "## 섹션1\n본문",
+                         created_at="n", platform="tistory")
     cfg = make_cfg(tmp_path)
 
     import image_gen

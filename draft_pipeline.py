@@ -11,6 +11,7 @@ import re
 import time
 
 import config as config_mod
+import platforms as platforms_mod
 from draft_generator import (
     TAGS_MAX_COUNT, DraftGenerationError, _append_faq_if_missing, _run_llm,
     parse_draft,
@@ -193,14 +194,18 @@ def _search_evidence_context(search_evidence):
 
 
 def pass1_outline(keyword, structure, runner=None, current_date=None,
-                  search_evidence=None, timeout=90, pattern_guidance=None):
+                  search_evidence=None, timeout=90, pattern_guidance=None,
+                  platform=None):
     """1패스: H2 골격 + 섹션별 핵심 불릿을 생성한다 (구조 검증용).
     v17: timeout 인자 노출 + facts·comparisons 참고 근거 주입 (고도화 2).
-    v18: pattern_guidance — 성과 상위 글 패턴 주입 (표본 충분 시)."""
+    v18: pattern_guidance — 성과 상위 글 패턴 주입 (표본 충분 시).
+    v19: platform — 플랫폼별 골격 규칙 주입 (네이버는 플레인 소제목)."""
+    platform = platform or platforms_mod.DEFAULT_PLATFORM
     qs = _outline_questions(structure)[:5]
     facts, comparisons = _outline_grounding(structure)
     evidence_context = _search_evidence_context(search_evidence)
     pattern = _pattern_section(pattern_guidance)
+    platform_rules = platforms_mod.PASS1_RULES.get(platform, "")
     q_text = "\n".join(f"- {q}" for q in qs) if qs else "- (골격 질문 없음 — 주제에서 추론)"
     grounding_hint = ""
     if facts or comparisons:
@@ -218,6 +223,8 @@ def pass1_outline(keyword, structure, runner=None, current_date=None,
 
 {evidence_context}
 {pattern}
+## 플랫폼 규칙
+{platform_rules}
 상위글 골격 질문:
 {q_text}
 {grounding_hint}
@@ -248,13 +255,15 @@ def pass1_outline(keyword, structure, runner=None, current_date=None,
 
 def pass2_expand(keyword, h2s, intent, facts=None, comparisons=None, runner=None,
                  qc_feedback="", current_date=None, search_evidence=None,
-                 timeout=120, pattern_guidance=None):
+                 timeout=120, pattern_guidance=None, platform=None):
     """2패스: 1패스 H2 골격을 섹션별로 확장해 최종 초안을 만든다.
     v14.1: qc_feedback — 1차 검수 미달 시 실측 수치·교정 지시를 주입해
     재생성이 같은 실패를 반복하지 않도록 함 (기존은 동일 프롬프트 맹재시도).
     v17: facts·comparisons 실제 주입 — 기존 has_facts는 생성 경로가 없는
     verified_facts를 보느라 항상 '수치 금지' 경로였음 (버그 5 + 고도화 2).
-    v18: pattern_guidance — 성과 상위 글 패턴 주입."""
+    v18: pattern_guidance — 성과 상위 글 패턴 주입.
+    v19: platform — 플랫폼별 포맷·어조·태그·썸네일 아이디어 규칙 주입."""
+    platform = platform or platforms_mod.DEFAULT_PLATFORM
     skeleton = "\n".join(
         f"## {h['title']}\n" + "\n".join(f"- {b}" for b in h.get("bullets", []))
         for h in h2s)
@@ -262,6 +271,14 @@ def pass2_expand(keyword, h2s, intent, facts=None, comparisons=None, runner=None
     evidence_context = _search_evidence_context(search_evidence)
     grounding = _grounding_section(facts or [], comparisons or [])
     pattern = _pattern_section(pattern_guidance)
+    platform_rules = platforms_mod.PASS2_RULES.get(platform, "")
+    common_tail = platforms_mod.PASS2_COMMON_TAIL.format(
+        TAGS_PROMPT_MIN=TAGS_PROMPT_MIN, TAGS_PROMPT_MAX=TAGS_PROMPT_MAX)
+    if platforms_mod.table_required(platform):
+        rule_tables = "3. 표(markdown table) 1~2개 이상 포함 (플랫폼 포맷 준수)"
+    else:
+        rule_tables = ("3. 표·마크다운 기호 금지 — '1) 2) 3)' 넘버링 또는 문단 나열로 "
+                       "구조화 (네이버 플레인 텍스트)")
     prompt = f"""키워드 '{keyword}' 블로그 글을 아래 골격을 확장해 {BODY_PROMPT_MIN}~{BODY_PROMPT_MAX}자로 작성해줘.
 
 ## 최신성 기준
@@ -274,17 +291,19 @@ def pass2_expand(keyword, h2s, intent, facts=None, comparisons=None, runner=None
 
 {evidence_context}
 {pattern}
+## 플랫폼 포맷
+{platform_rules}
 ## H2 골격 (각 섹션을 500~900자로 확장)
 {skeleton}
 
 ## 필수 규칙
 1. 첫문단: 키워드 질문에 즉답 ({FIRST_PARA_PROMPT_MIN}~{FIRST_PARA_PROMPT_MAX}자, 서론 금지)
 2. 각 H2 섹션: 골격의 불릿을 자연스럽게 본문으로 확장, 2~3문단
-3. 표(markdown table) 1~2개 이상 포함
+{rule_tables}
 4. 키워드 '{keyword}'를 본문 전체에 자연스럽게 {KEYWORD_USE_MIN}~{KEYWORD_USE_MAX}회 사용 (도배 금지, 문맥 속에 녹일 것)
-5. 말투: 친근한 존댓말. 1인칭 허위 경험('제가 직접...') 금지 — 객관적 조언으로
-6. 마지막에 '## 자주 묻는 질문' 섹션 1개만 (H3 질문 3~5개, 답변 40~120자). 다른 FAQ성 섹션 금지
-7. 태그 {TAGS_PROMPT_MIN}~{TAGS_PROMPT_MAX}개: 주제 키워드 '{keyword}'를 첫 태그로, 이어서 변형·연관어(지역·계절·용도·대상 등). # 기호 없이 낱개만
+5. 말투: 플랫폼 포맷의 어조를 따른다. 1인칭 허위 경험('제가 직접...') 금지 — 객관적 조언으로
+6. 마지막 FAQ 섹션 1개만 (플랫폼 포맷 규칙의 형식 준수, 질문 3~5개, 답변 40~120자). 다른 FAQ성 섹션 금지
+{common_tail}
 {intent_section}
 {grounding}
 {qc_feedback}
@@ -292,14 +311,16 @@ def pass2_expand(keyword, h2s, intent, facts=None, comparisons=None, runner=None
 {{
   "title": "제목 (30자 이내)",
   "first_paragraph": "첫문단",
-  "body": "본문 마크다운 (H2 골격 유지 + 확장)",
-  "tags": ["{keyword}", "연관 태그 1", "연관 태그 2"]
+  "body": "본문 ({'플레인 텍스트' if platform == 'naver' else '마크다운 (H2 골격 유지 + 확장)'})",
+  "tags": ["{keyword}", "연관 태그 1", "연관 태그 2"],
+  "thumbnail_ideas": ["썸네일 콘셉트 1", "썸네일 콘셉트 2"]
 }}
 """
     raw = (runner or _run_llm)(prompt, timeout=timeout)
     draft = parse_draft(raw)
     if isinstance(h2s, list) and h2s:
-        draft = _append_faq_if_missing(draft, {"questions": [h["title"] for h in h2s]})
+        draft = _append_faq_if_missing(draft, {"questions": [h["title"] for h in h2s]},
+                                       platform=platform)
     # v17.2: 키워드 태그 보장 — 모델이 태그를 누락해도 주제 키워드는 네이버
     # 검색 연관성의 첫 태그로 항상 들어가야 함
     tags = draft.get("tags") or []
@@ -395,6 +416,11 @@ def _enrich_failed(failed, draft, keyword):
                          if p in draft.get("body", ""))
         failed = [f"no_fake_experience ({hits} 포함)"
                   if f == "no_fake_experience" else f for f in failed]
+    if "no_markdown" in failed:  # v19: 네이버 플레인 텍스트 위반 기호 표기
+        syms = sorted({s for s, _ in platforms_mod.naver_markdown_violations(
+            draft.get("body", ""))})
+        failed = [f"no_markdown ({', '.join(syms[:4])} 사용 — 네이버 플레인 텍스트)"
+                  if f == "no_markdown" else f for f in failed]
     return failed
 
 
@@ -403,19 +429,45 @@ def check_no_fake_experience(draft):
     return not any(f in body for f in FAKE_EXPERIENCE)
 
 
-def validate_draft(draft, keyword, current_date=None):
-    """9항목 검수 — (통과: True, 실패 항목 리스트)"""
+# v19: 네이버 플레인 텍스트 검수 — 마크다운 기호 위반 감지
+def check_naver_plain_text(draft):
+    body = draft.get("body", "")
+    return not platforms_mod.naver_markdown_violations(body)
+
+
+def check_naver_subtitles(draft, skeleton=None):
+    """네이버 골격 소제목이 플레인 텍스트 한 줄로 존재하는지 — 마크다운
+    H2 기호 없이도 구조가 잡혔는지 확인. 골격 없으면 스킵(통과)."""
+    if not skeleton:
+        return True
+    lines = [ln.strip() for ln in draft.get("body", "").splitlines()]
+    found = sum(1 for h in skeleton
+                if str(h.get("title") or "").strip() in lines)
+    return found >= H2_MIN_COUNT
+
+
+def validate_draft(draft, keyword, current_date=None, platform=None,
+                   skeleton=None):
+    """플랫폼별 검수 — (통과: True, 실패 항목 리스트).
+    v19: 네이버는 H2/표 검수를 플레인 텍스트 규칙(마크다운 금지·소제목 존재)으로
+    대체. 마크다운 블로그(티스토리/애드센스/브랜드)는 기존 구조 검수 유지."""
+    platform = platform or platforms_mod.DEFAULT_PLATFORM
     checks = {
         "title": check_title(draft),
         "first_paragraph": check_first_paragraph(draft),
         "body_length": check_body_length(draft),
-        "h2_count": check_h2_count(draft),
-        "tables": check_tables(draft),
         "faq": check_faq(draft),
         "keyword_density": check_keyword_density(draft, keyword),
         "no_fake_experience": check_no_fake_experience(draft),
         "temporal_relevance": check_temporal_relevance(draft, current_date),
     }
+    if platform == "naver":
+        checks["no_markdown"] = check_naver_plain_text(draft)
+        checks["structure"] = check_naver_subtitles(draft, skeleton)
+    else:
+        checks["h2_count"] = check_h2_count(draft)
+        if platforms_mod.table_required(platform):
+            checks["tables"] = check_tables(draft)
     failed = [k for k, ok in checks.items() if not ok]
     return (not failed), failed
 
@@ -423,7 +475,7 @@ def validate_draft(draft, keyword, current_date=None):
 def generate_two_pass(keyword, structure, runner=None, retry_budget_seconds=None,
                       current_date=None, search_evidence=None,
                       hard_budget_seconds=HARD_BUDGET_SECONDS,
-                      pattern_guidance=None):
+                      pattern_guidance=None, platform=None):
     """[3]+[4] 2패스 생성 + 검수. 미달 시 1회 재생성. 그래도 미달이면 최종 결과 반환.
 
     v11: retry_budget_seconds — 1회차 사이클이 예산을 넘겼으면 재생성을 건너뛰고
@@ -434,7 +486,9 @@ def generate_two_pass(keyword, structure, runner=None, retry_budget_seconds=None
     v17: hard_budget_seconds — 1회차부터 LLM 호출 타임아웃을 잔여 예산에 클램프
     (버그 4). 기존은 retry 예산이 1사이클 '이후'에만 검사돼 pass1+pass2 자체
     타임아웃(90+120초)이 Vercel 60초를 넘어 무비용 손실·무저장 종료가 가능했음.
-    배치(GH Actions)처럼 시간 제약 없는 호출은 hard_budget_seconds=None으로 해제."""
+    배치(GH Actions)처럼 시간 제약 없는 호출은 hard_budget_seconds=None으로 해제.
+    v19: platform — 플랫폼별 프롬프트·검수 분기."""
+    platform = platform or platforms_mod.DEFAULT_PLATFORM
     current_date = current_date or config_mod.today_kst()
     intent = classify(keyword)
     facts, comparisons = _outline_grounding(structure)
@@ -457,18 +511,21 @@ def generate_two_pass(keyword, structure, runner=None, retry_budget_seconds=None
         try:
             h2s = pass1_outline(keyword, structure, runner, current_date,
                                 search_evidence, timeout=timeout1,
-                                pattern_guidance=pattern_guidance)
+                                pattern_guidance=pattern_guidance,
+                                platform=platform)
             timeout2 = call_timeout(120)
             if timeout2 is None:
                 break
             draft = pass2_expand(keyword, h2s, intent, facts, comparisons, runner,
                                  qc_feedback, current_date, search_evidence,
-                                 timeout=timeout2, pattern_guidance=pattern_guidance)
+                                 timeout=timeout2, pattern_guidance=pattern_guidance,
+                                 platform=platform)
         except DraftGenerationError:
             if attempt == 1:
                 continue
             raise
-        ok, failed = validate_draft(draft, keyword, current_date)
+        ok, failed = validate_draft(draft, keyword, current_date,
+                                    platform=platform, skeleton=h2s)
         if ok:
             return draft, failed
         if attempt == 1:

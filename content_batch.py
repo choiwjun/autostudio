@@ -41,14 +41,23 @@ def _backfill_images(d, cfg, now, result, deadline):
             break
         keyword_row = d.get_keyword(draft["keyword_id"])
         keyword = keyword_row["keyword"] if keyword_row else ""
+        platform = draft.get("platform") or "naver"
+        ideas = _thumbnail_ideas(draft)
         created = 0
         if not draft["image_url"]:
             try:
-                url = generate_image(keyword, draft["title"])
+                url = generate_image(keyword, draft["title"],
+                                     thumbnail_ideas=ideas)
                 d.update_draft_image(draft["id"], url, now)
                 created += 1
             except ImageGenerationError as e:
                 logger.warning("backfill main image draft=%s: %s", draft["id"], e)
+        # v19: 네이버 플레인 텍스트는 H2가 없어 섹션 이미지 대상이 아님
+        if platform == "naver":
+            if created:
+                result["draft_images_created"] += created
+                d.log_collection(keyword, "image", f"배치 백필 {created}장", now)
+            continue
         sections = _section_titles(draft["body"])
         existing = []
         if draft.get("section_images"):
@@ -79,7 +88,19 @@ def _backfill_images(d, cfg, now, result, deadline):
             d.log_collection(keyword, "image", f"배치 백필 {created}장", now)
 
 
-def _create_draft(d, cfg, client, keyword_row, today, now, deadline):
+def _thumbnail_ideas(draft):
+    """초안 thumbnail_ideas JSON → 리스트 (이미지 프롬프트 재료)."""
+    if not draft.get("thumbnail_ideas"):
+        return []
+    try:
+        parsed = json.loads(draft["thumbnail_ideas"])
+        return parsed if isinstance(parsed, list) else []
+    except (TypeError, json.JSONDecodeError):
+        return []
+
+
+def _create_draft(d, cfg, client, keyword_row, today, now, deadline,
+                  platform="naver"):
     keyword = keyword_row["keyword"]
     reference_date = date.fromisoformat(today)
     snap = analyze_keyword(client, keyword, reference_date,
@@ -92,21 +113,27 @@ def _create_draft(d, cfg, client, keyword_row, today, now, deadline):
     draft, failed = generate_two_pass(
         keyword, structure, current_date=reference_date,
         search_evidence=evidence, hard_budget_seconds=HARD_DRAFT_BUDGET_SECONDS,
-        pattern_guidance=d.top_performer_pattern())
+        pattern_guidance=d.top_performer_pattern(), platform=platform)
     if failed:
         logger.warning("batch draft qc warnings kw=%s: %s", keyword, failed)
     draft_id = d.insert_draft(
         keyword_row["id"], draft["title"], draft["first_paragraph"],
         draft["body"], created_at=now,
-        tags=json.dumps(draft.get("tags") or [], ensure_ascii=False))
+        tags=json.dumps(draft.get("tags") or [], ensure_ascii=False),
+        platform=platform,
+        thumbnail_ideas=json.dumps(
+            draft.get("thumbnail_ideas") or [], ensure_ascii=False))
     d.log_collection(keyword, "draft", "배치 초안 생성", now)
     created_images = 0
     try:
-        url = generate_image(keyword, draft["title"])
+        url = generate_image(keyword, draft["title"],
+                             thumbnail_ideas=draft.get("thumbnail_ideas"))
         d.update_draft_image(draft_id, url, now)
         created_images += 1
     except ImageGenerationError as e:
         logger.warning("batch main image kw=%s: %s", keyword, e)
+    if platform == "naver":
+        return created_images  # v19: 네이버 플레인 텍스트는 섹션 이미지 없음
     sections = _section_titles(draft["body"])
     if sections:
         try:
@@ -145,6 +172,8 @@ def run_content_batch(d, cfg, today, now, client=None):
     _backfill_images(d, cfg, now, result, deadline)
 
     max_new = cfg.get("content_batch_max_new", 2)
+    # v19: 배치 신규 초안 플랫폼 — 기본 네이버 (CONTENT_BATCH_PLATFORM으로 변경 가능)
+    batch_platform = cfg.get("content_batch_platform") or "naver"
     for keyword_row in d.keywords_without_drafts(max_new):
         if time.monotonic() >= deadline:
             d.log_collection("(content)", "partial",
@@ -152,7 +181,8 @@ def run_content_batch(d, cfg, today, now, client=None):
             break
         try:
             created_images = _create_draft(
-                d, cfg, client, keyword_row, today, now, deadline)
+                d, cfg, client, keyword_row, today, now, deadline,
+                platform=batch_platform)
             result["drafts_created"] += 1
             result["draft_images_created"] += created_images
         except (NaverAPIError, ImageGenerationError) as e:

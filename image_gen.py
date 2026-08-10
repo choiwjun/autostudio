@@ -29,11 +29,14 @@ class ImageGenerationError(Exception):
     pass
 
 
-def generate_image(keyword, title, prompt=None, runner=None, timeout=IMAGE_TIMEOUT):
-    """제목 기반 이미지 프롬프트로 이미지를 생성, 이미지 URL을 반환한다."""
+def generate_image(keyword, title, prompt=None, runner=None, timeout=IMAGE_TIMEOUT,
+                   thumbnail_ideas=None):
+    """제목 기반 이미지 프롬프트로 이미지를 생성, 이미지 URL을 반환한다.
+    v19: thumbnail_ideas — 초안이 생성한 썸네일 콘셉트를 프롬프트 재료로 사용
+    (첫 번째 아이디어 우선, 없으면 기존 키워드+제목 프롬프트)."""
     if not llm_client.has_api_key():
         raise ImageGenerationError("이미지 키가 필요합니다 (BAILIAN_TOKEN_PLAN_API_KEY)")
-    image_prompt = prompt or _build_prompt(keyword, title)
+    image_prompt = prompt or _build_prompt(keyword, title, thumbnail_ideas)
     run = runner or (lambda p: _run_http(p, timeout=timeout))
     return run(image_prompt)
 
@@ -79,11 +82,17 @@ def generate_section_images(keyword, title, sections, runner=None, timeout=IMAGE
     return urls
 
 
-def _build_prompt(keyword, title):
-    return (
+def _build_prompt(keyword, title, thumbnail_ideas=None):
+    base = (
         f"네이버 블로그 대표 이미지. 주제: {keyword}. 제목: {title}. "
         f"현실적인 사진 촬영 스타일. {_SINGLE_SCENE_RULES}"
     )
+    ideas = [str(i).strip() for i in (thumbnail_ideas or []) if str(i).strip()]
+    if ideas:
+        # v19: 초안이 제안한 썸네일 콘셉트를 우선 반영 — 키워드+제목만으로
+        # 프롬프트를 만들어 이미지 품질이 주제에서 벗어나던 약점 보완
+        base += f"\n썸네일 콘셉트(첫 번째 아이디어 우선): {ideas[0]}"
+    return base
 
 
 def _run_http(image_prompt, timeout=IMAGE_TIMEOUT):

@@ -152,6 +152,9 @@ def load_config(load_env=True):
         "content_batch_max_new": int(os.getenv("CONTENT_BATCH_MAX_NEW", "2")),
         "content_batch_budget_seconds": int(
             os.getenv("CONTENT_BATCH_BUDGET_SECONDS", "1200")),
+        # v19: 배치 신규 초안 생성 플랫폼 (네이버/티스토리/애드센스/브랜드)
+        "content_batch_platform": os.getenv(
+            "CONTENT_BATCH_PLATFORM", "naver"),
         # v6: 시드 비어 있을 때 자동 초기화용 집중 시드 + 애드포스트 CPC 등급
         # v8: 무카테고리 키워드 자동 분류 규칙 (시드 상속 실패 시 폴백)
         "default_focus_seeds": DEFAULT_FOCUS_SEEDS,
