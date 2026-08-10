@@ -2,10 +2,13 @@
 # 네이버 블로그는 쓰기 공개 API가 없어 게시는 수동일 수밖에 없다 — 대신
 # '붙여넣기 직전 상태'의 문서를 만들어 복붙 마찰을 최소화한다.
 # v19: 플랫폼별 내보내기 — 네이버(플레인 텍스트) / 티스토리(마크다운+목차+FAQ) /
-#      애드센스(마크다운) / 브랜드(마크다운+간접 CTA). 태그 형식도 플랫폼별 분기.
+#      애드센스(마크다운) / 브랜드(마크다운). 태그 형식도 플랫폼별 분기.
+# v21(B.4): 네이버쇼핑커넥트 상품 블록 렌더링 (플랫폼별 포맷 분기).
 import json
+import os
 
 import platforms as platforms_mod
+from product_recommend import to_deep_link
 
 
 def _json_list(raw):
@@ -49,10 +52,40 @@ def _thumbnail_ideas_block(draft, platform):
     return "\n".join(lines)
 
 
+def _product_block_lines(draft, platform):
+    """v21(B.4): 네이버쇼핑커넥트 상품 블록 — drafts.product_block(JSON) →
+    플랫폼별 라인 (네이버: 링크+가격 텍스트 / 마크다운: 리스트+링크).
+    PID 미설정·추출 실패는 원본 쇼핑 링크 유지 (무해 폴백)."""
+    products = _json_list(draft.get("product_block"))
+    if not products:
+        return []
+    pid = os.getenv("SHOPPING_CONNECT_PID", "")
+    items = []
+    for p in products[:3]:
+        title = str(p.get("title") or "").strip()
+        link = to_deep_link(str(p.get("link") or ""), pid)
+        if not title or not link:
+            continue
+        try:
+            price = f"{int(p.get('price') or 0):,}원"
+        except (TypeError, ValueError):
+            price = "가격 확인"
+        mall = f" ({p['mall']})" if p.get("mall") else ""
+        if platform == "naver":
+            items.append(f"- {title} — {price} ({link}){mall}")
+        else:
+            items.append(f"- **{title}** — {price} [(보러 가기)]({link}){mall}")
+    if not items:
+        return []
+    header = "[관련 상품]" if platform == "naver" else "## 관련 상품"
+    return ["", header, ""] + items
+
+
 def _export_naver(draft):
     lines = ["[제목]", draft["title"], "",
              "[본문]", draft["first_paragraph"], ""]
     lines += (draft.get("body") or "").splitlines()
+    lines += _product_block_lines(draft, "naver")
     tags = platforms_mod.format_tags(_json_list(draft.get("tags")), "naver")
     if tags:
         lines += ["", "[태그]", tags]
@@ -69,6 +102,7 @@ def _export_tistory(draft):
     if headings:
         lines += ["**목차**"] + [f"{i + 1}. {h}" for i, h in enumerate(headings)] + ["", "---", ""]
     lines += _image_lines(draft, "본문", "대표 이미지")
+    lines += _product_block_lines(draft, "tistory")
     tags = platforms_mod.format_tags(_json_list(draft.get("tags")), "tistory")
     if tags:
         lines += ["", "---", "", "**태그:** " + tags]
@@ -83,6 +117,7 @@ def _export_markdown(draft, platform):
     lines += _image_lines(draft, "본문", "대표 이미지")
     if platform == "brand":
         lines += ["", "더 자세한 내용이 궁금하시다면 관련 서비스/제품 페이지를 확인해 보세요.", ""]
+    lines += _product_block_lines(draft, platform)
     tags = platforms_mod.format_tags(_json_list(draft.get("tags")), platform)
     if tags:
         lines += ["", "---", "", "**태그:** " + tags]

@@ -22,6 +22,7 @@ from image_gen import (
 )
 from naver_client import NaverAPIError, NaverClient
 from outline import build_outline_structure
+from product_recommend import PRODUCT_BLOCK_CATEGORIES, search_products
 
 logger = logging.getLogger("content_batch")
 
@@ -99,6 +100,17 @@ def _thumbnail_ideas(draft):
         return []
 
 
+def _product_block_for(client, keyword_row):
+    """v21(B.3): 쇼핑 전환 적합 카테고리(요리/패션/IT 등) 초안에만 상품 블록.
+    검색 실패·카테고리 미해당 시 '' (선택 사양 — 파이프라인 무해)."""
+    if keyword_row.get("category") not in PRODUCT_BLOCK_CATEGORIES:
+        return ""
+    products = search_products(client, keyword_row["keyword"])
+    if not products:
+        return ""
+    return json.dumps(products, ensure_ascii=False)
+
+
 def _create_draft(d, cfg, client, keyword_row, today, now, deadline,
                   platform="naver"):
     keyword = keyword_row["keyword"]
@@ -122,7 +134,8 @@ def _create_draft(d, cfg, client, keyword_row, today, now, deadline,
         tags=json.dumps(draft.get("tags") or [], ensure_ascii=False),
         platform=platform,
         thumbnail_ideas=json.dumps(
-            draft.get("thumbnail_ideas") or [], ensure_ascii=False))
+            draft.get("thumbnail_ideas") or [], ensure_ascii=False),
+        product_block=_product_block_for(client, keyword_row))
     d.log_collection(keyword, "draft", "배치 초안 생성", now)
     created_images = 0
     try:

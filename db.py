@@ -110,7 +110,8 @@ CREATE TABLE IF NOT EXISTS drafts (
     refresh_of INTEGER,
     refreshed_at TEXT NOT NULL DEFAULT '',
     platform TEXT NOT NULL DEFAULT 'naver',
-    thumbnail_ideas TEXT NOT NULL DEFAULT ''
+    thumbnail_ideas TEXT NOT NULL DEFAULT '',
+    product_block TEXT NOT NULL DEFAULT ''
 );
 -- v17.3: 게시 URL·제목 매칭(AdPost 임포트)과 키워드별 초안 조회 인덱스
 CREATE INDEX IF NOT EXISTS idx_drafts_keyword ON drafts(keyword_id);
@@ -231,7 +232,8 @@ CREATE TABLE IF NOT EXISTS drafts (
     refresh_of INTEGER,
     refreshed_at TEXT NOT NULL DEFAULT '',
     platform TEXT NOT NULL DEFAULT 'naver',
-    thumbnail_ideas TEXT NOT NULL DEFAULT ''
+    thumbnail_ideas TEXT NOT NULL DEFAULT '',
+    product_block TEXT NOT NULL DEFAULT ''
 );
 -- v17.3: 게시 URL·제목 매칭(AdPost 임포트)과 키워드별 초안 조회 인덱스
 CREATE INDEX IF NOT EXISTS idx_drafts_keyword ON drafts(keyword_id);
@@ -447,6 +449,9 @@ LEFT JOIN daily_stats ds
         ("drafts", "platform", "TEXT NOT NULL DEFAULT 'naver'",
          "TEXT NOT NULL DEFAULT 'naver'"),
         ("drafts", "thumbnail_ideas", "TEXT NOT NULL DEFAULT ''",
+         "TEXT NOT NULL DEFAULT ''"),
+        # v21(B.3): 네이버쇼핑커넥트 상품 블록 — JSON 배열 문자열 (B.4가 렌더링)
+        ("drafts", "product_block", "TEXT NOT NULL DEFAULT ''",
          "TEXT NOT NULL DEFAULT ''"),
     )
 
@@ -975,15 +980,17 @@ LIMIT ? OFFSET ?"""
 
     def insert_draft(self, keyword_id, title, first_paragraph, body,
                      image_url="", status="draft", created_at="", tags="",
-                     refresh_of=None, platform="naver", thumbnail_ideas=""):
+                     refresh_of=None, platform="naver", thumbnail_ideas="",
+                     product_block=""):
         # v15: id는 RETURNING/lastrowid로 취득 — 기존 'INSERT 후 ORDER BY id DESC
         # LIMIT 1 재읽기'는 다중 인스턴스에서 그 사이 끼어든 타 실행의 초안 ID를
         # 반환할 수 있는 레이스였음
         # v18: refresh_of — 리프레시 초안의 원본 초안 id
         # v19: platform — 생성 플랫폼 (네이버/티스토리/애드센스/브랜드), thumbnail_ideas JSON
+        # v21(B.3): product_block — 쇼핑커넥트 상품 JSON (B.4가 렌더링)
         values = (keyword_id, title, first_paragraph, body, image_url, status,
                   created_at, created_at, tags, refresh_of, platform,
-                  thumbnail_ideas)
+                  thumbnail_ideas, product_block)
         if self.dialect == "postgres":
             for attempt in (0, 1):
                 try:
@@ -991,8 +998,8 @@ LIMIT ? OFFSET ?"""
                         cur.execute(
                             "INSERT INTO drafts (keyword_id, title, first_paragraph, "
                             "body, image_url, status, created_at, updated_at, tags, "
-                            "refresh_of, platform, thumbnail_ideas) "
-                            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                            "refresh_of, platform, thumbnail_ideas, product_block) "
+                            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                             "RETURNING id",
                             values)
                         draft_id = cur.fetchone()["id"]
@@ -1005,7 +1012,8 @@ LIMIT ? OFFSET ?"""
         cur = self.conn.execute(
             "INSERT INTO drafts (keyword_id, title, first_paragraph, body, image_url, "
             "status, created_at, updated_at, tags, refresh_of, platform, "
-            "thumbnail_ideas) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "thumbnail_ideas, product_block) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             values)
         self.conn.commit()
         return cur.lastrowid
@@ -1112,7 +1120,7 @@ ORDER BY id LIMIT ?"""
         _, d_pct = self.percentiles("demand_idx")
         demand_p50 = d_pct.get(0.5, 0.001)
         sql = f"""
-SELECT k.id, k.keyword, {self.PRIORITY_SQL} AS priority
+SELECT k.id, k.keyword, k.category, {self.PRIORITY_SQL} AS priority
 {self._KEYWORD_BASE}
 WHERE k.active = 1
   AND NOT EXISTS (SELECT 1 FROM drafts dr WHERE dr.keyword_id = k.id)

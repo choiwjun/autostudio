@@ -158,6 +158,10 @@ def load_config(load_env=True):
         "datalab_enabled": os.getenv("DATALAB_ENABLED", "1") == "1",
         "datalab_anchor": os.getenv("DATALAB_ANCHOR", "냉장고"),
         "shopping_insight_category": os.getenv("SHOPPING_INSIGHT_CATEGORY", "50000000"),
+        # v21(B.2): 네이버쇼핑커넥트 파트너스 ID — 딥링크 변환용
+        # (brandconnect.naver.com/affiliates/{PID}?channelProductNo={상품번호})
+        # 미설정 시 상품 블록은 원본 쇼핑 링크 유지 (딥링크 없이도 동작)
+        "shopping_connect_pid": os.getenv("SHOPPING_CONNECT_PID", ""),
         "env": env,  # v15: 소문자 정규화값
         "run_lock_stale_minutes": int(os.getenv("RUN_LOCK_STALE_MINUTES", "60")),
         # v17: 콘텐츠 배치 — 스케줄 수집(GH Actions)에서 초안·이미지 생성.

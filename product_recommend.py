@@ -10,6 +10,27 @@ logger = logging.getLogger("product_recommend")
 
 # 네이버 쇼핑 검색 API의 title은 <b> 강조 마크업 포함 — 제거 (v21.1 버그 수정)
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+# 상품 링크에서 상품번호 추출 — shop.json link의 productId/channelProductNo
+_PRODUCT_NO_RE = re.compile(r"(?:productId|channelProductNo|pid)=(\d+)")
+
+
+def _extract_product_no(link):
+    """네이버 쇼핑 링크 → 상품번호. 추출 실패 시 '' (딥링크 변환 불가)."""
+    m = _PRODUCT_NO_RE.search(link or "")
+    return m.group(1) if m else ""
+
+
+def to_deep_link(link, pid):
+    """네이버쇼핑커넥트 딥링크 변환 (v21 B.2).
+    brandconnect.naver.com/affiliates/{PID}?channelProductNo={상품번호}
+    상품번호 추출 실패 또는 PID 미설정 시 원본 링크 유지 (무해 폴백)."""
+    if not pid:
+        return link
+    product_no = _extract_product_no(link)
+    if not product_no:
+        return link
+    return (f"https://brandconnect.naver.com/affiliates/{pid}"
+            f"?channelProductNo={product_no}")
 
 # 카테고리 → 쇼핑 검색 최적 키워드 가중치 (B.3에서 초안 삽입 시 우선 대상)
 PRODUCT_BLOCK_CATEGORIES = ("요리", "패션", "뷰티", "IT", "디지털", "인테리어", "반려동물")
@@ -61,18 +82,15 @@ def search_products(client, keyword, max_items=PRODUCT_MAX):
 
 def product_block_markdown(keyword, products, pid=""):
     """상품 리스트 → 블로그 하단 '관련 상품' 블록 마크다운.
-    v21(B.1): 링크는 네이버쇼핑커넥트 딥링크 형식으로 변환될 자리 —
-    pid 미설정 시 원본 쇼핑 링크 + 설정 안내 주석 (B.2에서 활성화).
-    네이버 플레인 텍스트용은 publish.py가 이 데이터를 재렌더링한다."""
+    v21(B.2): pid 설정 시 네이버쇼핑커넥트 딥링크로 변환 (상품번호 추출 실패·
+    PID 미설정은 원본 링크 유지). 네이버 플레인 텍스트용은 publish.py가
+    이 데이터를 재렌더링한다."""
     if not products:
         return ""
     lines = ["", "## 관련 상품", ""]
     for i, p in enumerate(products[:PRODUCT_MAX], 1):
         price = f"{p['price']:,}원" if p["price"] else "가격 확인"
-        link = p["link"]
-        if pid:
-            # B.2: 네이버쇼핑커넥트 딥링크 형식으로 치환 (PID 확정 후 구현)
-            link = f"{link}&src=shoppingconnect&pid={pid}"
+        link = to_deep_link(p["link"], pid)
         lines.append(
             f"{i}. **{p['title']}** — {price} "
             f"[(보러 가기)]({link}){f' ({p['mall']})' if p['mall'] else ''}")

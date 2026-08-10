@@ -1019,6 +1019,17 @@ function thumbnailBlock(d) {
     </div>`;
 }
 
+// v21(B.5): 네이버쇼핑커넥트 상품 블록 미리보기 (내보내기에 포함됨)
+function productBlock(d) {
+  const products = Array.isArray(d.product_block) ? d.product_block : [];
+  if (!products.length) return '';
+  return `<div class="draft-block">
+      <h4>관련 상품 (네이버쇼핑커넥트 — 내보내기에 자동 포함)</h4>
+      <ul class="tags">${products.map(p =>
+        `<li title="${esc(p.link)}">${esc(p.title)} — ${Number(p.price || 0).toLocaleString()}원</li>`).join('')}</ul>
+    </div>`;
+}
+
 async function renderDraftStep(d) {
   // v11: 검수 경고 표시 — 8항목 QC 미달 시 재생성 대신 경고 노출
   const warnings = (Array.isArray(d.quality_warnings) && d.quality_warnings.length)
@@ -1037,6 +1048,7 @@ async function renderDraftStep(d) {
     </div>
     ${tagsBlock(d)}
     ${thumbnailBlock(d)}
+    ${productBlock(d)}
     <div class="draft-block" id="imgWrap">
       <h4>블로그 이미지</h4>
       <div id="imgArea"></div>
