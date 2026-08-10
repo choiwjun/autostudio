@@ -12,6 +12,30 @@ def make_db(tmp_path):
     return d
 
 
+def test_keywords_without_drafts_prioritizes_upcoming(tmp_path):
+    # v21(A.4): '곧 뜰'(upcoming) 키워드가 초안 생성 우선 대상 —
+    # 상승 반전(growth≥2%) & 수요 P50 미만 & 기회 P50 이상
+    d = make_db(tmp_path)
+    for i in range(24):  # 백분위 유효 표본
+        kid = d.upsert_keyword(f"키워드{i:02d}", day="2026-08-01")
+        d.insert_daily_stats(kid, "2026-08-02", {
+            "ai_cite_idx": i / 100.0,
+            "demand_idx": round(i * 0.0004, 4),   # P50 = 0.0048
+            "opportunity": float(23 - i),           # P50 = 11.5 → i<12는 12+
+            "demand_growth": 0.02,                  # 전부 상승 반전
+        })
+    rows = d.keywords_without_drafts(24)
+    upcoming = [r["keyword"] for r in rows if r["keyword"] < "키워드12"]
+    others = [r["keyword"] for r in rows if r["keyword"] >= "키워드12"]
+    # upcoming 그룹 내에서는 priority DESC (ai·demand가 높은 i 큰 쪽 우선)
+    assert upcoming[:3] == ["키워드11", "키워드10", "키워드09"]
+    assert len(upcoming) == 12 and len(others) == 12
+    # upcoming이 others보다 항상 앞
+    assert rows[0]["keyword"] < "키워드12"
+    assert rows[-1]["keyword"] >= "키워드12"
+    d.close()
+
+
 def test_init_creates_tables(tmp_path):
     d = make_db(tmp_path)
     rows = d.conn.execute(

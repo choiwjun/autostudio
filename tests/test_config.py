@@ -79,3 +79,17 @@ def test_kst_helpers():
     assert now.endswith("+09:00")
     earlier = config.minutes_ago_kst_iso(30)
     assert earlier < now
+
+
+def test_focus_seeds_high_cpc_majority():
+    # v21(A.2): 시드 리밸런싱 — 고CPC(≥0.8) 시드가 과반, 요리 계열은 축소 유지
+    high = [s for s in config.DEFAULT_FOCUS_SEEDS
+            if config.DEFAULT_CPC_TIERS.get(s[1], 0.5) >= 0.8]
+    cooking = [s for s in config.DEFAULT_FOCUS_SEEDS if s[1] == "요리"]
+    assert len(high) / len(config.DEFAULT_FOCUS_SEEDS) >= 0.6
+    assert len(cooking) <= 3  # 기존 5개 → 3개로 축소
+
+
+def test_category_cap_ratio_default():
+    # v21(A.3): 발굴 카테고리 비중 상한 기본 30%
+    assert config.load_config()["category_cap_ratio"] == 0.3

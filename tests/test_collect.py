@@ -25,7 +25,59 @@ def make_cfg(tmp_path):
         "default_focus_seeds": [], "cpc_tiers": {},  # v6: 시드 자동 초기화 비활성(기존 테스트 보존)
         "keyword_category_rules": [("에어프라이어", "요리"), ("보험", "보험")],  # v8
         "content_batch_enabled": False,  # v17: 단위 테스트는 콘텐츠 배치 생략
+        "category_cap_ratio": 0.3,  # v21(A.3)
     }
+
+
+def test_discover_blocks_overweight_category(tmp_path, monkeypatch):
+    # v21(A.3): 카테고리 비중 상한(30%) 초과 시 해당 카테고리 시드는 BFS 제외 —
+    # 요리 40% 상태에서 요리 신규 발굴 0, 고CPC(보험)는 정상 발굴
+    cfg = make_cfg(tmp_path)
+    d = db.Database(cfg["db_url"])
+    d.init()
+    d.add_seed("에어프라이어 레시피", "요리")
+    d.add_seed("보험 비교", "보험")
+    for i in range(2):  # 요리 2/5 = 40% > 30%
+        d.upsert_keyword(f"기존요리{i}", category="요리", day="2026-07-01")
+    d.upsert_keyword("기존보험", category="보험", day="2026-07-01")
+    d.upsert_keyword("기존기타", category="기타", day="2026-07-01")
+
+    captured = {}
+
+    def fake_expand(seeds, **kw):
+        captured["seeds"] = list(seeds)
+        return (["새 보험 키워드"], {"새 보험 키워드": "보험 비교"}, "ok")
+
+    monkeypatch.setattr(collect, "expand_keywords", fake_expand)
+    result = {"found_raw": 0, "rejected": 0, "new_keywords": 0, "crawl_stopped": None}
+    collect.discover(d, cfg, "2026-08-01", "now", "schedule", result)
+    assert captured["seeds"] == ["보험 비교"]  # 요리 시드 제외
+    assert result["new_keywords"] == 1
+    logs = [l for l in d.get_logs() if l["action"] == "skip"]
+    assert any("카테고리 비중" in l["note"] for l in logs)
+    d.close()
+
+
+def test_discover_all_categories_blocked_stops(tmp_path, monkeypatch):
+    # v21(A.3): 전 카테고리 비중 상한이면 발굴 자체 중단 (크래시 없이)
+    cfg = make_cfg(tmp_path)
+    d = db.Database(cfg["db_url"])
+    d.init()
+    d.add_seed("요리 시드", "요리")
+    for i in range(4):  # 요리 4/4 = 100% > 30%
+        d.upsert_keyword(f"요리{i}", category="요리", day="2026-07-01")
+    called = {"n": 0}
+
+    def fake_expand(seeds, **kw):
+        called["n"] += 1
+        return ([], {}, "ok")
+
+    monkeypatch.setattr(collect, "expand_keywords", fake_expand)
+    result = {"found_raw": 0, "rejected": 0, "new_keywords": 0, "crawl_stopped": None}
+    collect.discover(d, cfg, "2026-08-01", "now", "schedule", result)
+    assert called["n"] == 0  # BFS 미호출
+    assert result["new_keywords"] == 0
+    d.close()
 
 
 def test_empty_seeds_auto_init_focus_seeds(tmp_path):

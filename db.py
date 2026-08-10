@@ -543,6 +543,14 @@ ORDER BY last_day, k.id"""
         rows = self._qd("SELECT COUNT(*) AS c FROM keywords WHERE active = 1", (), fetch=True)
         return rows[0]["c"]
 
+    def count_active_by_category(self):
+        """v21(A.3): 활성 키워드 카테고리 분포 — 발굴 비중 가드의 입력."""
+        rows = self._qd(
+            "SELECT category, COUNT(*) AS c FROM keywords "
+            "WHERE active = 1 AND category != '' GROUP BY category",
+            (), fetch=True)
+        return {r["category"]: r["c"] for r in rows}
+
     def all_keyword_names(self):
         rows = self._qd("SELECT keyword FROM keywords", (), fetch=True)
         return {r["keyword"] for r in rows}
@@ -1093,24 +1101,40 @@ WHERE image_url = ''
 ORDER BY id LIMIT ?"""
         return self._qd(sql, (limit,), fetch=True)
 
-    def keywords_without_drafts(self, limit):
+    def keywords_without_drafts(self, limit, upcoming_growth_min=0.02):
         """초안이 없는 활성 키워드를 우선순위 순으로 — 콘텐츠 배치 신규 대상.
-        스냅샷 없는 키워드는 priority 산출이 불가하므로 뒤로 밀어낸다."""
+        스냅샷 없는 키워드는 priority 산출이 불가하므로 뒤로 밀어낸다.
+        v21(A.4): '곧 뜰'(upcoming) 키워드를 최우선 — 상승 반전(growth≥2%) &
+        수요 P50 미만(선점) & 기회 P50 이상(경쟁 미포화). 경쟁이 붙기 전
+        초안을 먼저 만들어 선점한다. (프리셋 임계는 백분위 자가보정과 정합)"""
+        _, opp_pct = self.percentiles("opportunity")
+        opp_p50 = opp_pct.get(0.5, 20.0)
+        _, d_pct = self.percentiles("demand_idx")
+        demand_p50 = d_pct.get(0.5, 0.001)
         sql = f"""
 SELECT k.id, k.keyword, {self.PRIORITY_SQL} AS priority
 {self._KEYWORD_BASE}
 WHERE k.active = 1
   AND NOT EXISTS (SELECT 1 FROM drafts dr WHERE dr.keyword_id = k.id)
-ORDER BY CASE WHEN ds.day IS NULL THEN 1 ELSE 0 END, priority DESC, k.id
+ORDER BY CASE WHEN ds.demand_growth IS NOT NULL AND ds.demand_growth >= ?
+              AND ds.demand_idx IS NOT NULL AND ds.demand_idx < ?
+              AND ds.opportunity IS NOT NULL AND ds.opportunity >= ?
+         THEN 0 ELSE 1 END,
+         CASE WHEN ds.day IS NULL THEN 1 ELSE 0 END, priority DESC, k.id
 LIMIT ?"""
-        return self._qd(sql, (limit,), fetch=True)
+        return self._qd(
+            sql, (upcoming_growth_min, demand_p50, opp_p50, limit), fetch=True)
 
     # ---------- v17: 게시·AdPost 피드백 ----------
 
     def set_draft_published_url(self, draft_id, url, updated_at=""):
+        # v21.1: URL 등록 = 게시 확정 — status·published_at 갱신으로 게시 로그에
+        # 즉시 노출 (기존 draft 유지 시 발행 이력에서 누락)
         self._qd(
-            "UPDATE drafts SET published_url = ?, updated_at = ? WHERE id = ?",
-            (url, updated_at, draft_id),
+            "UPDATE drafts SET published_url = ?, status = 'published', "
+            "published_at = CASE WHEN published_at = '' THEN ? "
+            "ELSE published_at END, updated_at = ? WHERE id = ?",
+            (url, updated_at, updated_at, draft_id),
         )
 
     def mark_draft_refreshed(self, draft_id, refreshed_at):
@@ -1261,6 +1285,16 @@ LIMIT ?"""
                     have = parsed if isinstance(parsed, list) else []
                 except (TypeError, json_mod.JSONDecodeError):
                     have = []
+            # v21(A.1): 게시 리마인더 — 생성 후 경과일 (3일+ 강조 대상)
+            age_days = 0
+            if r["created_at"]:
+                try:
+                    from datetime import date as date_mod
+                    import config as config_mod
+                    created = date_mod.fromisoformat(r["created_at"][:10])
+                    age_days = (config_mod.today_kst() - created).days
+                except ValueError:
+                    age_days = 0
             plan.append({
                 "draft_id": r["id"], "title": r["title"],
                 "keyword": r["keyword"], "priority": r["priority"],
@@ -1269,8 +1303,19 @@ LIMIT ?"""
                 "section_images_ready": len(have),
                 "section_images_needed": len(h2s),
                 "created_at": r["created_at"],
+                "age_days": max(0, age_days),
             })
         return plan
+
+    def recent_published(self, limit=5):
+        """v21(A.1): 게시 로그 — 최근 발행 초안 (발행일·플랫폼·URL·성과)."""
+        return self._qd(
+            "SELECT d.id AS draft_id, d.title, d.platform, d.published_at, "
+            "d.published_url, d.performance_score, k.keyword FROM drafts d "
+            "JOIN keywords k ON k.id = d.keyword_id "
+            "WHERE d.status = 'published' AND d.published_at != '' "
+            "ORDER BY d.published_at DESC, d.id DESC LIMIT ?",
+            (limit,), fetch=True)
 
     def refresh_candidates(self, limit=5, min_age_days=14, score_lt=50):
         """리프레시 추천 — 게시 후 일정 기간 지나고 성과 저조(score < 50)인
