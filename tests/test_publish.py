@@ -97,3 +97,29 @@ def test_export_defaults_to_naver_when_platform_missing():
     draft.pop("platform")
     md = build_export_markdown(draft)
     assert md.startswith("[제목]")
+
+
+def test_export_product_block_per_platform(monkeypatch):
+    # v21(B.4): 상품 블록 렌더링 — 네이버=링크 텍스트, 마크다운=링크 리스트
+    products = json.dumps([{
+        "title": "에어프라이어 5L",
+        "link": "https://shopping.naver.com/gold/gold.naver?productId=9581015846",
+        "image": "", "price": 15000, "mall": "가전스토어"}], ensure_ascii=False)
+    monkeypatch.setenv("SHOPPING_CONNECT_PID", "983190190858208")
+    naver = build_export_markdown(_draft(platform="naver", product_block=products))
+    assert "[관련 상품]" in naver
+    assert "brandconnect.naver.com/affiliates/983190190858208" in naver
+    assert "에어프라이어 5L — 15,000원" in naver
+    # v22.1: 네이버 플레인 텍스트는 마크다운 마커('- ') 금지 — 숫자 넘버링
+    assert "1. 에어프라이어 5L" in naver
+    assert "\n- " not in naver
+    tistory = build_export_markdown(_draft(platform="tistory", product_block=products))
+    assert "## 관련 상품" in tistory
+    assert "[(보러 가기)]" in tistory
+    # 상품 블록 없으면 섹션 미생성
+    assert "관련 상품" not in build_export_markdown(_draft())
+
+
+def test_export_product_block_bad_json_omitted():
+    md = build_export_markdown(_draft(platform="tistory", product_block="not json"))
+    assert "관련 상품" not in md

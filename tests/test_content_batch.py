@@ -90,6 +90,96 @@ def test_creates_draft_and_images_for_top_keyword(tmp_path, monkeypatch):
     d.close()
 
 
+def test_batch_attaches_product_block_for_shop_category(tmp_path, monkeypatch):
+    # v21(B.3): 쇼핑 전환 적합 카테고리(요리) 초안에 상품 블록 자동 첨부
+    monkeypatch.setenv("BAILIAN_TOKEN_PLAN_API_KEY", "test-key")
+    d = make_db(tmp_path)
+    kid = d.upsert_keyword("에어프라이어 추천", category="요리", day="2026-08-01")
+    d.insert_daily_stats(kid, "2026-08-02", {"opportunity": 10.0})
+    cfg = make_cfg(tmp_path)
+
+    import draft_pipeline
+    import image_gen
+    import product_recommend
+
+    monkeypatch.setattr(content_batch, "analyze_keyword",
+                        lambda client, kw, rd, **kw2: {
+        "total_sim": 100, "total_date": 100, "fresh_ratio": 0.5,
+        "top_post_dates": [], "top_bloggers": [], "top_descriptions": [],
+        "search_evidence": {"status": "available", "searched_at_kst": "",
+                            "reference_date": "", "items": []}})
+    monkeypatch.setattr(draft_pipeline, "generate_two_pass",
+                        lambda k, s, **kw: (
+                            {"title": "제목", "first_paragraph": "즉답",
+                             "body": "## 섹션1\n내용"}, []))
+    monkeypatch.setattr(content_batch, "generate_two_pass",
+                        draft_pipeline.generate_two_pass)
+    monkeypatch.setattr(image_gen, "generate_image",
+                        lambda kw, title, **kw2: "https://cdn.example.com/m.png")
+    monkeypatch.setattr(content_batch, "generate_image",
+                        image_gen.generate_image)
+    monkeypatch.setattr(image_gen, "generate_section_images",
+                        lambda kw, title, sections, **kw2: [])
+    monkeypatch.setattr(content_batch, "generate_section_images",
+                        image_gen.generate_section_images)
+    monkeypatch.setattr(product_recommend, "search_products",
+                        lambda client, kw: [{
+                            "title": "에어프라이어 5L",
+                            "link": "https://shopping.naver.com/gold/gold.naver?productId=1",
+                            "image": "", "price": 15000, "mall": "스토어"}])
+    monkeypatch.setattr(content_batch, "search_products",
+                        product_recommend.search_products)
+
+    result = content_batch.run_content_batch(
+        d, cfg, "2026-08-02", "now", FakeClient())
+    assert result["drafts_created"] == 1
+    draft = d.list_drafts_by_keyword(kid)[0]
+    block = json.loads(draft["product_block"])
+    assert block[0]["title"] == "에어프라이어 5L"
+    assert block[0]["price"] == 15000
+    d.close()
+
+
+def test_batch_skips_product_block_for_non_shop_category(tmp_path, monkeypatch):
+    # v21(B.3): 비쇼핑 카테고리(보험) 초안은 상품 블록 없음
+    monkeypatch.setenv("BAILIAN_TOKEN_PLAN_API_KEY", "test-key")
+    d = make_db(tmp_path)
+    kid = d.upsert_keyword("보험 비교", category="보험", day="2026-08-01")
+    d.insert_daily_stats(kid, "2026-08-02", {"opportunity": 10.0})
+    cfg = make_cfg(tmp_path)
+
+    import draft_pipeline
+    import image_gen
+
+    monkeypatch.setattr(content_batch, "analyze_keyword",
+                        lambda client, kw, rd, **kw2: {
+        "total_sim": 100, "total_date": 100, "fresh_ratio": 0.5,
+        "top_post_dates": [], "top_bloggers": [], "top_descriptions": [],
+        "search_evidence": {"status": "available", "searched_at_kst": "",
+                            "reference_date": "", "items": []}})
+    monkeypatch.setattr(draft_pipeline, "generate_two_pass",
+                        lambda k, s, **kw: (
+                            {"title": "제목", "first_paragraph": "즉답",
+                             "body": "## 섹션1\n내용"}, []))
+    monkeypatch.setattr(content_batch, "generate_two_pass",
+                        draft_pipeline.generate_two_pass)
+    monkeypatch.setattr(image_gen, "generate_image",
+                        lambda kw, title, **kw2: "https://cdn.example.com/m.png")
+    monkeypatch.setattr(content_batch, "generate_image",
+                        image_gen.generate_image)
+    monkeypatch.setattr(image_gen, "generate_section_images",
+                        lambda kw, title, sections, **kw2: [])
+    monkeypatch.setattr(content_batch, "generate_section_images",
+                        image_gen.generate_section_images)
+
+    result = content_batch.run_content_batch(
+        d, cfg, "2026-08-02", "now", FakeClient())
+    assert result["drafts_created"] == 1
+    draft = d.list_drafts_by_keyword(kid)[0]
+    assert draft["product_block"] == ""
+    d.close()
+
+
 def test_backfills_missing_images_only(tmp_path, monkeypatch):
     monkeypatch.setenv("BAILIAN_TOKEN_PLAN_API_KEY", "test-key")
     d = make_db(tmp_path)

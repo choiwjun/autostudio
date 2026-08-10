@@ -1,7 +1,8 @@
 # tests/test_product_recommend.py — v21(B.1): 네이버 쇼핑 검색 상품 추천
 from naver_client import NaverAPIError
 from product_recommend import (
-    PRODUCT_BLOCK_CATEGORIES, product_block_markdown, search_products,
+    PRODUCT_BLOCK_CATEGORIES, _extract_product_no, product_block_markdown,
+    search_products, to_deep_link,
 )
 
 
@@ -53,9 +54,9 @@ def test_product_block_markdown():
     md = product_block_markdown("에어프라이어", products)
     assert "## 관련 상품" in md
     assert "에어프라이어 5L" in md and "15,000원" in md and "가전스토어" in md
-    # PID 설정 시 딥링크 파라미터 추가 (B.2 자리)
+    # v21(B.2): PID가 있어도 상품번호 없는 링크는 변환 불가 → 원본 유지
     md2 = product_block_markdown("에어프라이어", products, pid="P123")
-    assert "pid=P123" in md2
+    assert md2 == md
     # 상품 없으면 블록 미생성 — 파이프라인 무해
     assert product_block_markdown("키워드", []) == ""
 
@@ -73,3 +74,26 @@ def test_product_block_categories_defined():
     # B.3: 상품 블록 우선 카테고리 — 요리·패션·IT 등 쇼핑 전환 적합 분야
     assert "요리" in PRODUCT_BLOCK_CATEGORIES
     assert "IT" in PRODUCT_BLOCK_CATEGORIES
+
+
+def test_deep_link_conversion():
+    # v21(B.2): brandconnect 딥링크 변환 — 샘플 형식과 동일
+    link = "https://shopping.naver.com/gold/gold.naver?productId=9581015846"
+    out = to_deep_link(link, "983190190858208")
+    assert out == ("https://brandconnect.naver.com/affiliates/983190190858208"
+                   "?channelProductNo=9581015846")
+    # channelProductNo 포함 링크도 추출
+    assert _extract_product_no(
+        "https://x.com?a=1&channelProductNo=123") == "123"
+    # PID 미설정 → 원본 유지
+    assert to_deep_link(link, "") == link
+    # 상품번호 추출 실패 → 원본 유지 (무해 폴백)
+    assert to_deep_link("https://shopping.naver.com/no-product", "P1") == (
+        "https://shopping.naver.com/no-product")
+
+
+def test_product_block_markdown_uses_deep_link():
+    products = [{"title": "에어프라이어 5L", "link": "https://shopping.naver.com/gold/gold.naver?productId=9581015846",
+                 "image": "", "price": 15000, "mall": "가전스토어"}]
+    md = product_block_markdown("에어프라이어", products, pid="983190190858208")
+    assert "brandconnect.naver.com/affiliates/983190190858208" in md

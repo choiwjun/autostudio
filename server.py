@@ -108,10 +108,10 @@ def _unavailable_search_evidence(reference_date, searched_at):
 
 def _with_parsed_tags(draft):
     """v17.2: DB의 태그 JSON 문자열 → 응답용 리스트 (대시보드가 바로 쓰게).
-    v19: thumbnail_ideas도 동일 파싱."""
+    v19: thumbnail_ideas도 동일 파싱. v21(B.5): product_block도 파싱."""
     if not draft:
         return draft
-    for field in ("tags", "thumbnail_ideas"):
+    for field in ("tags", "thumbnail_ideas", "product_block"):
         try:
             parsed = json.loads(draft.get(field) or "[]")
             draft[field] = parsed if isinstance(parsed, list) else []
