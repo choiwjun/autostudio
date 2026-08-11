@@ -574,6 +574,18 @@ def generate_two_pass(keyword, structure, runner=None, retry_budget_seconds=None
                     f"- 허위 1인칭 경험 표현({hits}) 감지 — 해당 문장을 '일반적으로', "
                     "'확인해야 하는 기준은' 같은 객관적 조언으로 고칠 것. "
                     "'제가', '직접' 등 1인칭 경험 표현은 전면 금지.\n")
+            # D-1: 길이 계열 실측 주입 — 무피드백 맹재시도로 같은 실패가 반복되던 경로 제거
+            if "body_length" in failed:
+                qc_feedback += (
+                    "\n## 검수 피드백 (이번 작성분에 반드시 반영)\n"
+                    f"- 본문이 {len(draft.get('body', ''))}자로 기준({BODY_MIN_LEN}자) "
+                    f"미달 — 각 섹션을 구체적 실용 정보로 확장해 {BODY_MIN_LEN}자 이상으로 작성할 것.\n")
+            if "first_paragraph" in failed:
+                qc_feedback += (
+                    "\n## 검수 피드백 (이번 작성분에 반드시 반영)\n"
+                    f"- 첫문단이 {len(draft.get('first_paragraph', ''))}자로 기준"
+                    f"({FIRST_PARA_QC_MIN}~{FIRST_PARA_QC_MAX}자) 밖 — 검색 의도를 즉답하는 "
+                    f"{FIRST_PARA_QC_MIN}자 이상 요약으로 다시 작성할 것.\n")
             continue  # 1회 재생성
     if draft is None:
         # v17: 하드 예산 소진으로 초안 자체가 없는 경우 — None 반환은 호출 측

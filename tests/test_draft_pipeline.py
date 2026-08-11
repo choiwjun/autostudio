@@ -473,6 +473,37 @@ def test_generate_two_pass_density_feedback_in_retry():
     assert "10~15회" in retry_prompt      # 목표량 명시
 
 
+def test_generate_two_pass_body_length_feedback_in_retry():
+    # D-1: 본문 길이·첫문단 미달 → 재생성 프롬프트에 실측 길이·목표 주입 (맹재시도 제거)
+    import json as json_mod
+    calls = []
+
+    def fake_runner(prompt, timeout=90):
+        calls.append(prompt)
+        if "골격을 확장" not in prompt:
+            return _PASS1_JSON
+        n_pass2 = len([c for c in calls if "골격을 확장" in c])
+        if n_pass2 == 1:
+            return json_mod.dumps({
+                "title": "에어프라이어 추천 기준 정리",
+                "first_paragraph": "짧은 즉답",
+                "body": "## 소개\n매우 짧은 본문입니다.",
+            }, ensure_ascii=False)
+        return json_mod.dumps({
+            "title": "에어프라이어 추천 기준 정리",
+            "first_paragraph": "에어프라이어는 용량과 조리 방식을 먼저 확인해야 합니다. 관리 편의성도 중요합니다.",
+            "body": _good_body("에어프라이어"),
+        }, ensure_ascii=False)
+
+    draft, failed = generate_two_pass("에어프라이어", {}, runner=fake_runner,
+                                      platform="tistory")
+    assert failed == []
+    retry_prompt = [c for c in calls if "골격을 확장" in c][1]
+    assert "검수 피드백" in retry_prompt
+    assert "3000" in retry_prompt        # 본문 목표 길이 실측 주입
+    assert "첫문단" in retry_prompt      # 첫문단 실측 주입
+
+
 def _over_density_body(keyword="에어프라이어"):
     """keyword_density 초과(도배) 본문 — 재생성 피드백 방향 분기 검증용."""
     parts = []
