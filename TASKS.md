@@ -93,3 +93,35 @@
 - [x] 전체 pytest 실행 (기존 358 + 신규 테스트 전부 통과)
 - [x] VERIFICATION.md 갱신 (수정 내역 반영)
 - [x] 릴리즈 노트 요약 (releaser)
+
+
+# ===== Phase 2: 블로그 프롬프트 개선 (2026-08-11, 리서치 기반 — docs/RESEARCH.md) =====
+
+## T18 (P1-1) SYSTEM_PROMPT 안전성 — '실제 경험 기반' → 검증 가능 정보 + 창작 금지
+- [x] **수용 기준**: SYSTEM_PROMPT에 '경험·출처·기관명·통계 창작 금지' + AI 브리핑 인용 구조 명시. '실제 경험 기반' 표현 제거
+- [x] 파일: draft_generator.py / tests/test_draft_generator.py
+- [x] 커밋: `fix: 초안 SYSTEM_PROMPT 창작 금지 강화 — 허위 경험·출처 방지 (P1-1)`
+
+## T19 (P1-2) 허위 출처 표현 검수 추가
+- [x] **수용 기준**: '조사에 따르면'류 패턴 감지 시 검수 실패 + 재생성 피드백
+- [x] 파일: draft_pipeline.py (check_no_fake_sources, validate_draft, generate_two_pass) / tests/test_draft_pipeline.py
+- [x] 커밋: `feat: 허위 출처('조사에 따르면'류) 검수·재생성 피드백 추가 (P1-2)`
+
+## T20 (P2-1) AI 브리핑 인용 구조 지시 (pass1/pass2)
+- [x] **수용 기준**: pass1·pass2 프롬프트에 'AI 브리핑이 인용하기 좋은 구조' 지시 포함
+- [x] 파일: draft_pipeline.py / tests/test_draft_pipeline.py
+- [x] 커밋: `feat: 프롬프트에 AI 브리핑 인용 구조 지시 추가 (P2-1)`
+
+## T21 (P2-2) non-commodity 지시 (정보형 템플릿)
+- [x] **수용 기준**: intent 정보형 템플릿에 '일반 상식 나열 금지·구체적 기준/숫자/비교/함정 중심' 포함
+- [x] 파일: intent.py / tests/test_intent.py
+- [x] 커밋: `feat: 정보형 템플릿 non-commodity 지시 추가 (P2-2)`
+
+## T22 (P3) 제목 지시 보강 (연도·정보성)
+- [x] **수용 기준**: pass2 제목 요구사항에 연도·정보성·핵심요약 지시 포함
+- [x] 파일: draft_pipeline.py / tests/test_draft_pipeline.py
+- [x] 커밋: `feat: 제목 지시 보강 — 연도·정보성·핵심 요약 (P3)`
+
+## 최종 (Phase 2)
+- [x] 전체 pytest 통과
+- [x] README·VERIFICATION.md 갱신 + 수동 배포 (vercel --prod)
