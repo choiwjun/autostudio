@@ -442,6 +442,29 @@ def test_upcoming_preset_with_show_inactive(tmp_path):
     assert body["count"] == 12
 
 
+def test_upcoming_preset_falls_back_when_p50_zero(tmp_path):
+    # B-1: opportunity P50=0이면 폴백 절대값(20.0) 사용 — 0.0으로 전체 노출 금지.
+    # resolve_thresholds(폴백 20.0)와 동일 규칙.
+    dbfile = f"sqlite:///{tmp_path / 'upcoming_zero.db'}"
+    d = db.Database(dbfile)
+    d.init()
+    for i in range(24):  # 표본 24 — 백분위 유효
+        kid = d.upsert_keyword(f"z{i:02d}", day="2026-08-01")
+        d.insert_daily_stats(kid, "2026-08-02", {
+            "opportunity": 0.0,            # 전부 0 → P50 = 0
+            "demand_idx": 0.001,
+            "demand_growth": 0.05,
+        })
+    d.close()
+    app = create_app({"db_url": dbfile, "dashboard_token": "sekret",
+                      "manual_budget_seconds": 45, "env": "development"})
+    client = TestClient(app)
+    body = client.get("/keywords?preset=upcoming").json()
+    # opportunity ≥ 폴백(20.0)인 키워드는 0개 — 전체 노출(24개)이 아니라 0개여야 함
+    assert body["count"] == 0
+    assert body["items"] == []
+
+
 def test_percentile_presets_with_enough_sample(tmp_path):
     # v14 §3: 표본 ≥ 20이면 백분위 임계 — ai픽 = ai_cite≥P50 & demand≥P50,
     # 유망 = opportunity≥P75 & demand≥P50, 상승 = growth≥0.1 & demand≥P50

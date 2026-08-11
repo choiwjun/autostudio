@@ -371,7 +371,9 @@ def create_app(cfg):
             demand_min, growth_min = thresholds["demand"], RISING_GROWTH_MIN
         elif preset == "upcoming":
             _, opp_pct = run_db(lambda d: d.percentiles("opportunity"))
-            opportunity_min = opp_pct.get(0.5, 20.0)
+            # B-1: P50=0이면 get 기본값이 아니라 0.0이 반환돼 프리셋 필터가
+            # 무력화(전체 노출)됨 — resolve_thresholds와 동일하게 폴백 규칙 적용
+            opportunity_min = opp_pct.get(0.5) or 20.0
             demand_max = thresholds["demand"]
             growth_min = UPCOMING_GROWTH_MIN
         filters = dict(category=category, commercial_min=commercial_min, q=q,
