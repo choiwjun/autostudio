@@ -298,8 +298,8 @@ class Database:
     #     demand 항을 사실상 무력화(최대 기여 ~0.35점) — 0.01(실측 상한) 기준 정규화로
     #     0~1 복원. 상한 초과는 1.0으로 클램프 (scoring.v6_priority와 동일 값 유지).
     # v14: growth 몫(15)을 수요에서 분리 — 30×AI인용 + 25×수요 + 15×성장 + 30×CPC.
-    #     growth_norm = clamp(demand_growth / 0.05, -0.5, 1.0), NULL은 0 (scoring.growth_norm
-    #     동일 수식 — GROWTH_NORM_MAX 0.05 재사용). 성공 기준 ② 상승 키워드 상단 노출.
+    #     growth_norm = clamp(demand_growth / 0.15, -0.5, 1.0), NULL은 0
+    #     (scoring.growth_norm과 동일 — GROWTH_NORM_MAX 0.15, v20 갱신).
     # SORT_COLUMNS에 쓰이는 priority 표현식 — SELECT에도 동일 alias로 노출 (server 조회용)
     CPC_TIER_SQL = (
         "CASE WHEN k.category IN ('보험','금융','재테크') THEN 1.0 "
@@ -357,6 +357,7 @@ class Database:
     PERCENTILE_QUANTILES = (0.25, 0.5, 0.75, 0.9)
     SORT_COLUMNS = {
         "opportunity": "ds.opportunity",
+        # v4 이후 commercial은 항상 NULL (쇼핑 검색 API 종료) — API 호환용으로 유지
         "commercial": "ds.commercial",
         "click": "ds.shop_click_idx",  # v4: 쇼핑 클릭 지수 (쇼핑 검색 API 종료 대체)
         "demand": "ds.demand_idx",

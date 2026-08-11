@@ -218,12 +218,6 @@ def validate_content(content, ref_date, content_type):
 # 일주·별자리·띠는 규칙 기반 결정적 생성 (LLM 미사용 — "엔진 = 데이터").
 # 주간·월간은 엔진 데이터를 LLM이 서사로 풀어쓰기 (주 1회·월 1회만 — 비용 절감).
 
-FIXED_CONTENT_NAMES = {
-    "day_pillar": ("일주", "갑자", 60),
-    "zodiac": ("별자리", "물병자리", 12),
-    "animal": ("띠", "쥐", 12),
-}
-
 _CTA_FIXED = ("\n\n---\n\n매일 달라지는 오늘의 운세가 궁금하다면 "
               "블로그의 다른 운세 글도 확인해보세요.")
 
