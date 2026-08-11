@@ -340,7 +340,8 @@ def create_app(cfg):
                       category: str = "", commercial_min: float = 0,
                       click_min: float = 0, q: str = "",
                       discovered_within: int = 0,
-                      preset: str = "ai_pick", show_inactive: int = 0,
+                      # UX-1: 기본 = 전체 — 추천(ai_pick)은 대시보드 버튼으로 명시
+                      preset: str = "", show_inactive: int = 0,
                       page: int = 1, page_size: int = 50):
         page = max(page, 1)
         page_size = min(max(page_size, 1), 200)

@@ -311,10 +311,10 @@
         <option value="">전체 분야</option>
       </select>
       <select id="click" onchange="resetAndLoad()" aria-label="쇼핑클릭 필터">
-        <option value="">쇼핑클릭 전체</option>
-        <!-- v12: v9 실측(앵커 대비 상대비율, 대부분 0) 기준 — 기존 0.5+/0.2+는 교집합 0건 -->
-        <option value="0.001">클릭 0.001+ (신호 있음)</option>
-        <option value="0.01">클릭 0.01+</option>
+        <option value="">쇼핑클릭 전체 (미수집 포함)</option>
+        <!-- UX-3: 0.001+/0.01+는 동일 결과(상위 슬롯만 수집 — 미수집 다수)라
+             '수집됨' 하나로 통합. 값 있는 키워드가 적다는 걸 라벨로 명확히 -->
+        <option value="0.001">클릭 수집됨 (값 있음만)</option>
       </select>
       <select id="discovered" onchange="resetAndLoad()" aria-label="발견기간 필터">
         <option value="">발견기간 전체</option>
@@ -324,11 +324,16 @@
       <input id="q" placeholder="키워드 검색" oninput="onSearchInput()" aria-label="키워드 검색">
       <label class="chk"><input type="checkbox" id="showInactive" onchange="resetAndLoad()"> 제외 목록 포함</label>
       <div class="seg" role="group" aria-label="프리셋">
-        <button type="button" id="presetAi" onclick="togglePreset('ai_pick')">AI픽</button>
-        <button type="button" id="presetProm" onclick="togglePreset('promising')">유망</button>
-        <button type="button" id="presetRise" onclick="togglePreset('rising')">상승</button>
-        <button type="button" id="presetUpcoming" onclick="togglePreset('upcoming')">곧 뜰</button>
-        <button type="button" id="presetAll" onclick="togglePreset('')">전체</button>
+        <button type="button" id="presetAi" onclick="togglePreset('ai_pick')"
+                title="AI인용·수요 상위 50% 키워드 — 지금 써야 할 글 후보">AI픽</button>
+        <button type="button" id="presetProm" onclick="togglePreset('promising')"
+                title="기회점수 상위 25% & 수요 상위 50%">유망</button>
+        <button type="button" id="presetRise" onclick="togglePreset('rising')"
+                title="성장 +10% 이상 & 수요 상위 50%">상승</button>
+        <button type="button" id="presetUpcoming" onclick="togglePreset('upcoming')"
+                title="상승 반전 & 수요 아직 낮음(선점) & 기회 상위 50%">곧 뜰</button>
+        <button type="button" id="presetAll" onclick="togglePreset('')"
+                title="모든 활성 키워드">전체</button>
       </div>
       <button class="btn" onclick="toggleSeeds()">시드키워드 관리</button>
       <div class="token-box">
@@ -479,7 +484,7 @@
 let sortBy = 'priority';
 let sortDir = 'desc';
 let page = 1;
-let preset = 'ai_pick';
+let preset = '';  // UX-1: 기본 = 전체 (추천은 프리셋 버튼)
 let loading = true;
 let loadError = false;
 let collectBusy = false;
@@ -659,7 +664,11 @@ async function load() {
   });
   renderSortArrows();
   const maxPage = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
-  document.getElementById('pageInfo').textContent = `${totalCount}건 · ${page}/${maxPage}페이지`;
+  const presetLabel = { ai_pick: 'AI픽', promising: '유망', rising: '상승',
+                        upcoming: '곧 뜰' }[preset] || (preset === '' ? '전체' : preset);
+  // UX-1: 현재 프리셋 기준 건수를 명확히 (예: "39건 (AI픽) · 1/1페이지")
+  document.getElementById('pageInfo').textContent =
+    `${totalCount}건 (${presetLabel}) · ${page}/${maxPage}페이지`;
 }
 
 function resetAndLoad() { page = 1; load(); loadTopKpi(); }
@@ -669,7 +678,7 @@ function resetFilters() {
   document.getElementById('discovered').value = '';
   document.getElementById('q').value = '';
   document.getElementById('showInactive').checked = false;
-  preset = 'ai_pick';
+  preset = '';  // UX-2: 필터 초기화 = 전체 보기
   updatePresetBtn();
   resetAndLoad();
 }

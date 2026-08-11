@@ -54,13 +54,16 @@ def test_list_reads_precomputed_scores(tmp_path):
     assert item["days"] == 2
 
 
-def test_default_preset_is_ai_pick(tmp_path):
-    # v6: 기본 뷰 = '지금 써야 할 키워드' — ai_cite≥0.6 & demand≥0.001만 노출 (에어프라이어만 통과)
-    # v14: 임계는 백분위 — 표본 2개(< 20)라 폴백 절대값(0.6/0.001) 적용 → 결과 동일
+def test_default_preset_shows_all(tmp_path):
+    # UX-1: 기본 뷰 = 전체 (프리셋 미적용) — 첫 화면에 모든 활성 키워드 표시.
+    # ai_pick(추천)은 명시적으로 조회 (대시보드 버튼).
+    # v14: 임계는 백분위 — 표본 2개(< 20)라 폴백 절대값(0.6/0.001) 적용
     client = TestClient(make_app(tmp_path))
     body = client.get("/keywords").json()
-    assert body["count"] == 1
-    assert body["items"][0]["keyword"] == "에어프라이어"
+    assert body["count"] == 2  # 활성 2개 (에어프라이어 + 선풍기)
+    ai = client.get("/keywords?preset=ai_pick").json()
+    assert ai["count"] == 1
+    assert ai["items"][0]["keyword"] == "에어프라이어"
     # v20: DEMAND_NORM 0.01→0.02, priority = 30×0.8 + 25×(0.005/0.02) + 15×0 + 30×0.5
     # 24 + 6.25 + 0 + 15 = 45.2 (반올림 45.3) — demands 소수점 정밀도 보정
     assert body["items"][0]["priority"] == 45.3
@@ -475,7 +478,9 @@ def test_percentile_presets_with_enough_sample(tmp_path):
     assert body["thresholds"]["ai_cite"] == 0.12
     assert body["thresholds"]["demand"] == 0.0048
     assert body["thresholds"]["opportunity"] == 17.0
-    assert body["count"] == 12                    # i ≥ 12 (ai·demand 모두 충족)
+    assert body["count"] == 24                    # 기본 = 전체
+    ai = client.get("/keywords?preset=ai_pick").json()
+    assert ai["count"] == 12                      # i ≥ 12 (ai·demand 모두 충족)
     prom = client.get("/keywords?preset=promising").json()
     assert prom["count"] == 7                     # i ≥ 17 (opp≥17 & demand≥0.0048)
     rising = client.get("/keywords?preset=rising").json()
