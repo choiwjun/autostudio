@@ -437,12 +437,23 @@ def check_naver_plain_text(draft):
 
 def check_naver_subtitles(draft, skeleton=None):
     """네이버 골격 소제목이 플레인 텍스트 한 줄로 존재하는지 — 마크다운
-    H2 기호 없이도 구조가 잡혔는지 확인. 골격 없으면 스킵(통과)."""
+    H2 기호 없이도 구조가 잡혔는지 확인. 골격 없으면 스킵(통과).
+    D-2: 정확 일치 대신 공백 제거 부분 일치 — pass2가 소제목을 변형
+    ('용량' → '용량 비교')해도 구조로 인정. 전혀 다른 줄이면 실패 유지."""
     if not skeleton:
         return True
     lines = [ln.strip() for ln in draft.get("body", "").splitlines()]
-    found = sum(1 for h in skeleton
-                if str(h.get("title") or "").strip() in lines)
+    found = 0
+    for h in skeleton:
+        title = str(h.get("title") or "").strip()
+        if not title:
+            continue
+        title_norm = title.replace(" ", "")
+        # 부분 일치: 변형은 보통 접미사 확장('용량' → '용량 비교') —
+        # 줄 시작부가 소제목으로 시작하면 인정. 본문 중간 단어 포함은 제외.
+        if any(ln.replace(" ", "").startswith(title_norm)
+               for ln in lines):
+            found += 1
     return found >= H2_MIN_COUNT
 
 

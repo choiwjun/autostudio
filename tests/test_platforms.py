@@ -76,6 +76,27 @@ def test_naver_plain_text_qc_rejects_markdown():
     assert not ok2 and "no_markdown" in failed2
 
 
+def test_naver_structure_check_allows_variant_title():
+    # D-2: 골격 소제목이 본문에서 변형(접미사·확장)돼도 부분 일치 인정 —
+    # 정확 일치 요구는 pass2가 소제목을 살짝 다듬으면 반복 실패를 낳음
+    from draft_pipeline import validate_draft
+    skeleton = [{"title": "기준", "bullets": []}, {"title": "용량", "bullets": []},
+                {"title": "관리", "bullets": []}]
+    fp = "즉답입니다. 추천 기준은 용량과 조리 방식, 관리 편의성 순서로 확인해야 합니다."
+    body = _naver_good_body(subtitle="기준", extra_titles=("용량 비교", "관리 방법"))
+    ok, failed = validate_draft(
+        {"title": "좋은 제목", "first_paragraph": fp, "body": body},
+        "키워드", skeleton=skeleton)
+    assert ok, failed
+    # 전혀 다른 소제목이면 여전히 실패
+    ok2, failed2 = validate_draft(
+        {"title": "좋은 제목", "first_paragraph": fp,
+         "body": _naver_good_body(subtitle="완전히다른주제",
+                                  extra_titles=("다른1", "다른2"))},
+        "키워드", skeleton=skeleton)
+    assert not ok2 and "structure" in failed2
+
+
 def test_naver_structure_check_uses_skeleton():
     from draft_pipeline import validate_draft
     skeleton = [{"title": "기준", "bullets": []}, {"title": "용량", "bullets": []},
