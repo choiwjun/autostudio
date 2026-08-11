@@ -276,6 +276,24 @@ def test_revenue_insights_aggregates(tmp_path):
     d.close()
 
 
+def test_revenue_insights_consistent_filters(tmp_path):
+    # R-4: totals/monthly/top_keywords 집계 기준 통일 — 수익만 있고 노출·클릭이
+    # NULL인 글이 monthly에만 잡히면 합계가 어긋난다 (totals와 불일치)
+    d = _open(tmp_path)
+    k = d.upsert_keyword("부분지표", category="일상", day="2026-06-01")
+    did = d.insert_draft(k, "부분글", "첫문단", "본문", created_at="2026-07-01")
+    # 부분 지표: 수익만 기록 (노출/클릭 NULL) — record_adpost_metrics는 3지표 필수라 직접 UPDATE
+    d._qd("UPDATE drafts SET adpost_revenue = 5000.0, "
+          "published_at = '2026-07-15' WHERE id = ?", (did,))
+    ins = d.revenue_insights()
+    assert ins["totals"]["posts"] == 0        # 3지표 모두 있는 글만 합산
+    assert ins["totals"]["revenue"] == 0.0
+    monthly_total = sum((m["revenue"] or 0) for m in ins["monthly"])
+    assert monthly_total == ins["totals"]["revenue"]  # 월별 합계 = 전체 합계
+    assert ins["top_keywords"] == []          # 부분 지표 글은 기여 집계 제외
+    d.close()
+
+
 def test_revenue_insights_endpoint_auth(tmp_path):
     client = TestClient(_make_big_app(tmp_path))
     assert client.get("/revenue-insights").json()["totals"]["posts"] == 0

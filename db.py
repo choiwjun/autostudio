@@ -1443,17 +1443,22 @@ LIMIT ?"""
             "FROM drafts WHERE adpost_revenue IS NOT NULL "
             "AND adpost_impressions IS NOT NULL AND adpost_clicks IS NOT NULL",
             (), fetch=True)[0]
+        # R-4: 집계 기준 통일 — totals와 동일하게 3지표(수익·노출·클릭) 모두
+        # 있는 글만 합산. 부분 지표 글이 월별/키워드에만 잡히면 합계 불일치.
+        _FULL_METRICS = ("adpost_revenue IS NOT NULL "
+                         "AND adpost_impressions IS NOT NULL "
+                         "AND adpost_clicks IS NOT NULL")
         monthly = self._qd(
             "SELECT substr(published_at, 1, 7) AS month, COUNT(*) AS posts, "
             "SUM(adpost_revenue) AS revenue "
-            "FROM drafts WHERE adpost_revenue IS NOT NULL AND published_at != '' "
+            f"FROM drafts WHERE {_FULL_METRICS} AND published_at != '' "
             "GROUP BY month ORDER BY month",
             (), fetch=True)
         top_keywords = self._qd(
             "SELECT k.keyword, k.category, COUNT(d.id) AS posts, "
             "SUM(d.adpost_revenue) AS revenue "
             "FROM drafts d JOIN keywords k ON k.id = d.keyword_id "
-            "WHERE d.adpost_revenue IS NOT NULL "
+            f"WHERE {_FULL_METRICS} "
             "GROUP BY k.id, k.keyword, k.category "
             "ORDER BY revenue DESC LIMIT 10",
             (), fetch=True)
