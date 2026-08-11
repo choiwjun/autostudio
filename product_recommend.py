@@ -91,9 +91,10 @@ def product_block_markdown(keyword, products, pid=""):
     for i, p in enumerate(products[:PRODUCT_MAX], 1):
         price = f"{p['price']:,}원" if p["price"] else "가격 확인"
         link = to_deep_link(p["link"], pid)
+        mall = f" ({p['mall']})" if p["mall"] else ""
         lines.append(
             f"{i}. **{p['title']}** — {price} "
-            f"[(보러 가기)]({link}){f' ({p['mall']})' if p['mall'] else ''}")
+            f"[(보러 가기)]({link}){mall}")
     return "\n".join(lines) + "\n"
 
 
