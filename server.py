@@ -171,6 +171,8 @@ RISING_GROWTH_MIN = 0.1  # 상승 프리셋: 최근 7일 평균이 이전 23일 
 # v20.1: '곧 뜰' 프리셋 상승 반전 최소 임계 — 0 초과면 0.1% 미세 상승(노이즈)도
 # 잡혀 실측 43개(활성의 21%)가 선점 후보로 나옴. 2% 이상 반전 + 콜드스타트(1.0)만.
 UPCOMING_GROWTH_MIN = 0.02
+# R-5: 리프레시 최소 게시 경과일 — db.refresh_candidates 기본값(14)과 정합
+REFRESH_MIN_AGE_DAYS = 14
 
 
 def resolve_thresholds(d):
@@ -738,6 +740,19 @@ def create_app(cfg):
             raise HTTPException(status_code=404, detail="not found")
         if old["refreshed_at"]:
             raise HTTPException(status_code=400, detail="이미 리프레시된 초안입니다")
+        # R-5: 플래너(refresh_candidates)와 동일 게이트 — 게시 14일+·성과 50 미만만
+        # 리프레시 허용. 미게시/최근 게시/성과 양호 초안의 무분별 재작성 차단.
+        if old.get("status") != "published" or not old.get("published_at"):
+            raise HTTPException(status_code=400,
+                                detail="게시된 초안만 리프레시할 수 있습니다")
+        cutoff = (config_mod.today_kst()
+                  - timedelta(days=REFRESH_MIN_AGE_DAYS)).isoformat()
+        if old.get("published_at", "") > cutoff:
+            raise HTTPException(status_code=400,
+                                detail="게시 14일 이후부터 리프레시할 수 있습니다")
+        if old.get("performance_score") is None or old["performance_score"] >= 50:
+            raise HTTPException(status_code=400,
+                                detail="성과 50 미만 초안만 리프레시할 수 있습니다")
         result = _generate_and_store_draft(
             old["keyword_id"], refresh_of=old["id"],
             platform=old.get("platform") or "naver")

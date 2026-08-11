@@ -231,10 +231,19 @@ def test_refresh_inherits_platform(tmp_path, monkeypatch):
     client = TestClient(_make_app(tmp_path))
     did = client.post("/drafts", json={"keyword_id": 1,
                                        "platform": "adsense"}).json()["id"]
+    # R-5: 리프레시는 게시 14일+·성과 50 미만만 허용 — 게시 상태로 준비
+    import datetime as dt
+    d = db.Database(f"sqlite:///{tmp_path / 't.db'}")
+    old_day = (dt.date.today() - dt.timedelta(days=20)).isoformat()
+    d.record_draft_feedback(did, 1, old_day, 30.0, "", "2026-08-01", 0)
+    d.close()
     r = client.post(f"/drafts/{did}/refresh")
     assert r.status_code == 200
     assert r.json()["platform"] == "adsense"
     assert r.json()["refresh_of"] == did
+    # draft 상태(미게시) 초안은 거부
+    did2 = client.post("/drafts", json={"keyword_id": 1}).json()["id"]
+    assert client.post(f"/drafts/{did2}/refresh").status_code == 400
 
 
 def test_planner_queue_includes_platform(tmp_path, monkeypatch):
