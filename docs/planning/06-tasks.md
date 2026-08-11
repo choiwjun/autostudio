@@ -1,5 +1,9 @@
-# 네이버 블로그 콘텐츠 자동화 — 태스크 목록 (v1)
+# 네이버 블로그 콘텐츠 자동화 — 태스크 목록 (v1) [아카이브]
 
+> **⚠️ 보관 처리 (2026-08-11)**: 아래 v1 태스크(P0~P3)는 전부 **구현 완료** —
+> drafts/outlines/초안 생성/이미지/대시보드 모두 존재. 체크박스는 v1 작성 시점의
+> 계획 상태 그대로이며, 현재 진행 작업은 `TASKS.md`(뿌리)와 `docs/planning/11~12`를 볼 것.
+>
 > 작성일: 2026-08-04 · 입력: `specs/screens/*.yaml`, `specs/domain/resources.yaml`, `docs/planning/01~10`
 > 실행: /auto-orchestrate (단일 워커 의존성 자동 빌드)
 > 프로젝트 구조: FastAPI(server.py) + 단일 HTML(static/index.html) + Supabase Postgres + GitHub Actions

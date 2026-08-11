@@ -72,10 +72,22 @@ python -m pytest tests -q                                # 테스트
    - `db.<ref>.supabase.co` 호스트만 사용 (IPv6 주소는 Actions/Vercel에서 연결 실패)
 3. GitHub Secrets: `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`, `DATABASE_URL`,
    `BAILIAN_TOKEN_PLAN_API_KEY` (콘텐츠 배치용 — 미등록 시 초안·이미지 배치만 생략)
-4. `npx vercel --prod` 배포, Vercel Env에 `DASHBOARD_TOKEN`, `ENV=production`,
-   `BAILIAN_TOKEN_PLAN_API_KEY` 설정
+4. **수동 배포 필수** — Vercel 프로젝트에 GitHub 연동이 없어 **push만으로 배포되지 않는다**
+   (2026-08-11 503 사태 원인 — 배포가 멈춘 채 옛 코드가 서빙됨).
+   배포 절차:
+   ```bash
+   # 로컬(WSL)에서
+   powershell.exe -NoProfile -Command "Set-Location 'C:\Users\wj941\OneDrive\바탕 화면\jproject\autostudio'; vercel --prod --yes"
+   ```
+   배포 후 `https://autostudio-eight.vercel.app/status` 로 확인 (토큰 필수).
+   Vercel Env: `DASHBOARD_TOKEN`, `ENV=production`, `BAILIAN_TOKEN_PLAN_API_KEY`,
+   `OPENCODE_GO_API_KEY` 설정
 5. 매일 07:17 KST 자동 수집: `.github/workflows/daily-collect.yml`
 6. PR/푸시 테스트: `.github/workflows/ci.yml`
+7. **LLM 쿼터 주의** — Bailian Token Plan 주간 쿼터 소진 시(429) 초안은
+   opencode-go로 자동 전환되지만(폴백), **이미지 생성은 Bailian 전용이라 쿼터
+   소진 중에는 실패**한다. 쿼터 리셋은 통상 금요일 06:03 UTC.
+   배포 자동화(GitHub Actions)는 미구현 — 필요 시 추가한다.
 
 ## 환경변수
 
