@@ -71,7 +71,15 @@ def parse_adpost_csv(raw_bytes):
     header = [_norm_header(c) for c in rows[0]]
 
     def find(keys):
+        # R-1: 정확 일치 우선 — '클릭률'이 '클릭'보다 앞에 있으면 부분문자열 매칭이
+        # 클릭률을 클릭수로 오선택하던 문제. 정확 일치 실패 시에만 부분 매칭 폴백.
         for i, cell in enumerate(header):
+            if cell in keys:
+                return i
+        # 부분 매칭 폴백 — 비율 열(률/율)은 수량(클릭수·노출수)이 아니므로 제외
+        for i, cell in enumerate(header):
+            if cell.endswith(("률", "율")):
+                continue
             if any(key in cell for key in keys):
                 return i
         return None

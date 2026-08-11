@@ -39,6 +39,24 @@ def test_empty_rows_skipped():
     assert len(rows) == 1
 
 
+def test_click_rate_column_not_misread_as_clicks():
+    # R-1: '클릭률'이 '클릭'보다 앞에 있어도 클릭수 열을 선택 (부분문자열 오선택 방지)
+    raw = ("게시물 제목,URL,수익(원),노출수,클릭률,클릭수\n"
+           "에어프라이어 추천,https://blog.naver.com/a/1,1500,3000,1.5,20\n"
+           ).encode("utf-8-sig")
+    rows = parse_adpost_csv(raw)
+    assert len(rows) == 1
+    assert rows[0]["clicks"] == 20.0
+    assert rows[0]["impressions"] == 3000.0
+
+
+def test_click_column_partial_fallback_kept():
+    # 정확 일치·비율 열이 없으면 기존 부분 매칭 유지 (레거시 호환)
+    raw = ("게시물 제목,수익(원),클릭건수\n제목1,100,7\n").encode("utf-8-sig")
+    rows = parse_adpost_csv(raw)
+    assert rows[0]["clicks"] == 7.0
+
+
 def test_performance_score_weights():
     # 수익 60 + 노출 25 + 클릭 15 — 만점 기준 클램프
     assert adpost_performance_score(3000, 5000, 100) == 100.0
