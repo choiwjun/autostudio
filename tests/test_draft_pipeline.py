@@ -473,6 +473,28 @@ def test_generate_two_pass_density_feedback_in_retry():
     assert "10~15회" in retry_prompt      # 목표량 명시
 
 
+def test_pass_prompts_mention_ai_briefing_structure():
+    # P2-1: pass1·pass2 프롬프트에 AI 브리핑 인용 구조 지시 포함
+    import json as json_mod
+    calls = []
+
+    def fake_runner(prompt, timeout=90):
+        calls.append(prompt)
+        if "골격을 확장" not in prompt:
+            return _PASS1_JSON
+        return json_mod.dumps({
+            "title": "에어프라이어 추천 기준 정리",
+            "first_paragraph": "에어프라이어는 용량과 조리 방식을 먼저 확인해야 합니다. 관리 편의성도 중요합니다.",
+            "body": _good_body("에어프라이어"),
+        }, ensure_ascii=False)
+
+    generate_two_pass("에어프라이어", {}, runner=fake_runner, platform="tistory")
+    assert len(calls) == 2
+    pass1, pass2 = calls
+    assert "AI 브리핑" in pass1 or "AI 인용" in pass1
+    assert "AI 브리핑" in pass2 or "AI 인용" in pass2
+
+
 def test_check_no_fake_sources():
     # P1-2: 근거 없는 출처 표현('조사에 따르면'류) 감지 — AI가 지어낸 출처가
     # 신뢰도를 떨어뜨리고 AI 인용·C-Rank에 역효과

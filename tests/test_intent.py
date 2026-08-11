@@ -27,6 +27,15 @@ def test_vs_inside_english_word_is_not_compare():
     assert classify("devs 설정 방법") == Intent.INFO
 
 
+def test_info_template_non_commodity():
+    # P2-2: 정보형 템플릿에 non-commodity 지시 — 누구나 쓸 수 있는 일반 상식
+    # 나열 대신 구체적 기준·숫자·비교·함정 중심 (구글·네이버 공통 원칙)
+    from intent import intent_template
+    tpl = intent_template(Intent.INFO)
+    assert "일반 상식" in tpl
+    assert "구체적" in tpl
+
+
 def test_info_intent_default():
     assert classify("연말정산 환급 방법") == Intent.INFO
     assert classify("에어프라이어") == Intent.INFO

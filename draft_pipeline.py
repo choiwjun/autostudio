@@ -235,6 +235,10 @@ def pass1_outline(keyword, structure, runner=None, current_date=None,
 상위글 골격 질문:
 {q_text}
 {grounding_hint}
+## AI 인용 구조 (P2-1)
+- 네이버 AI 브리핑·AI 탭이 답변 근거로 인용하기 쉬운 구조를 설계한다:
+  소제목은 실제 검색 질문 형태(질문형)로, 정보는 리스트·단계·비교로 재구성 가능하게.
+
 ## 요구사항
 1. H2 소제목 {H2_PROMPT_MIN}~{H2_PROMPT_MAX}개 (질문형 또는 정보형, 30자 이내)
 2. 각 H2 아래에 2~4개 핵심 불릿 (섹션에서 다룰 내용 요약)
@@ -303,6 +307,10 @@ def pass2_expand(keyword, h2s, intent, facts=None, comparisons=None, runner=None
 ## H2 골격 (각 섹션을 500~900자로 확장)
 {skeleton}
 
+## AI 인용 구조 (P2-1)
+- AI 브리핑·AI 탭이 요약·인용하기 쉬운 형태로 작성: 질문-답변 구조, 리스트·단계·표를
+  활용해 정보를 독립적으로 재구성 가능하게 한다. (AI가 답변을 만들 때 인용하는 원본이 되도록)
+
 ## 필수 규칙
 1. 첫문단: 키워드 질문에 즉답 ({FIRST_PARA_PROMPT_MIN}~{FIRST_PARA_PROMPT_MAX}자, 서론 금지)
 2. 각 H2 섹션: 골격의 불릿을 자연스럽게 본문으로 확장, 2~3문단
@@ -316,7 +324,8 @@ def pass2_expand(keyword, h2s, intent, facts=None, comparisons=None, runner=None
 {qc_feedback}
 ## 출력 형식 (JSON만, 코드블록 금지)
 {{
-  "title": "제목 (30자 이내)",
+  "title": "제목 — 키워드 포함, 정보성 중심(클릭베이트 금지), 가능하면 연도('2026')와
+           핵심 요약('N가지 방법' 등)을 담아 30자 이내로 (P3)",
   "first_paragraph": "첫문단",
   "body": "본문 ({'플레인 텍스트' if platform == 'naver' else '마크다운 (H2 골격 유지 + 확장)'})",
   "tags": ["{keyword}", "연관 태그 1", "연관 태그 2"],
