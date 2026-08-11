@@ -631,7 +631,7 @@ def create_app(cfg):
         draft = run_db(lambda d: d.get_draft(draft_id))
         if not draft:
             raise HTTPException(status_code=404, detail="not found")
-        url = (body.url or "").strip()
+        url = (body.url or "").strip().rstrip("/")
         if not url.startswith(("http://", "https://")):
             raise HTTPException(status_code=400, detail="올바른 URL이 아닙니다")
         run_db(lambda d: d.set_draft_published_url(

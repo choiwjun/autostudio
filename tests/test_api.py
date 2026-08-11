@@ -635,6 +635,11 @@ def test_published_url_set_and_validate(tmp_path, monkeypatch):
                     json={"url": "https://blog.naver.com/a/1"})
     assert r.status_code == 200
     assert r.json()["published_url"] == "https://blog.naver.com/a/1"
+    # R-2: trailing slash는 제거해 저장 — AdPost CSV URL(rstrip('/'))과 매칭 정합
+    r2 = client.post(f"/drafts/{did}/published-url",
+                     json={"url": "https://blog.naver.com/a/1/"})
+    assert r2.status_code == 200
+    assert r2.json()["published_url"] == "https://blog.naver.com/a/1"
     # v21.1: URL 등록 = 게시 확정 — status published + 게시 로그 노출
     assert r.json()["status"] == "published"
     planner = client.get("/planner").json()
