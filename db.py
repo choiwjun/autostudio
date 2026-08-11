@@ -1256,9 +1256,9 @@ LIMIT ?"""
     # ---------- v18: 실측 CPC/RPM · 게시 플래너 · 리프레시 · 수익 인사이트 ----------
 
     # 실측 CPC 만점 기준 — 애드포스트 CPC 스케일(수백~수천원)의 보수적 상한.
-    # measured_tier = 0.5×정적 등급 + 0.5×clamp(cpc/3000) — 실측과 정적의 절충.
+    # B-4: measured_tier는 순수 실측 — 정적 등급과의 절충은 EFFECTIVE_CPC_SQL의
+    # 베이지안 스무딩(prior=3)이 단일 책임으로 수행.
     CPC_FULL_SCALE = 3000.0
-    MEASURED_TIER_MIN_POSTS = 3
 
     def refresh_category_cpc_stats(self, updated_at):
         """AdPost 실측 지표 → category_cpc_stats 재집계 (전량 교체, 표는 소형).
