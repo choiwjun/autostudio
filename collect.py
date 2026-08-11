@@ -386,11 +386,13 @@ def fortune_generate_step(d, cfg, today):
               (ftype == "monthly" and today_dt.day == 1)
         if not due or not has_llm:
             continue
-        if not d.upsert_fortune_generation(ref_key, ctype, "",
-                                           grounding=grounding_json):
-            continue
         try:
+            # E-2: grounding은 자체 builder 결과 저장 (daily 그라운딩 오염 방지)
             g = builder(today_dt)
+            g_json = json_mod.dumps(g, ensure_ascii=False)
+            if not d.upsert_fortune_generation(ref_key, ctype, "",
+                                               grounding=g_json):
+                continue
             content = fc.generate_extended_blog(g)
             ok, fails = fc.validate_content(content, ref_key, "blog")
             status = "generated" if ok else "qc_failed"
@@ -424,7 +426,8 @@ def fortune_generate_step(d, cfg, today):
                     d.upsert_fortune_generation(
                         ref_key, ctype,
                         json_mod.dumps(content, ensure_ascii=False),
-                        grounding=grounding_json)
+                        # E-2: 고정 콘텐츠 grounding은 자체 builder 결과 (daily 오염 방지)
+                        grounding=json_mod.dumps(g, ensure_ascii=False))
                     created += 1
                     fixed_quota -= 1
                     progressed = True

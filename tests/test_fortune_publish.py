@@ -238,6 +238,39 @@ def test_fixed_content_generated_and_published(monkeypatch, tmp_path):
     d.close()
 
 
+def test_weekly_fixed_grounding_not_daily(monkeypatch, tmp_path):
+    # E-2: weekly/monthly/고정 콘텐츠의 grounding은 자체 builder 결과여야 함 —
+    # daily 그라운딩이 오염 저장되는 문제 차단
+    import collect
+    import llm_client
+    from engine import fortune_content as fc
+    import json as json_mod
+
+    def fake_blog(g, **kw):
+        ref = g.get("reference", "2026-08-10")
+        return {"title": f"{ref} 주간 운세", "summary": "요약",
+                "body": f"## 총평\n{ref} 기준 본문"}
+
+    monkeypatch.setattr(llm_client, "has_api_key", lambda: True)
+    monkeypatch.setattr(fc, "generate_sns_summary",
+                        lambda g, **kw: {"text": "요약", "hashtags": []})
+    monkeypatch.setattr(fc, "generate_blog_detail", fake_blog)
+    monkeypatch.setattr(fc, "generate_extended_blog", fake_blog)
+    monkeypatch.setattr(publish_client.requests, "post",
+                        lambda *a, **kw: _Resp(200, {}))
+    d = _open(tmp_path)
+    cfg = _cfg(tmp_path)
+    cfg["fortune_fixed_per_day"] = 1
+    collect.fortune_generate_step(d, cfg, "2026-08-10")  # 월요일 → weekly
+    weekly = d.get_fortune_generation("2026-08-10", "weekly_blog")
+    wg = json_mod.loads(weekly["grounding"])
+    assert wg.get("content_type") == "weekly", "weekly grounding이 daily로 오염"
+    fixed = d.get_fortune_generation("01", "day_pillar_blog")
+    fg = json_mod.loads(fixed["grounding"])
+    assert fg.get("content_type") == "day_pillar", "고정 콘텐츠 grounding이 daily로 오염"
+    d.close()
+
+
 def test_weekly_and_monthly_created_on_schedule(monkeypatch, tmp_path):
     import collect
     import llm_client
