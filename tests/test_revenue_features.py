@@ -57,18 +57,19 @@ def test_measured_cpc_tier_updates_priority(tmp_path):
     assert row["category"] == "일상"
     assert row["posts"] == 3 and row["cpc"] == 3000.0
     assert row["rpm"] == 3000.0  # 3000/1000*1000
-    assert row["measured_tier"] == 0.65  # 0.5*0.3 + 0.5*min(1, 3000/3000)
-    # v20: 베이지안 스무딩 (prior=3) — (3*0.3 + 3*0.65)/(3+3)=0.475 → 14.25
-    # SQL ROUND는 half-away(14.3), Python round는 banker's(14.2) — SQL 값 기준
+    # B-4: measured_tier는 순수 실측 (정적 혼합 제거) — 3000원 → 1.0
+    assert row["measured_tier"] == 1.0
+    # v20: 베이지안 스무딩 (prior=3) — (3*0.3 + 3*1.0)/(3+3)=0.65 → 19.5
     after = d.query_keywords(sort="priority", active=1)[0]["priority"]
-    assert after == 14.3
+    assert after == 19.5
     d.close()
 
 
-def test_measured_tier_needs_min_posts(tmp_path):
-    # v18: 표본 3건 미만이어도 v20 베이지안 스무딩으로 일부 반영
-    # v20: (prior=3) posts=2 → (3*0.4 + 2*0.7)/(3+2)=0.52 → priority 15.6
-    # 여행 measured_tier = 0.5*0.4+0.5*1.0=0.7
+def test_measured_tier_uses_pure_measured_with_bayesian(tmp_path):
+    # B-4: measured_tier는 순수 실측 — 표본 부족은 EFFECTIVE_CPC 베이지안
+    # (prior=3)이 정적 등급 쪽으로 부드럽게 수렴 (이중 절충 제거)
+    # 여행 measured_tier = min(1, 3000/3000) = 1.0
+    # posts=2 → (3*0.4 + 2*1.0)/(3+2)=0.64 → priority 19.2
     d = _open(tmp_path)
     k = d.upsert_keyword("여행 후기", category="여행", day="2026-08-01")
     for _ in range(2):
@@ -77,9 +78,9 @@ def test_measured_tier_needs_min_posts(tmp_path):
                                 "2026-08-05", "2026-08-05", 0)
     d.refresh_category_cpc_stats("2026-08-06")
     row = d.category_cpc_stats_list()[0]
-    assert row["posts"] == 2 and row["measured_tier"] is not None
+    assert row["posts"] == 2 and row["measured_tier"] == 1.0
     priority = d.query_keywords(sort="priority", active=1)[0]["priority"]
-    assert priority == round(30.0 * 0.52, 1)  # 베이지안 스무딩 (3*0.4+2*0.7)/5
+    assert priority == 19.2  # 30 * (3*0.4+2*1.0)/5
     d.close()
 
 
@@ -99,7 +100,7 @@ def test_measured_cpc_stats_refreshed_on_import(tmp_path, monkeypatch):
     insights = client.get("/revenue-insights").json()
     cats = {c["category"]: c for c in insights["categories"]}
     assert "가전" in cats
-    assert cats["가전"]["measured_tier"] == 0.75  # 0.5*0.5(가전 ELSE) + 0.5*1.0
+    assert cats["가전"]["measured_tier"] == 1.0  # B-4: 순수 실측
     d = _open(tmp_path)
     assert d.category_cpc_stats_list()[0]["posts"] == 1
     d.close()
@@ -271,7 +272,7 @@ def test_revenue_insights_aggregates(tmp_path):
     assert ins["top_keywords"][0]["revenue"] == 3000.0
     cats = {c["category"]: c for c in ins["categories"]}
     assert cats["보험"]["cpc"] == 500.0   # 3000/6
-    assert cats["보험"]["measured_tier"] == round(0.5 * 1.0 + 0.5 * (500.0 / 3000.0), 3)
+    assert cats["보험"]["measured_tier"] == round(500.0 / 3000.0, 3)  # B-4: 순수 실측
     assert cats["일상"]["cpc"] == 500.0
     d.close()
 

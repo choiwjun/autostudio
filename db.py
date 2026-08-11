@@ -1285,12 +1285,14 @@ LIMIT ?"""
                    if r["clicks"] > 0 else None)
             rpm = (r["revenue"] / r["impressions"] * 1000.0
                    if r["impressions"] > 0 else None)
-            static = tiers.get(r["category"], tiers.get("", 0.5))
             measured = None
             if cpc is not None:
+                # B-4: measured_tier는 순수 실측 (정적 등급 혼합 제거) —
+                # 정적 등급과의 절충은 EFFECTIVE_CPC_SQL의 베이지안(prior=3)이
+                # 단일 책임으로 수행. 이전엔 이중 혼합으로 표본 3건에도
+                # 실측 신호가 25%에 그쳐 '실측 보정'이 사실상 무력했음.
                 measured = round(
-                    0.5 * static
-                    + 0.5 * max(0.0, min(1.0, cpc / self.CPC_FULL_SCALE)), 3)
+                    max(0.0, min(1.0, cpc / self.CPC_FULL_SCALE)), 3)
             computed.append((r["category"], r["posts"], r["revenue"],
                              r["impressions"], r["clicks"], cpc, rpm,
                              measured, updated_at))

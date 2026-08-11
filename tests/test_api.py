@@ -703,10 +703,10 @@ def test_adpost_import_matches_by_url_and_title(tmp_path, monkeypatch):
     assert body["results"][0]["draft_id"] == did
     assert body["results"][0]["performance_score"] == 100.0
     # 만점 성과 → boost +10이 priority에 반영.
-    # v20: 베이지안 실측 CPC(가전: 정적 0.5 → (3*0.5+1*0.255)/4=0.439)로 CPC 항이
-    # 소폭 하락(-1.84)하므로 boost 반영을 범위로 검증 (8.16 ≈ base+8.2)
+    # B-4: 순수 실측 measured_tier(가전: 3000/100/3000=0.01) →
+    # 베이지안 (3*0.5+1*0.01)/4=0.3775 → CPC 항 3.675 하락 → boost 순효과 +6.3
     after_priority = _priority_of(client, "에어프라이어")
-    assert base + 8 <= after_priority <= base + 10
+    assert base + 5 <= after_priority <= base + 8
     # 초안에도 지표 저장
     draft = client.get(f"/drafts/{did}").json()
     assert draft["adpost_revenue"] == 3000.0
