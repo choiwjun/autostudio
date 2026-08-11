@@ -1,16 +1,15 @@
-# draft_generator.py — v8: 글 초안 생성 모듈 (Token Plan HTTP API)
-# 상위글 골격(outline)을 프롬프트에 넣고 Token Plan OpenAI 호환 API로 초안을 받아온다.
+# draft_generator.py — v8: 글 초안 생성 모듈 (OpenAI 호환 HTTP API)
+# 상위글 골격(outline)을 프롬프트에 넣고 LLM API로 초안을 받아온다.
 # v7(2026-08-05)까지 opencode CLI를 썼으나 Vercel 서버리스에 바이너리가 없어
 # 표준 라이브러리 urllib로 전환 — 로컬·GH Actions·Vercel 모두 동일 동작.
+# v23: 프로바이더 전환 — OPENCODE_GO_API_KEY가 있으면 OpenCode Go
+# (zen/go, deepseek-v4-flash), 없으면 기존 Bailian(Token Plan) 폴백.
 # v15: HTTP·키 해석·펜스 제거·오류 정규화는 llm_client 공용 레이어 사용.
 #      v8 단일패스 generate_draft는 v10 이후 프로덕션 미사용 사어 코드라 제거 —
 #      초안 생성은 draft_pipeline.generate_two_pass(2패스+검수)가 유일 진입점.
 import json
 
 import llm_client
-
-DRAFT_MODEL = "deepseek-v4-flash-0731"
-DEFAULT_BASE_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
 
 SYSTEM_PROMPT = (
     "너는 네이버 블로그 애드포스트 글을 잘 쓰는 작가다. "
@@ -25,23 +24,31 @@ class DraftGenerationError(Exception):
 
 
 def _run_llm(prompt, timeout=90):
-    api_key = llm_client.resolve_api_key()
+    # v23: 프로바이더 결정 — OPENCODE_GO_API_KEY가 있으면 OpenCode Go
+    # (deepseek-v4-flash), 없으면 기존 Bailian(Token Plan) 폴백.
+    provider, base_url, model = llm_client.resolve_draft_provider()
+    api_key = llm_client.resolve_draft_api_key()
     if not api_key:
-        raise DraftGenerationError("Token Plan API 키가 필요합니다 (BAILIAN_TOKEN_PLAN_API_KEY)")
-    base_url = llm_client.resolve_base_url(DEFAULT_BASE_URL)
+        raise DraftGenerationError(
+            "초안 LLM 키가 필요합니다 (OPENCODE_GO_API_KEY 또는 BAILIAN_TOKEN_PLAN_API_KEY)")
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.7,
+        # v11: 3000자+ 본문 — 한국어 토큰 비율상 4000 토큰은 본문 중간 절단 리스크
+        "max_tokens": 5500,
+    }
+    if provider == "opencode-go":
+        # v23: deepseek-v4-flash는 reasoning 모델 — 추론을 끄지 않으면
+        # max_tokens를 추론이 소진해 본문이 잘린다. DeepSeek 공식 파라미터 사용.
+        payload["thinking"] = {"type": "disabled"}
+    else:
+        payload["enable_thinking"] = False
     data = llm_client.post_json(
-        f"{base_url}/chat/completions",
-        {
-            "model": DRAFT_MODEL,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.7,
-            # v11: 3000자+ 본문 — 한국어 토큰 비율상 4000 토큰은 본문 중간 절단 리스크
-            "max_tokens": 5500,
-            "enable_thinking": False,
-        },
+        f"{base_url}/chat/completions", payload,
         api_key, timeout, DraftGenerationError, "draft API",
     )
     try:

@@ -79,8 +79,10 @@ python -m pytest tests -q                                # 테스트
 |---|---|
 | `DATABASE_URL` | Postgres 접속 문자열. **비개발 환경 필수** (미설정 시 기동 거부, fail-closed) |
 | `NAVER_CLIENT_ID` / `NAVER_CLIENT_SECRET` | 네이버 검색/데이터랩 API 키 |
-| `BAILIAN_TOKEN_PLAN_API_KEY` | 초안·이미지 생성 LLM 키 (Token Plan) |
+| `BAILIAN_TOKEN_PLAN_API_KEY` | 초안·이미지 생성 LLM 키 (Token Plan) — 초안은 v23부터 아래 OpenCode Go 우선 |
 | `BAILIAN_TOKEN_PLAN_BASE_URL` | LLM 엔드포인트 오버라이드 (선택) |
+| `OPENCODE_GO_API_KEY` | 초안 LLM 키 (OpenCode Go — deepseek-v4-flash). 설정 시 초안 생성 전용으로 우선 사용, 미설정 시 Bailian 폴백 |
+| `OPENCODE_GO_BASE_URL` | OpenCode Go 엔드포인트 오버라이드 (선택, 기본 `https://opencode.ai/zen/go/v1`) |
 | `DASHBOARD_TOKEN` | 대시보드 API 토큰. **비개발 환경 필수** (읽기·쓰기 전부 인증) |
 | `ENV` | `development`(기본, 인증 생략) / 그 외 값은 전부 프로덕션 취급 (소문자 정규화) |
 | `DATALAB_ANCHOR` | 수요지수 정규화 앵커 키워드 (기본 `냉장고`) |

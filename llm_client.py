@@ -21,6 +21,34 @@ def resolve_base_url(default):
     return os.getenv("BAILIAN_TOKEN_PLAN_BASE_URL", default)
 
 
+# v23: 블로그 초안 LLM — OpenCode Go(zen/go) 우선, 없으면 기존 Bailian 폴백.
+# 이미지 생성(image_gen)·운세(fortune)는 기존 Bailian 전용으로 유지.
+DRAFT_OPENCODE_BASE_URL = "https://opencode.ai/zen/go/v1"
+DRAFT_BAILIAN_BASE_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
+
+
+def resolve_draft_api_key():
+    """초안 LLM 키 — OPENCODE_GO_API_KEY 우선, 없으면 Bailian/DashScope 폴백."""
+    return os.getenv("OPENCODE_GO_API_KEY") or resolve_api_key()
+
+
+def resolve_draft_provider():
+    """초안 LLM 프로바이더 결정.
+
+    - OPENCODE_GO_API_KEY 설정: opencode-go (deepseek-v4-flash, zen/go 엔드포인트)
+    - 미설정: bailian (deepseek-v4-flash-0731, 기존 Token Plan) — 하위 호환
+    반환: (provider, base_url, model) — base_url은 OPENCODE_GO_BASE_URL /
+    BAILIAN_TOKEN_PLAN_BASE_URL 오버라이드를 각 프로바이더에만 적용.
+    """
+    if os.getenv("OPENCODE_GO_API_KEY"):
+        return ("opencode-go",
+                os.getenv("OPENCODE_GO_BASE_URL", DRAFT_OPENCODE_BASE_URL),
+                "deepseek-v4-flash")
+    return ("bailian",
+            os.getenv("BAILIAN_TOKEN_PLAN_BASE_URL", DRAFT_BAILIAN_BASE_URL),
+            "deepseek-v4-flash-0731")
+
+
 def strip_code_fence(text):
     """모델이 JSON 출력에 씌운 ``` 펜스 제거 — 언어 태그를 대소문자 구분 없이 처리
     (```json 외 ```JSON/```Json 등). 펜스 없으면 원문 반환."""
@@ -43,6 +71,11 @@ def post_json(url, payload, api_key, timeout, error_cls, err_prefix):
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            # v23: OpenCode Go(zen/go)는 Cloudflare 앞단에서 urllib 기본 UA(1010)를
+            # 차단 — 브라우저 계열 UA로 통일 (Bailian에도 무해)
+            "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                           "AppleWebKit/537.36 (KHTML, like Gecko) "
+                           "Chrome/126.0.0.0 Safari/537.36"),
         },
         method="POST",
     )
