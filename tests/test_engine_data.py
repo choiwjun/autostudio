@@ -88,7 +88,9 @@ def test_lookup_known_values(engine_db):
     # 스모크: 실측 기준점 (2026-08-11, 2026 입춘)
     lunar = solar_to_lunar("2026-08-11", db_path=engine_db)
     assert lunar is not None and lunar["lunar_year"] == 2026
-    assert solar_to_lunar("2026-08-11") is None or True  # 기본 경로도 동작(또는 skip)
+    # E-4: 실측 기준점 고정 (항진 단언 제거) — 2026-08-11 = 음력 6월 29일
+    assert lunar == {"lunar_year": 2026, "lunar_month": 6,
+                     "lunar_day": 29, "is_leap": 0}
     terms = get_solar_terms(2026, db_path=engine_db)
     ipchun = terms[2]  # ordinal 3 = 입춘 (1 소한, 2 대한, 3 입춘)
     assert ipchun["korean_name"] == "입춘"

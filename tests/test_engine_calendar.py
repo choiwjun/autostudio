@@ -65,10 +65,13 @@ def test_golden_lunar_conversion_and_pillars(golden_cases):
 
 
 def test_ganji_known_pillars():
-    # 실측 기준점: 2026-08-11 (자평명리 표준 계산과 대조)
+    # E-5: 실측 기준점 2026-08-11 10:30 (engine.db 계산으로 고정) —
+    # 10간 중 하나인지만 보던 항진성 단언을 실제 기대값으로 교체
     result = get_ganji(2026, 8, 11, 10, 30)
-    assert result["day"]["gan"] in ("甲", "乙", "丙", "丁", "戊",
-                                    "己", "庚", "辛", "壬", "癸")
+    assert result["day"]["ganji"] == "丁巳"
+    assert result["hour"]["ganji"] == "乙巳"
+    assert result["year"]["ganji"] == "丙午"
+    assert result["month"]["ganji"] == "丙申"
     assert result["hour"]["ganji"] == f"{result['hour']['gan']}{result['hour']['ji']}"
     # 일주 결정성: 같은 날짜 → 같은 기둥
     assert get_ganji(2026, 8, 11, 10, 30)["day"] == result["day"]
