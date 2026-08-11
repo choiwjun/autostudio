@@ -686,8 +686,11 @@ def create_app(cfg):
             draft = (run_db(lambda d, u=row["url"]: d.find_draft_by_published_url(u))
                      if row["url"] else None)
             if not draft and row["title"]:
+                # R-3: 제목 매칭은 게시된 초안만 — 미게시 초안에 실측 성과가
+                # 붙어 priority가 오염되는 경로 차단
                 draft = run_db(
-                    lambda d, t=row["title"]: d.find_draft_by_title(t))
+                    lambda d, t=row["title"]: d.find_draft_by_title(
+                        t, status="published"))
             if not draft:
                 unmatched += 1
                 continue

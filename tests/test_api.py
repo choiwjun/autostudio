@@ -711,12 +711,24 @@ def test_adpost_import_matches_by_url_and_title(tmp_path, monkeypatch):
     draft = client.get(f"/drafts/{did}").json()
     assert draft["adpost_revenue"] == 3000.0
     assert draft["performance_score"] == 100.0
-    # 제목 매칭 경로 (URL 미등록 초안)
-    did2 = _create_draft(client, monkeypatch)
-    csv2 = "게시물 제목,수익\n제목,100\n".encode("utf-8-sig")
+    # R-3: 제목 매칭은 게시 상태 초안만 — 별도 테스트로 검증
+
+
+def test_adpost_import_title_match_requires_published(tmp_path, monkeypatch):
+    # R-3: 미게시 초안에는 AdPost 성과가 매칭되지 않음 (성과 오염 방지) —
+    # 게시 후에는 동명 초안에 매칭
+    client = TestClient(make_app(tmp_path))
+    did = _create_draft(client, monkeypatch)
+    csv = "게시물 제목,수익\n제목,100\n".encode("utf-8-sig")
+    body = client.post("/adpost/import",
+                       files={"file": ("r.csv", csv, "text/csv")}).json()
+    assert body["matched"] == 0
+    assert body["unmatched"] == 1
+    client.post(f"/drafts/{did}/published-url",
+                json={"url": "https://blog.naver.com/a/2"})
     body2 = client.post("/adpost/import",
-                        files={"file": ("r.csv", csv2, "text/csv")}).json()
-    assert body2["matched"] >= 1  # 동명 초안 중 최신에 매칭
+                        files={"file": ("r.csv", csv, "text/csv")}).json()
+    assert body2["matched"] >= 1
 
 
 def test_adpost_import_rejects_bad_csv(tmp_path):

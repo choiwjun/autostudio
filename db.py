@@ -1193,11 +1193,20 @@ LIMIT ?"""
         )
         return rows[0] if rows else None
 
-    def find_draft_by_title(self, title):
-        rows = self._qd(
-            "SELECT * FROM drafts WHERE title = ? ORDER BY id DESC LIMIT 1",
-            (title,), fetch=True,
-        )
+    def find_draft_by_title(self, title, status=None):
+        """제목으로 초안 검색 — status 지정 시 해당 상태만 (R-3: AdPost
+        임포트 제목 매칭은 게시된 초안만 대상으로 성과 오염 방지)."""
+        if status:
+            rows = self._qd(
+                "SELECT * FROM drafts WHERE title = ? AND status = ? "
+                "ORDER BY id DESC LIMIT 1",
+                (title, status), fetch=True,
+            )
+        else:
+            rows = self._qd(
+                "SELECT * FROM drafts WHERE title = ? ORDER BY id DESC LIMIT 1",
+                (title,), fetch=True,
+            )
         return rows[0] if rows else None
 
     def record_adpost_metrics(self, draft_id, keyword_id, revenue, impressions,
