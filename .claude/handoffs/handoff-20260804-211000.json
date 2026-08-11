@@ -1,0 +1,59 @@
+{
+  "handoff": {
+    "created_at": "2026-08-04T21:10:00+09:00",
+    "project": "autostudio (네이버 블로그 키워드 대시보드)",
+    "completed_skill": "socrates → screen-spec → tasks-generator → auto-orchestrate (v7 콘텐츠 자동화 구현 완료)",
+    "next_skill": "배포(Vercel) + 이미지 키 재발급 + 실제 사용",
+    "output_files": [
+      "docs/planning/01-prd.md ~ 10-desire-map.md (10개 기획 문서)",
+      "specs/domain/resources.yaml, specs/screens/*.yaml (화면 명세)",
+      "docs/planning/06-tasks.md (TASKS)"
+    ]
+  },
+  "context_summary": {
+    "project_stage": "v6 대시보드 + v7 콘텐츠 자동화 구현 완료 (111 tests passed). 아직 Vercel 배포·이미지 키 미설정 상태.",
+    "v7_implemented": {
+      "db": "drafts/outlines 테이블 추가 (sqlite/postgres SCHEMAS), CRUD 메서드",
+      "outline": "analyzer.py가 description 캡처(기존 버림) → outline.py가 질문형/비교/수치 구조 추출",
+      "draft_generator": "opencode CLI(deepseek-v4-flash) 비대화형 호출 — Windows는 exe 직접 호출 + --format json 이벤트 파싱 + 90s 타임아웃",
+      "image_gen": "bl image generate (qwen) 래퍼 — 키 미설정 시 503 명확한 안내",
+      "api": "POST/GET /outlines/{id}, POST /drafts, GET /drafts/{id}, POST /drafts/{id}/image (모두 require_token)",
+      "ui": "대시보드 '글 생성' 버튼 → 골격 모달 → 초안 보기 → 이미지 생성 → 복사",
+      "tests": "84 → 111 passed (신규 27개: outline/draft_generator/image_gen/api/db)",
+      "smoke": "실제 초안 생성 확인: '에어프라이어 vs 오븐, 어떤 게 좋을까? 1년 후기' + 질문형 소제목 + 본문 1549자"
+    },
+    "commits": [
+      "d6cbac4 docs: content automation planning (10 docs) + screen specs + tasks",
+      "b7f64a3 feat: drafts/outlines schema",
+      "01dde09 feat: description capture + outline extraction",
+      "bb60f60 feat: draft generation + outlines/drafts API",
+      "f6525a9 feat: blog image generation API",
+      "bb3eea6 feat(dashboard): draft generation UI",
+      "aa271f9 fix(draft): opencode exe direct call + json parse + 90s timeout",
+      "bb1251c docs(env): bailian image key var"
+    ],
+    "open_questions": [
+      "이미지 생성용 qwen(BAILIAN) API 키 재발급 — .env.local의 BAILIAN_TOKEN_PLAN_API_KEY 설정 필요 (사용자 작업)",
+      "Vercel 배포 시 신규 엔드포인트 + ENV 변수(BAILIAN 키) 추가 필요",
+      "opencode CLI가 Vercel 서버리스에서 실행 가능한지 미검증 (현재는 GH Actions/로컬 전제, draft 생성이 90초 소요되어 Vercel 60초 제한에 걸릴 수 있음 — GH Actions 배치 우회 검토 필요)"
+    ],
+    "validation_criteria_status": {
+      "대시보드에서 키워드 → '글 생성' → deepseek 초안 반환": "✅ 로컬 스모크 확인",
+      "초안에 질문형 소제목 + 첫 문단 즉답 구조": "✅ 실제 생성물 확인",
+      "블로그 이미지 생성 후 초안 삽입": "⚠️ 키 재발급 대기 (코드·UI·503 안내 구현 완료)",
+      "전부 GitHub Actions/Vercel에서 실행": "⚠️ Vercel 배포 대기"
+    }
+  },
+  "next_steps": [
+    "이미지 생성용 BAILIAN API 키 재발급 → .env.local + Vercel Env 설정",
+    "Vercel 재배포 (npx vercel --prod) → 신규 엔드포인트 반영",
+    "opencode CLI의 Vercel 서버리스 호환성 검증 — 실패 시 GH Actions 배치로 초안 생성 우회 (draft_generator를 배치 작업으로 전환)",
+    "실사용 피드백 → 성과 추적(조회수/인용 체크)는 다음 버전"
+  ],
+  "assumptions": [
+    "초안 생성은 opencode-go/deepseek-v4-flash (확정)",
+    "이미지 생성은 qwen 계열 (확정) — 키 재발급 필요",
+    "반자동: 초안 → 사용자 검토·수정 → 수동 발행",
+    "로컬 PC 없이 클라우드 실행 (Vercel 배포는 미완료)"
+  ]
+}

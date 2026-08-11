@@ -18,3 +18,7 @@ data/
 docs/_html/
 .env*
 !.env.example
+
+# 로컬 에이전트 툴 설정 (머신 특정 경로 포함 — 커밋 금지)
+.commandcode/
+.qwen/
