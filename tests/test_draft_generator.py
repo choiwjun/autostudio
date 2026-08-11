@@ -229,6 +229,16 @@ def test_run_llm_no_bailian_key_no_fallback(monkeypatch):
         draft_generator._run_llm("프롬프트")
 
 
+def test_system_prompt_no_fabrication():
+    # P1-1: '실제 경험 기반' 표현은 허위 경험 창작을 유발 — 검증 가능한 정보와
+    # 창작 금지를 명시해야 함. AI 브리핑 인용 구조도 포함.
+    import draft_generator
+    sp = draft_generator.SYSTEM_PROMPT
+    assert "창작하지" in sp or "창작" in sp          # 경험·출처·수치 창작 금지
+    assert "실제 경험 기반" not in sp                 # 허위 경험 유발 표현 제거
+    assert "AI 브리핑" in sp                          # 인용 구조 프레임
+
+
 def test_run_llm_no_fallback_on_auth_error(monkeypatch):
     # 401(인증 오류)은 폴백 무의미 — 그대로 전파
     import draft_generator
