@@ -16,17 +16,24 @@ MYUNGLAB_DATA = os.path.join(
 
 @pytest.fixture(scope="module")
 def engine_db(tmp_path_factory):
-    """변환 스크립트를 실행해 테스트 전용 DB 생성 (원본 JSON 필요)."""
+    """테스트 전용 DB 생성.
+
+    - myunglab 원본 JSON이 있으면 변환 스크립트를 먼저 실행해 최신 데이터로 갱신
+    - 없으면 저장소에 커밋된 engine/data/engine.db(고정 데이터 1899~2101)를 사용
+      (원본 JSON 부재 시에도 비파괴 — 이전에는 서브프로세스 실패로 테스트가 깨짐)
+    """
+    import shutil
     import subprocess
     import sys
+
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = os.path.join(repo_root, "engine", "data", "engine.db")
+    if os.path.isdir(MYUNGLAB_DATA):
+        subprocess.run(
+            [sys.executable, "scripts/convert_engine_data.py", MYUNGLAB_DATA],
+            cwd=repo_root, check=True)
     db = tmp_path_factory.mktemp("engine") / "engine.db"
-    subprocess.run(
-        [sys.executable, "scripts/convert_engine_data.py", MYUNGLAB_DATA],
-        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        check=True)
-    # 변환 스크립트는 data/engine.db로 고정 — 임시 DB 복사
-    import shutil
-    shutil.copy("data/engine.db", db)
+    shutil.copy(src, db)
     return str(db)
 
 
