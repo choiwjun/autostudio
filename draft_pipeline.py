@@ -44,6 +44,13 @@ MIN_CALL_TIMEOUT = 15  # 이 미만 잔여 예산에선 호출 시작 무의미 
 # 소진하면 pass2 시작 자체가 불가능해 draft 없이 반환되던 500 경로 제거
 PASS2_RESERVE = 30
 FAKE_EXPERIENCE = ("제가 직접", "직접 사용해", "직접 분석해", "제 경험", "제가 해")
+# P1-2: 근거 없는 출처 표현 — AI가 지어낸 '조사·연구·통계' 인용은 신뢰도와
+# AI 인용(C-Rank·AI 브리핑)에 역효과. 검증 소스 없이는 '통상/보통'으로 완화해야 함.
+FAKE_SOURCE_PATTERNS = (
+    "조사에 따르면", "연구에 따르면", "통계에 의하면", "보고서에 따르면",
+    "전문가에 따르면", "데이터에 따르면", "설문에 따르면", "결과에 따르면",
+    "조사 결과", "연구 결과", "통계 결과", "발표에 따르면",
+)
 FAQ_MARKER = "자주 묻는 질문"
 STALE_MONTH_CUES = ("정답", "좋은", "추천", "떠나", "여행지", "지금", "이번", "가볼", "알맞", "최적", "성수기")
 STALE_MONTH_EXCEPTIONS = ("지난", "작년", "내년", "다음", "돌아보", "지났", "지나간", "예정", "계획", "예약", "미리", "부터", "까지", "당시", "회고", "후기")
@@ -429,6 +436,14 @@ def check_no_fake_experience(draft):
     return not any(f in body for f in FAKE_EXPERIENCE)
 
 
+def check_no_fake_sources(draft):
+    """P1-2: 근거 없는 출처 표현 감지 — '조사에 따르면'류 패턴이 제목·첫문단·본문에
+    있으면 실패. (검증된 출처가 없으므로 생성 단계에서는 전부 창작 위험)"""
+    text = "\n".join(
+        (draft.get(field) or "") for field in ("title", "first_paragraph", "body"))
+    return not any(p in text for p in FAKE_SOURCE_PATTERNS)
+
+
 # v19: 네이버 플레인 텍스트 검수 — 마크다운 기호 위반 감지
 def check_naver_plain_text(draft):
     body = draft.get("body", "")
@@ -470,6 +485,8 @@ def validate_draft(draft, keyword, current_date=None, platform=None,
         "faq": check_faq(draft),
         "keyword_density": check_keyword_density(draft, keyword),
         "no_fake_experience": check_no_fake_experience(draft),
+        # P1-2: 근거 없는 출처 표현 검수 (신뢰·AI 인용 보호)
+        "no_fake_sources": check_no_fake_sources(draft),
         "temporal_relevance": check_temporal_relevance(draft, current_date),
     }
     if platform == "naver":
@@ -586,6 +603,16 @@ def generate_two_pass(keyword, structure, runner=None, retry_budget_seconds=None
                     "'확인해야 하는 기준은' 같은 객관적 조언으로 고칠 것. "
                     "'제가', '직접' 등 1인칭 경험 표현은 전면 금지.\n")
             # D-1: 길이 계열 실측 주입 — 무피드백 맹재시도로 같은 실패가 반복되던 경로 제거
+            if "no_fake_sources" in failed:
+                hits = ", ".join(f"'{p}'" for p in FAKE_SOURCE_PATTERNS
+                                 if p in "\n".join(
+                                     (draft.get(f) or "") for f in
+                                     ("title", "first_paragraph", "body")))
+                qc_feedback += (
+                    "\n## 검수 피드백 (이번 작성분에 반드시 반영)\n"
+                    f"- 근거 없는 출처 표현({hits}) 감지 — 검증된 출처가 없으므로 "
+                    "이런 표현을 쓰지 말고, '통상', '보통', '확인해야 하는 기준'처럼 "
+                    "완화 표현으로 바꿀 것. 출처·기관명·통계를 창작하지 말 것.\n")
             if "body_length" in failed:
                 qc_feedback += (
                     "\n## 검수 피드백 (이번 작성분에 반드시 반영)\n"

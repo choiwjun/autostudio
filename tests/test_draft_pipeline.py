@@ -473,6 +473,29 @@ def test_generate_two_pass_density_feedback_in_retry():
     assert "10~15회" in retry_prompt      # 목표량 명시
 
 
+def test_check_no_fake_sources():
+    # P1-2: 근거 없는 출처 표현('조사에 따르면'류) 감지 — AI가 지어낸 출처가
+    # 신뢰도를 떨어뜨리고 AI 인용·C-Rank에 역효과
+    from draft_pipeline import check_no_fake_sources
+    good = _good_draft()
+    assert check_no_fake_sources(good)
+    bad = dict(good)
+    bad["body"] = good["body"] + "\n최근 조사에 따르면 80%가 만족합니다."
+    assert not check_no_fake_sources(bad)
+    bad2 = dict(good)
+    bad2["first_paragraph"] = "연구에 따르면 효과가 검증되었습니다."
+    assert not check_no_fake_sources(bad2)
+
+
+def test_validate_draft_rejects_fake_sources():
+    # P1-2: validate_draft가 no_fake_sources 항목으로 실패 처리
+    from draft_pipeline import validate_draft
+    draft = dict(_good_draft())
+    draft["body"] = draft["body"] + "\n통계에 의하면 3배 효과가 있습니다."
+    ok, failed = validate_draft(draft, "에어프라이어", platform="naver")
+    assert not ok and "no_fake_sources" in failed
+
+
 def test_generate_two_pass_body_length_feedback_in_retry():
     # D-1: 본문 길이·첫문단 미달 → 재생성 프롬프트에 실측 길이·목표 주입 (맹재시도 제거)
     import json as json_mod
