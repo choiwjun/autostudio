@@ -1466,10 +1466,11 @@ LIMIT ?"""
     def upsert_fortune_generation(self, ref_date, content_type, content,
                                   grounding="", status="generated"):
         """생성 멱등 키 — 같은 (기준일·타입) 이미 생성 시 스킵(False).
-        단, content가 빈 placeholder(생성 실패 잔재)면 재시도 허용 — 기존 행 갱신."""
+        재시도 허용: ① content가 빈 placeholder(생성 실패 잔재)
+        ② status=qc_failed (E-1 — 검수 실패분은 다음 실행에서 재생성, 영구 결손 방지)"""
         existing = self.get_fortune_generation(ref_date, content_type)
         if existing:
-            if existing["content"]:
+            if existing["content"] and existing["status"] != "qc_failed":
                 return False
             self._qd(
                 "UPDATE fortune_generations SET grounding = ?, updated_at = ? "

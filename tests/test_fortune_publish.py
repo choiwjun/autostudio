@@ -163,6 +163,28 @@ def test_upsert_retries_empty_placeholder(tmp_path):
     d.close()
 
 
+def test_upsert_retries_qc_failed(tmp_path):
+    # E-1: QC 실패(status=qc_failed) 행은 content 존재해도 재시도 허용 —
+    # content만으로 멱등 스킵하면 영구 결손. 재생성 성공(generated) 후엔 멱등.
+    d = _open(tmp_path)
+    d.upsert_fortune_generation("2026-08-10", "daily_blog",
+                                json.dumps(_blog_content(), ensure_ascii=False),
+                                grounding="g")
+    d.update_fortune_generation("2026-08-10", "daily_blog",
+                                json.dumps(_blog_content(), ensure_ascii=False),
+                                status="qc_failed")
+    assert d.upsert_fortune_generation("2026-08-10", "daily_blog", "",
+                                       grounding="g2")
+    row = d.get_fortune_generation("2026-08-10", "daily_blog")
+    assert row["grounding"] == "g2"
+    d.update_fortune_generation("2026-08-10", "daily_blog",
+                                json.dumps(_blog_content(), ensure_ascii=False),
+                                status="generated")
+    assert not d.upsert_fortune_generation("2026-08-10", "daily_blog", "",
+                                           grounding="g3")
+    d.close()
+
+
 def test_fortune_qc_failed_not_published(monkeypatch, tmp_path):
     import collect
 
