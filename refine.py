@@ -11,6 +11,9 @@ BLACKLIST_SUBSTRINGS = {
 # ("불법"+"대출", "사기" 단독)으로 충분히 차단되어 토큰 "대출"은 제거.
 BLACKLIST_TOKENS = {"성인", "도박", "불법", "사기", "토토"}
 LOAN_RISKY_COMBO_TOKENS = {"작업대출", "대환대출사기", "대출사기"}
+# C-1: '작업 대출'처럼 띄어쓴 조합 — 개별 토큰은 정상 금융어('대출', '작업')라
+# 단독 차단 불가, 두 토큰 동시 존재 시에만 차단
+LOAN_RISKY_TOKEN_PAIRS = (("작업", "대출"),)
 
 # 포털/플랫폼명이 토큰으로 포함된 브랜드 검색어 제거
 PORTAL_TOKENS = {
@@ -67,6 +70,8 @@ def reject_reason(w):
         return "token"
     if tokens & LOAN_RISKY_COMBO_TOKENS:
         return "substring"
+    if any(set(pair) <= tokens for pair in LOAN_RISKY_TOKEN_PAIRS):
+        return "token"
     if tokens & PORTAL_TOKENS:
         return "portal"
     if w in STOPWORDS:

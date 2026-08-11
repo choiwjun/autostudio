@@ -28,6 +28,17 @@ def test_compound_words_survive():
     assert rejected == []
 
 
+def test_loan_scam_spaced_combo_blocked():
+    # C-1: '작업대출'을 띄어 쓴 '작업 대출'도 차단 — substring('작업대출')과
+    # 단독 토큰('대출'은 v20에서 제거)을 모두 우회하던 구멍
+    kept, rejected = refine_keywords(["작업 대출", "작업 대출 후기"])
+    assert kept == []
+    assert all(r[1] == "token" for r in rejected)
+    # 정상 금융 키워드는 유지 ('대출' 단독 토큰 허용 유지)
+    kept2, _ = refine_keywords(["주택 대출 금리 비교", "전세 대출 조건"])
+    assert kept2 == ["주택 대출 금리 비교", "전세 대출 조건"]
+
+
 def test_stopwords_and_portal_tokens():
     # v3: 사유가 구분되어야 리젝 로그 주간 리뷰의 입력이 됨 (스펙 §4.2)
     kept, rejected = refine_keywords(["네이버 검색", "모르겠음", "정상 키워드"])
