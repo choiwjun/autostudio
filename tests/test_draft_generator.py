@@ -184,3 +184,63 @@ def test_run_llm_no_key_raises(monkeypatch):
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
     with pytest.raises(DraftGenerationError):
         draft_generator._run_llm("프롬프트")
+
+
+def test_run_llm_falls_back_to_bailian_on_quota(monkeypatch):
+    # v23.1: opencode-go 429(할당량 소진)/5xx → Bailian 자동 폴백 —
+    # 쿼터 소진 시 초안 생성이 며칠간 마비되지 않도록
+    import draft_generator
+    calls = []
+
+    def fake_post(url, payload, api_key, timeout, error_cls, err_prefix):
+        calls.append((url, payload, api_key))
+        if len(calls) == 1:  # opencode-go 호출이 429(쿼터)로 실패
+            raise error_cls("draft API http 429: quota exhausted")
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "og-key")
+    monkeypatch.setenv("BAILIAN_TOKEN_PLAN_API_KEY", "b-key")
+    monkeypatch.setattr(llm_client, "post_json", fake_post)
+    assert draft_generator._run_llm("프롬프트") == "ok"
+    assert len(calls) == 2
+    # 1차: opencode-go — thinking disabled
+    assert calls[0][0] == "https://opencode.ai/zen/go/v1/chat/completions"
+    assert calls[0][1]["thinking"] == {"type": "disabled"}
+    assert calls[0][2] == "og-key"
+    # 2차: Bailian 폴백 — enable_thinking + deepseek-v4-flash-0731
+    assert "token-plan" in calls[1][0]
+    assert calls[1][1]["model"] == "deepseek-v4-flash-0731"
+    assert calls[1][1]["enable_thinking"] is False
+    assert calls[1][2] == "b-key"
+
+
+def test_run_llm_no_bailian_key_no_fallback(monkeypatch):
+    # opencode-go 실패 + Bailian 키 없음 → 원래 에러 그대로 전파
+    import draft_generator
+
+    def fake_post(url, payload, api_key, timeout, error_cls, err_prefix):
+        raise error_cls("draft API http 429: quota exhausted")
+
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "og-key")
+    monkeypatch.delenv("BAILIAN_TOKEN_PLAN_API_KEY", raising=False)
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+    monkeypatch.setattr(llm_client, "post_json", fake_post)
+    with pytest.raises(DraftGenerationError):
+        draft_generator._run_llm("프롬프트")
+
+
+def test_run_llm_no_fallback_on_auth_error(monkeypatch):
+    # 401(인증 오류)은 폴백 무의미 — 그대로 전파
+    import draft_generator
+    calls = []
+
+    def fake_post(url, payload, api_key, timeout, error_cls, err_prefix):
+        calls.append(url)
+        raise error_cls("draft API http 401: invalid key")
+
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "og-key")
+    monkeypatch.setenv("BAILIAN_TOKEN_PLAN_API_KEY", "b-key")
+    monkeypatch.setattr(llm_client, "post_json", fake_post)
+    with pytest.raises(DraftGenerationError):
+        draft_generator._run_llm("프롬프트")
+    assert len(calls) == 1  # Bailian 호출 없음

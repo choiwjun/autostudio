@@ -23,9 +23,20 @@ class DraftGenerationError(Exception):
     pass
 
 
+# v23.1: 폴백 대상 오류 — 할당량 소진(429)·서버 오류(5xx)·네트워크 불가.
+# 401(키 오류)은 폴백해도 실패하므로 제외.
+_FALLBACK_ERROR_MARKERS = ("http 429", "http 5", "unreachable")
+
+
+def _should_fallback(err_text):
+    return any(m in err_text for m in _FALLBACK_ERROR_MARKERS)
+
+
 def _run_llm(prompt, timeout=90):
     # v23: 프로바이더 결정 — OPENCODE_GO_API_KEY가 있으면 OpenCode Go
     # (deepseek-v4-flash), 없으면 기존 Bailian(Token Plan) 폴백.
+    # v23.1: opencode-go가 할당량/서버 오류로 실패하면 Bailian으로 재시도 —
+    # 주간 쿼터 소진 시 초안 생성이 며칠간 마비되지 않도록.
     provider, base_url, model = llm_client.resolve_draft_provider()
     api_key = llm_client.resolve_draft_api_key()
     if not api_key:
@@ -47,10 +58,31 @@ def _run_llm(prompt, timeout=90):
         payload["thinking"] = {"type": "disabled"}
     else:
         payload["enable_thinking"] = False
-    data = llm_client.post_json(
-        f"{base_url}/chat/completions", payload,
-        api_key, timeout, DraftGenerationError, "draft API",
-    )
+    try:
+        data = llm_client.post_json(
+            f"{base_url}/chat/completions", payload,
+            api_key, timeout, DraftGenerationError, "draft API",
+        )
+    except DraftGenerationError as e:
+        if not (provider == "opencode-go" and _should_fallback(str(e))):
+            raise
+        bailian_key = llm_client.resolve_api_key()  # Bailian/DashScope
+        if not bailian_key:
+            raise
+        bailian_url = llm_client.resolve_base_url(
+            llm_client.DRAFT_BAILIAN_BASE_URL)
+        payload = {
+            "model": "deepseek-v4-flash-0731",
+            "messages": payload["messages"],
+            "temperature": 0.7,
+            "max_tokens": 5500,
+            "enable_thinking": False,
+        }
+        data = llm_client.post_json(
+            f"{bailian_url}/chat/completions", payload,
+            bailian_key, timeout, DraftGenerationError,
+            "draft API(bailian fallback)",
+        )
     try:
         content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as e:
