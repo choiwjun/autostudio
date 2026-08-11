@@ -525,6 +525,34 @@ def test_priority_sql_matches_v6_priority(tmp_path):
     d.close()
 
 
+def test_priority_sql_uses_measured_cpc_when_available(tmp_path):
+    # B-3: 실측 CPC(category_cpc_stats) 존재 시 PRIORITY_SQL은 보정 등급을 쓰고
+    # v6_priority(정적 등급 전용, 레거시)와는 다른 값이 됨 — '동일 수식' 보장은
+    # 실측이 없을 때만 성립. SQL이 베이지안 보정을 정확히 반영하는지 실측.
+    import scoring
+    d = make_db(tmp_path)
+    a = d.upsert_keyword("보험 비교 방법", category="보험", day="2026-08-01")
+    d.insert_daily_stats(a, "2026-08-02", {
+        "ai_cite_idx": 0.8, "demand_idx": 0.004, "demand_growth": 0.02})
+    # 보험: 정적 1.0, 실측 cpc=1000 → measured=1000/3000=0.3333, posts=5
+    d._qd("INSERT INTO category_cpc_stats (category, posts, revenue, "
+          "impressions, clicks, cpc, rpm, measured_tier, updated_at) "
+          "VALUES (?,?,?,?,?,?,?,?,?)",
+          ("보험", 5, 5000.0, 100000, 5, 1000.0, 50.0,
+           round(1000.0 / 3000.0, 3), "2026-08-10"))
+    rows = {r["keyword"]: r["priority"] for r in d.query_keywords()}
+    sql_p = rows["보험 비교 방법"]
+    # 베이지안: (3*1.0 + 5*0.333)/(3+5) = 0.5833 → 30*0.8 + 25*0.2 + 15*1.0
+    # (growth 0.02/0.15=0.133) + 30*0.5833 = 24+5+2.0+17.5 = 48.5
+    expected = round(30 * 0.8 + 25 * 0.2 + 15 * (0.02 / 0.15)
+                     + 30 * ((3 * 1.0 + 5 * (1000 / 3000.0)) / 8), 1)
+    assert sql_p == expected, f"SQL {sql_p} != 기대 {expected}"
+    # v6_priority(정적 1.0)와는 다름 — 실측 보정 경로는 Python 함수가 미커버
+    py_p = scoring.v6_priority(0.8, 0.004, 1.0, 0.02)
+    assert sql_p != py_p
+    d.close()
+
+
 def test_migrate_repairs_legacy_schema(tmp_path):
     # v15: 구버전(컬럼 누락) DB에서도 init()이 누락 컬럼만 보완 —
     # shop_click_idx는 마이그레이션 대상에서 빠져 insert가 깨지던 것의 회귀 방지.
