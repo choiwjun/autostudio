@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>plan</title>
+<style>
+:root { --accent:#2B5FDB; --bg:#ffffff; --fg:#1a1a2e; --muted:#666; --border:#e2e8f0; --code-bg:#f6f8fa; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#0f1117; --fg:#e6e6e6; --muted:#9ca3af; --border:#2a2f3a; --code-bg:#161b26; }
+}
+* { box-sizing: border-box; }
+body { font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; background:var(--bg);
+       color:var(--fg); line-height:1.7; margin:0; padding:2rem 1rem; }
+main { max-width: 860px; margin: 0 auto; }
+h1 { font-size:1.9rem; border-bottom:3px solid var(--accent); padding-bottom:.4rem; }
+h2 { font-size:1.4rem; margin-top:2.2rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.15rem; margin-top:1.6rem; }
+h4 { font-size:1rem; margin-top:1.2rem; color:var(--accent); }
+a { color:var(--accent); }
+code { background:var(--code-bg); padding:.15em .4em; border-radius:4px; font-size:.9em;
+       font-family:'JetBrains Mono','D2Coding',Consolas,monospace; }
+pre { background:var(--code-bg); padding:1rem; border-radius:8px; overflow-x:auto; border:1px solid var(--border); }
+pre code { background:none; padding:0; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.93rem; }
+th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); font-weight:600; }
+tr:nth-child(even) td { background:rgba(127,127,127,.05); }
+blockquote { border-left:4px solid var(--accent); margin:1rem 0; padding:.5rem 1rem;
+             background:rgba(43,95,219,.06); border-radius:0 6px 6px 0; }
+blockquote p { margin:.3rem 0; }
+hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
+li { margin:.25rem 0; }
+strong { font-weight:700; }
+.meta { color:var(--muted); font-size:.85rem; margin-bottom:1.5rem; }
+</style>
+</head>
+<body>
+<main>
+<div class="meta">📄 plan · 생성: 2026-08-13 20:42</div>
+<h1>이미지 프로바이더 폴백 + 쿼터 모니터링 알림 — 간이 계획 (plan.md)</h1>
+<blockquote>
+<p>작성: 개발팀 · 모드: small (요구사항팀 판정) · 근거: <code>requirements.md</code> (FR-1~FR-5, 테스트 5건)<br />
+승인 게이트: 본 plan + <code>tech-design.md</code> 승인 후 TDD 구현 시작</p>
+</blockquote>
+<h2>1. 목표</h2>
+<ol>
+<li>Bailian 이미지 쿼터 소진/장애 시 대표·섹션 이미지가 <strong>DashScope(wanx2.1-t2i-turbo)로 폴백</strong>되어 계속 생성되게 한다 (FR-1)</li>
+<li>배치 실행 단위 이미지 실패(시도/최종 실패/연속 실패)를 집계하고, 임계(연속 5건 또는 시도 5건+ 실패율 50% 초과) 초과 시 ERROR 로그 + <code>image_alert</code> → <strong>GH Actions 잡 실패 전파</strong>로 운영자 인지 (FR-4·FR-5)</li>
+<li><code>DASHSCOPE_API_KEY</code> 미설정 시 <strong>기존 동작 100% 불변</strong> (FR-2), 폴백도 실패하면 기존 예외 전파 (FR-3)</li>
+</ol>
+<h2>2. 수용 기준 대응 (AC → 구현 항목)</h2>
+<table>
+<thead>
+<tr>
+<th>AC</th>
+<th>구현 항목</th>
+<th>파일</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AC1-1/1-2/1-3</td>
+<td>Bailian 실패 → DashScope 재시도 <strong>정확히 1회</strong>, 성공 URL 반환</td>
+<td><code>image_gen.py</code> <code>_run_http</code> + <code>_dashscope_generate</code></td>
+</tr>
+<tr>
+<td>AC1-4</td>
+<td>폴백 시 WARNING 로그 (원본 예외 메시지 + 폴백 사용)</td>
+<td><code>image_gen.py</code></td>
+</tr>
+<tr>
+<td>AC2-1/2-2/2-3</td>
+<td>키 미설정 시 폴백 미호출·기존 예외 전파, 가드 메시지 유지</td>
+<td><code>image_gen.py</code> (가드 위치 불변)</td>
+</tr>
+<tr>
+<td>AC3-1/3-2</td>
+<td>폴백 실패 → <code>ImageGenerationError</code> (최종 원인 포함), 배치 격리 유지</td>
+<td><code>image_gen.py</code></td>
+</tr>
+<tr>
+<td>AC4-1/4-2/4-3</td>
+<td>결과 dict에 <code>image_attempts</code>·<code>image_failures</code> 추가 (백필+신규 모두 집계, 메모리 내)</td>
+<td><code>content_batch.py</code> + <code>image_gen.py</code> stats</td>
+</tr>
+<tr>
+<td>AC4-4</td>
+<td>배치 실행 이력 기록 — <strong><code>collection_runs</code>에 result 컬럼이 없음(실측)</strong> → 기존 <code>note</code> JSON에 이미지 집계 병기로 실현 (스키마 변경 금지 준수)</td>
+<td><code>collect.py</code></td>
+</tr>
+<tr>
+<td>AC5-1/5-2/5-3/5-4</td>
+<td>임계 판정(연속 5건 / 시도 5건+ 실패율&gt;50%), ERROR 로그 1건, 임계 미만 시 ERROR 없음</td>
+<td><code>content_batch.py</code></td>
+</tr>
+<tr>
+<td>AC5-5</td>
+<td>결과 dict <code>image_alert: True</code> → <code>collect.main()</code> <code>exit 1</code> (~3줄)</td>
+<td><code>collect.py</code></td>
+</tr>
+<tr>
+<td>AC5-6</td>
+<td>임계 초과여도 배치 정상 완주 (부분 성공 보존)</td>
+<td><code>content_batch.py</code> (기존 격리 유지)</td>
+</tr>
+</tbody>
+</table>
+<h2>3. 구현 범위 (Must 전부) / 제외</h2>
+<p><strong>포함</strong>: <code>image_gen.py</code> 폴백 + stats, <code>content_batch.py</code> 집계·판정·ERROR 로그, <code>collect.py</code> 연동(3줄+note 병기), <code>llm_client.py</code> (GET·헤더 지원 — 순수 추가, 기존 동작 불변), 테스트 5건+α, 문서 4종(02-trd·.env.example·CHANGELOG·VERIFICATION).</p>
+<p><strong>제외</strong>: <code>server.py</code> 서버리스 수동 생성, DB 스키마, 대시보드, 외부 알림 채널, 외부 라이브러리(urllib 유지).</p>
+<h2>4. 테스트 계획 (TDD — 테스트 먼저)</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>파일</th>
+<th>시나리오</th>
+<th>검증 AC</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T1</td>
+<td><code>tests/test_image_gen.py</code></td>
+<td>Bailian 실패 + DASHSCOPE 키 설정 → DashScope 1회 재시도·성공 URL</td>
+<td>AC1-1, 1-2, 1-3, 1-4</td>
+</tr>
+<tr>
+<td>T2</td>
+<td><code>tests/test_image_gen.py</code></td>
+<td>Bailian 실패 + 키 미설정 → 폴백 미호출·기존 예외 전파</td>
+<td>AC2-1</td>
+</tr>
+<tr>
+<td>T3</td>
+<td><code>tests/test_image_gen.py</code></td>
+<td>폴백도 실패 → <code>ImageGenerationError</code> (최종 원인 포함)</td>
+<td>AC3-1</td>
+</tr>
+<tr>
+<td>T4</td>
+<td><code>tests/test_content_batch.py</code></td>
+<td>연속 5건 실패(백필 5건) → ERROR 로그 + <code>image_alert=True</code></td>
+<td>AC5-1, 5-5</td>
+</tr>
+<tr>
+<td>T5</td>
+<td><code>tests/test_content_batch.py</code></td>
+<td>시도 5건 중 3건 실패(율 60%) → ERROR / 1건 실패(율 20%) → ERROR 없음</td>
+<td>AC5-2, 5-3</td>
+</tr>
+<tr>
+<td>T6+</td>
+<td><code>tests/test_content_batch.py</code></td>
+<td>판정 함수 단위 (연속 4건·시도 4건 실패율 100% → alert 없음: 소표본 가드)</td>
+<td>AC5-2</td>
+</tr>
+<tr>
+<td>T7+</td>
+<td><code>tests/test_collect.py</code></td>
+<td><code>run_collection</code> 결과 <code>image_alert=True</code> → <code>main()</code> <code>SystemExit(1)</code> / 미임계 → <code>exit 0</code></td>
+<td>AC5-5</td>
+</tr>
+<tr>
+<td>T8+</td>
+<td><code>tests/test_content_batch.py</code></td>
+<td>키 미설정 스킵 결과 dict 갱신 (신규 키 기본값 포함)</td>
+<td>AC4-1</td>
+</tr>
+</tbody>
+</table>
+<p><strong>기존 테스트 수정 (의도적 계약 변경 1건)</strong>: <code>tests/test_content_batch.py::test_skips_without_llm_key</code>가 결과 dict <strong>정확 일치</strong>를 단언 → FR-4로 dict 확장되므로 기대값에 신규 키 추가.</p>
+<h2>5. 검증 방법</h2>
+<ol>
+<li><code>./.venv/Scripts/python.exe -m pytest -q</code> 전체 통과 (기존 377 passed 유지 + 신규 ~8건)</li>
+<li>fable-prove-it — 각 수용 기준을 테스트/실행 증거로 대조</li>
+<li>code-review — diff 심사 (외부 라이브러리 없음·시그니처 불변·키 로그 미노출 확인)</li>
+</ol>
+<h2>6. 산출물</h2>
+<p><code>plan.md</code>·<code>plan.html</code> / <code>tech-design.md</code>·<code>tech-design.html</code> / <code>implementation-report.md</code>·<code>implementation-report.html</code> (모두 <code>pipeline/image-fallback/</code> 아래) + 소스 구현 + 문서 4종 갱신</p>
+</main>
+</body>
+</html>

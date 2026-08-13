@@ -2,6 +2,42 @@
 
 이 프로젝트의 버전 이력. 버전 규칙: 기능 단위로 커밋 메시지에 표기 (비공식 SemVer).
 
+## v26 — 2026-08-13 (이미지 프로바이더 폴백 · 쿼터 모니터링 알림)
+
+> VERIFICATION.md §6 미해결 항목 해소 — proposal-13-image-fallback (권장안 A+B 소형 패키지)
+
+### 추가
+- **DashScope 이미지 폴백** (`image_gen.py`, FR-1~FR-3) — Bailian 이미지 호출 실패(4xx/5xx·타임아웃·파싱 실패) 시
+  `DASHSCOPE_API_KEY`가 설정돼 있으면 `wanx2.1-t2i-turbo`로 **1회 재시도** (대표·섹션 공통 `_run_http` 레벨)
+  - ⚠️ 공식 문서 실측: wanx2.1은 **동기 호출 미지원** → 비동기 흐름 구현
+    (POST `image-synthesis` + `X-DashScope-Async: enable` → GET `/tasks/{id}` 3초 폴링, 예산 55s)
+  - 키 미설정 시 폴백 비활성 — 기존 동작 100% 불변 (FR-2), 폴백도 실패 시 최종 원인 포함 예외 전파 (FR-3)
+  - 폴백 발생 시 WARNING 로그 (원본 예외 메시지 + 폴백 모델, AC1-4)
+- **이미지 실패 집계·임계 알림** (`content_batch.py`·`collect.py`, FR-4/FR-5)
+  - 결과 dict에 `image_attempts`·`image_failures`·`image_alert` 추가 (백필+신규, 대표+섹션 전부 집계)
+  - 임계: **연속 5건 또는 시도 5건+ 실패율 50% 초과** → ERROR 로그 + `image_alert: True`
+  - `collect.py main()`: `image_alert`이면 `exit 1` → **GH Actions 잡 실패 전파** (기존 ERROR 로그만으로는
+    잡이 실패하지 않던 문제 해소 — 실측 기반, AC5-5)
+  - 배치 실행 이력: `collection_runs`에 result 컬럼이 없어(실측) **note JSON에 이미지 집계 병기** (AC4-4, 스키마 무변경)
+- `llm_client.py`: `post_json(headers=...)` 선택 헤더 + `get_json()` 추가 (순수 추가 — 기존 동작 불변)
+
+### 환경변수
+- `DASHSCOPE_API_KEY` 추가 (선택 — 미설정 = 폴백 비활성). **Bailian과 다른 계정 키 권장**
+- `DASHSCOPE_BASE_URL` 추가 (선택 — QA P2) — DashScope 리전별 호스트 오버라이드:
+  베이징 `https://dashscope.aliyuncs.com`(기본) / 싱가포르·국제 `https://dashscope-intl.aliyuncs.com`
+  (키 발급 리전과 호스트 불일치 시 인증 실패 — 국제 키 사용 환경에서 필수)
+
+### 테스트
+- 신규 11건: 폴백 4 (T1~T3 + P2 리전 오버라이드) · 집계·임계 5 (T4·T5a·T5b·T6 + P4 신규 초안 경로)
+  · collect 실패 전파 2 (T7a·T7b)
+- `test_skips_without_llm_key` 기대값 갱신 (FR-4 계약 — 결과 dict에 신규 키 추가)
+- 전체 pytest **388 passed / 10 skipped** (기존 377 + 신규 11)
+
+### 문서
+- `docs/planning/02-trd.md` 이미지 섹션 — 폴백·모니터링·성능(NFR-1) 반영, stale 문구(키 401) 갱신
+- `.env.example` — `DASHSCOPE_API_KEY` 옵션 항목
+- `docs/VERIFICATION.md` §6 — "미해결(별도 논의)" → 해소 표기
+
 ## v25 — 2026-08-11 (키워드 대시보드 UX 개선)
 
 ### 변경

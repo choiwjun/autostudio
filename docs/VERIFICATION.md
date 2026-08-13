@@ -108,4 +108,8 @@ POST /drafts 200 (43초) — 제목 '2026 다이어트방법 총정리, 요요 �
 | 11-fortune-channel.md | v23/v24 반영 (opencode-go 전환·프롬프트 개선), 도메인 현황 (space-daily.com = spacecl) |
 | 06-tasks.md | v1 태스크 아카이브 처리 (구현 완료 스탬프) |
 
-**미해결 (별도 논의)**: 이미지 프로바이더 폴백/쿼터 모니터링 알림 — 기획서에 미반영 상태.
+**해소 (v26, 2026-08-13)**: 이미지 프로바이더 폴백/쿼터 모니터링 알림 — `pipeline/image-fallback/requirements.md` 기획
+및 구현 완료 (proposal-13 권장안 A+B 소형 패키지, TDD 테스트 9건, pytest 386 passed).
+- 폴백: Bailian 실패 → DashScope `wanx2.1-t2i-turbo` 1회 재시도 (비동기 task 생성+폴링 — 동기 미지원 실측 반영)
+- 알림: 연속 5건 또는 시도 5건+ 실패율 50% 초과 → ERROR 로그 + `collect.py` `image_alert` `exit 1` → GH Actions 잡 실패 전파
+- 구현 상세: `pipeline/image-fallback/implementation-report.md` · `docs/planning/02-trd.md` · CHANGELOG v26

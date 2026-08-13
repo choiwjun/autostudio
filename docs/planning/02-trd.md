@@ -9,8 +9,15 @@
 - 프롬프트에 상위글 골격(구조 JSON)을 넣고 초안을 받아옴
 
 ### 이미지 생성
-- Aliyun Bailian CLI: `bl image generate` (qwen 계열: wan2.7-image / qwen-image)
-- ⚠️ 현재 API 키 401 무효 — 재발급 필요 (사용자 작업). 유효한 BAILIAN_TOKEN_PLAN_API_KEY가 `.qwen/settings.json`에 존재
+- Aliyun Bailian HTTP API (`image_gen.py`): 모델 `wan2.7-image`, 크기 `1280*720`, timeout 55s, 표준 라이브러리 urllib (v15)
+- **v26 폴백**: Bailian 호출 실패 시 DashScope `wanx2.1-t2i-turbo`로 1회 재시도 (FR-1).
+  `DASHSCOPE_API_KEY`가 **Bailian과 다른 계정**의 키일 것을 전제 — 미설정 시 폴백 비활성 (FR-2)
+- ⚠️ `wanx2.1-t2i-turbo`는 **HTTP 동기 호출 미지원**(공식 문서 실측) — 비동기 흐름:
+  POST `/api/v1/services/aigc/text2image/image-synthesis`(헤더 `X-DashScope-Async: enable`)
+  → GET `/api/v1/tasks/{task_id}` 3초 폴링(예산 55s) → `output.results[].url` (v26)
+- **v26 모니터링 (FR-4/FR-5)**: content_batch가 시도/최종 실패/연속 실패 집계 —
+  연속 5건 또는 시도 5건+ 실패율 50% 초과 시 ERROR 로그 + `image_alert` → `collect.py` exit 1
+  → GH Actions 잡 실패 전파 (배치 실행 이력은 `collection_runs.note` JSON에 병기)
 
 ### 서버리스
 - GitHub Actions 배치 (매일 07:17 KST 수집과 별개로, 글 생성은 사용자 트리거)
@@ -53,6 +60,7 @@
 
 - 초안 생성 응답: 60초 이내 (opencode CLI 1회 실행, Vercel 함수 60초 상한 내)
 - 이미지 생성: 비동기 처리 — 생성 중 "생성 중..." 상태 표시, 완료 후 URL 저장
+- 이미지 1건 최대 지연: 기존 55s → 폴백 포함 최대 약 110s (NFR-1 — 배치 예산 1200s·GH Actions 60분 내)
 - 동시 접속: 개인용 대시보드이므로 1명 가정 (별도 부하 대비 없음)
 
 ## 5. 개발 환경

@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>requirements</title>
+<style>
+:root { --accent:#2B5FDB; --bg:#ffffff; --fg:#1a1a2e; --muted:#666; --border:#e2e8f0; --code-bg:#f6f8fa; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#0f1117; --fg:#e6e6e6; --muted:#9ca3af; --border:#2a2f3a; --code-bg:#161b26; }
+}
+* { box-sizing: border-box; }
+body { font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; background:var(--bg);
+       color:var(--fg); line-height:1.7; margin:0; padding:2rem 1rem; }
+main { max-width: 860px; margin: 0 auto; }
+h1 { font-size:1.9rem; border-bottom:3px solid var(--accent); padding-bottom:.4rem; }
+h2 { font-size:1.4rem; margin-top:2.2rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.15rem; margin-top:1.6rem; }
+h4 { font-size:1rem; margin-top:1.2rem; color:var(--accent); }
+a { color:var(--accent); }
+code { background:var(--code-bg); padding:.15em .4em; border-radius:4px; font-size:.9em;
+       font-family:'JetBrains Mono','D2Coding',Consolas,monospace; }
+pre { background:var(--code-bg); padding:1rem; border-radius:8px; overflow-x:auto; border:1px solid var(--border); }
+pre code { background:none; padding:0; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.93rem; }
+th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); font-weight:600; }
+tr:nth-child(even) td { background:rgba(127,127,127,.05); }
+blockquote { border-left:4px solid var(--accent); margin:1rem 0; padding:.5rem 1rem;
+             background:rgba(43,95,219,.06); border-radius:0 6px 6px 0; }
+blockquote p { margin:.3rem 0; }
+hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
+li { margin:.25rem 0; }
+strong { font-weight:700; }
+.meta { color:var(--muted); font-size:.85rem; margin-bottom:1.5rem; }
+</style>
+</head>
+<body>
+<main>
+<div class="meta">📄 requirements · 생성: 2026-08-13 20:32</div>
+<h1>이미지 프로바이더 폴백 + 쿼터 모니터링 알림 — 요구사항 명세</h1>
+<blockquote>
+<p>작성: 요구사항팀 · 프로젝트: autostudio · 작업 디렉토리: <code>pipeline/image-fallback/</code><br />
+근거: <code>docs/planning/13-image-fallback.md</code> (제안서, 2026-08-11) — 사용자가 <strong>권장안 A+B 소형 패키지</strong> 승인<br />
+원본 요청: VERIFICATION.md §6 미해결 항목 — 이미지 생성 Bailian Token Plan 단일 프로바이더, 쿼터 소진/장애 시 대표·섹션 이미지 전량 누락 + 실패가 로그에만 남아 무감지</p>
+</blockquote>
+<h2>1. 배경 (실측 현황)</h2>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>실측 결과 (2026-08-11)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>이미지 프로바이더</td>
+<td><strong>Bailian Token Plan 단일</strong> — <code>image_gen.py</code> (모델 <code>wan2.7-image</code>, 크기 <code>1280*720</code>, timeout 55s)</td>
+</tr>
+<tr>
+<td>키 해석</td>
+<td><code>llm_client.resolve_api_key()</code> — <code>BAILIAN_TOKEN_PLAN_API_KEY</code> → <code>DASHSCOPE_API_KEY</code> 순 폴백 (둘 다 Alibaba 계열). <code>.env.example</code>에는 <code>DASHSCOPE_API_KEY</code> 미기재</td>
+</tr>
+<tr>
+<td>호출 경로</td>
+<td><code>generate_image()</code>(대표) / <code>generate_section_images()</code>(섹션 최대 8장) → 공통 <code>_run_http()</code> → <code>llm_client.post_json()</code></td>
+</tr>
+<tr>
+<td>실패 처리</td>
+<td>content_batch: <code>ImageGenerationError</code> catch → <strong>warning 로그 후 스킵</strong> (이미지 없는 초안 유지). 텍스트 LLM은 OpenCode Go ↔ Bailian 이중 폴백(v23)이 있으나 <strong>이미지는 폴백 없음</strong></td>
+</tr>
+<tr>
+<td>쿼터 모니터링</td>
+<td><strong>없음</strong> — 실패율/연속 실패 집계도, 알림도 없음</td>
+</tr>
+<tr>
+<td>알림 전파 (중요)</td>
+<td><code>collect.py main()</code>은 ① 자동완성 차단 ② <code>errors</code> 있고 스냅샷 0건일 때만 <code>exit 1</code>. <strong>ERROR 로그만으로는 GH Actions 잡이 실패하지 않음</strong> → 실패 전파를 달성하려면 <code>collect.py</code> 최소 연동 필요 (§6 FR-5)</td>
+</tr>
+</tbody>
+</table>
+<h2>2. 목표 &amp; 비목표</h2>
+<h3>목표</h3>
+<ol>
+<li>Bailian 이미지 쿼터 소진/장애 시에도 대표·섹션 이미지 생성이 계속되도록 <strong>DashScope 폴백 경로</strong> 제공</li>
+<li>이미지 실패 누적을 운영자가 감지할 수 있도록 <strong>실패 집계 + 임계 초과 알림</strong> (GH Actions 실패 전파)</li>
+<li>위 두 기능을 <strong>배치(GH Actions) 기준, 최소 변경</strong>으로 구현 (TDD, 테스트 5건)</li>
+</ol>
+<h3>비목표</h3>
+<ul>
+<li>서버리스 수동 생성(<code>server.py</code> <code>/drafts/{id}/image</code>) 폴백·알림 — <strong>범위 제외</strong> (사용자 결정)</li>
+<li>DB 스키마 변경 / 대시보드 UI 표시 — <strong>범위 제외</strong></li>
+<li>Slack·이메일 등 별도 알림 채널 — <strong>범위 제외</strong> (GH Actions 실패 전파가 기본 알림, 사용자 결정)</li>
+<li>타사 이미지 프로바이더(DALL-E·Stability 등) 도입 — <strong>범위 제외</strong> (제안서 옵션 C 비권장)</li>
+</ul>
+<h2>3. 타깃 (영향 파일)</h2>
+<table>
+<thead>
+<tr>
+<th>파일</th>
+<th>변경 성격</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>image_gen.py</code></td>
+<td>폴백 경로 추가 (권장안 A) — 대표·섹션 공통 <code>_run_http</code> 레벨</td>
+</tr>
+<tr>
+<td><code>content_batch.py</code></td>
+<td>실패 집계 + 임계 판정 + ERROR 로그 + 결과 dict 확장 (권장안 B)</td>
+</tr>
+<tr>
+<td><code>collect.py</code></td>
+<td><strong>최소 연동</strong> — <code>image_alert</code> 시 <code>exit 1</code> (실패 전파 실현, §6 FR-5)</td>
+</tr>
+<tr>
+<td><code>tests/test_image_gen.py</code></td>
+<td>폴백 테스트 3건</td>
+</tr>
+<tr>
+<td><code>tests/test_content_batch.py</code></td>
+<td>집계·임계 테스트 2~3건</td>
+</tr>
+<tr>
+<td><code>docs/planning/02-trd.md</code></td>
+<td>이미지 섹션에 폴백·모니터링 반영</td>
+</tr>
+<tr>
+<td><code>.env.example</code></td>
+<td><code>DASHSCOPE_API_KEY</code> 옵션 항목 추가 (미설정 = 폴백 비활성 명시)</td>
+</tr>
+<tr>
+<td><code>CHANGELOG.md</code> · <code>docs/VERIFICATION.md</code></td>
+<td>갱신 (§6 미해결 항목 해소 표시)</td>
+</tr>
+</tbody>
+</table>
+<h2>4. 범위</h2>
+<h3>포함</h3>
+<ul>
+<li>배치(GH Actions daily-collect)의 대표 이미지·섹션 이미지 생성 전 경로 (신규 생성 + 백필)</li>
+<li>Bailian 실패 → DashScope(<code>wanx2.1-t2i-turbo</code>) 1회 재시도</li>
+<li>배치 실행 단위 실패 집계 (시도/최종 실패/연속 실패)</li>
+<li>임계 초과 시 ERROR 로그 + <code>collect.py</code> 연동으로 GH Actions 잡 실패</li>
+<li>TDD 테스트 5건 + 문서 3종 반영</li>
+</ul>
+<h3>제외</h3>
+<ul>
+<li><code>server.py</code> 서버리스 수동 생성 경로 (폴백·알림 모두)</li>
+<li>DB 스키마·마이그레이션, 대시보드/프론트 변경</li>
+<li>Slack·이메일·PagerDuty 등 외부 알림 연동</li>
+<li>비동기 작업 폴링·재시도 큐 등 인프라 신설</li>
+</ul>
+<h2>5. 용어</h2>
+<table>
+<thead>
+<tr>
+<th>용어</th>
+<th>정의</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Bailian</td>
+<td>기본 이미지 프로바이더 (Token Plan, <code>wan2.7-image</code>)</td>
+</tr>
+<tr>
+<td>DashScope</td>
+<td>폴백 이미지 프로바이더 (Aliyun DashScope, <code>wanx2.1-t2i-turbo</code>)</td>
+</tr>
+<tr>
+<td>최종 실패</td>
+<td>폴백 포함 최종 시도까지 실패한 이미지 생성 호출 (호출부에서 <code>ImageGenerationError</code> 발생)</td>
+</tr>
+<tr>
+<td>시도(attempt)</td>
+<td>대표·섹션·백필을 통틀어 이미지 생성 호출 1회 (키 미설정 가드에서 중단되는 경우 제외)</td>
+</tr>
+<tr>
+<td>연속 실패</td>
+<td>성공 없이 이어진 최종 실패 건수</td>
+</tr>
+<tr>
+<td>실패율</td>
+<td>배치 실행 내 <code>최종 실패 건수 / 시도 건수</code></td>
+</tr>
+</tbody>
+</table>
+<h2>6. 기능 요구사항 (FR)</h2>
+<h3>FR-1 — DashScope 폴백 활성화 (M)</h3>
+<p>Bailian 호출이 실패하면, <code>DASHSCOPE_API_KEY</code>가 설정된 경우 DashScope <code>wanx2.1-t2i-turbo</code>로 <strong>1회 재시도</strong>한다. 대표 이미지(<code>generate_image</code>)와 섹션 이미지(<code>generate_section_images</code>) 모두 적용.</p>
+<p><strong>수용 기준 (검증 가능)</strong><br />
+- [ ] AC1-1: Bailian 호출이 실패(<code>ImageGenerationError</code> — HTTP 4xx/5xx·타임아웃·네트워크·응답 파싱 실패 모두)하고 <code>DASHSCOPE_API_KEY</code>가 설정되어 있으면, DashScope 엔드포인트로 동일 프롬프트·동일 파라미터(크기 <code>1280*720</code>, n=1)로 재시도가 정확히 1회 발생한다<br />
+- [ ] AC1-2: 폴백(DashScope)이 성공하면 성공 이미지 URL을 반환한다 — 호출부(<code>content_batch</code>)는 변경 없이 기존 성공 흐름(저장·카운트)을 탄다<br />
+- [ ] AC1-3: 폴백 시도는 <strong>1회로 제한</strong>된다 (2회 이상 재시도 금지 — 비용·지연 통제)<br />
+- [ ] AC1-4: 폴백 발생 시 WARNING 로그에 실패 원인(원본 예외 메시지)과 폴백 사용이 기록된다 (디버깅 가능성)</p>
+<h3>FR-2 — 키 미설정 시 graceful 비활성 (M)</h3>
+<p><code>DASHSCOPE_API_KEY</code>가 없으면 폴백 경로가 동작하지 않는다 — <strong>기존 동작 100% 불변</strong>.</p>
+<p><strong>수용 기준</strong><br />
+- [ ] AC2-1: <code>DASHSCOPE_API_KEY</code> 미설정 + Bailian 실패 → DashScope 호출이 발생하지 않고, 기존과 동일하게 <code>ImageGenerationError</code>가 전파된다<br />
+- [ ] AC2-2: 키 미설정 가드(<code>llm_client.has_api_key()</code> False → "이미지 키가 필요합니다")와 오류 메시지는 기존 그대로 유지된다 (<code>tests/test_image_gen.py::test_no_key_raises_clear_error</code> 계속 통과)<br />
+- [ ] AC2-3: <code>BAILIAN_TOKEN_PLAN_API_KEY</code>만 설정된 환경에서는 코드 경로·동작이 변경 전과 동일하다 (폴백 관련 코드 미실행)</p>
+<h3>FR-3 — 폴백 최종 실패 시 예외 전파 (M)</h3>
+<p>폴백(DashScope)도 실패하면 기존과 동일하게 <code>ImageGenerationError</code>를 전파한다 — 배치의 키워드 단위 격리·경고 로그·스킵 동작에 회귀가 없다.</p>
+<p><strong>수용 기준</strong><br />
+- [ ] AC3-1: Bailian·DashScope 모두 실패 → <code>ImageGenerationError</code> 발생, 메시지에 최종 실패 원인 포함<br />
+- [ ] AC3-2: <code>content_batch</code>의 기존 try/except 격리(한 키워드 실패가 배치 전체 중단 안 함)가 그대로 동작한다</p>
+<h3>FR-4 — 이미지 실패 집계 (M)</h3>
+<p><code>content_batch.run_content_batch()</code> 실행 단위로 이미지 생성 시도·최종 실패를 집계하고, 결과 dict에 노출한다.</p>
+<p><strong>수용 기준</strong><br />
+- [ ] AC4-1: 결과 dict에 <code>image_attempts</code>(시도 수)·<code>image_failures</code>(최종 실패 수)가 추가된다 (기존 키 <code>drafts_created</code>·<code>draft_images_created</code>는 유지)<br />
+- [ ] AC4-2: 백필 경로(<code>_backfill_images</code>)와 신규 생성 경로(<code>_create_draft</code>)의 실패가 모두 집계된다 (대표·섹션 포함)<br />
+- [ ] AC4-3: 집계는 프로세스 메모리 내에서만 수행 — DB 스키마 변경·신규 테이블 없음<br />
+- [ ] AC4-4: (부수 효과) <code>collect.py</code>가 결과를 <code>collection_runs.result</code>에 저장하므로 배치 실행 이력에 실패 집계가 자연 기록된다</p>
+<h3>FR-5 — 임계 초과 알림 (M)</h3>
+<p><strong>연속 5건 실패 또는 실패율 50% 초과</strong> 시 알림한다.</p>
+<p><strong>수용 기준</strong><br />
+- [ ] AC5-1: 배치 내 이미지 최종 실패가 <strong>연속 5건</strong>에 도달하면 ERROR 레벨 로그 1건이 출력된다 (시도 수와 무관 — 예: 시도 5건 전부 실패)<br />
+- [ ] AC5-2: 배치 내 <strong>실패율 50% 초과</strong>(최종 실패/시도 &gt; 0.5) 시 ERROR 로그 1건이 출력된다 (소표본 노이즈 방지: 실패율 판정은 시도 5건 이상일 때만 적용 — 연속 5건 규칙은 시도 수 무관)<br />
+- [ ] AC5-3: 임계 미만(예: 시도 5건 중 1건 실패)이면 ERROR 로그가 <strong>없고</strong> 기존 warning 로그만 유지된다<br />
+- [ ] AC5-4: ERROR 로그에는 집계 수치(시도/실패/연속 실패)와 원인 파악 힌트가 포함된다<br />
+- [ ] AC5-5: 임계 초과 시 결과 dict에 <code>image_alert: True</code>가 포함되고, <strong><code>collect.py main()</code>은 <code>image_alert</code>이면 <code>exit 1</code></strong> → GH Actions 잡 실패 → GitHub 기본 알림(메일)로 운영자 인지<br />
+- [ ] AC5-6: 임계 초과가 아니어도 배치 자체는 정상 완주한다 (부분 성공 보존 — 기존 설계 유지)</p>
+<blockquote>
+<p><strong>근거 (실측)</strong>: ERROR 로그만으로는 GH Actions 잡이 실패하지 않는다 (<code>collect.py main()</code>은 특정 조건에서만 exit 1). "GH Actions 실패 전파로 알림"을 실제로 달성하는 유일한 경로가 <code>collect.py</code>의 <code>image_alert</code> → <code>exit 1</code> 연동이다. 변경량은 ~3줄 수준.</p>
+</blockquote>
+<h2>7. 비기능 요구사항 (NFR)</h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>영역</th>
+<th>요구사항</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NFR-1</td>
+<td>성능</td>
+<td>폴백 재시도 1회 제한, 타임아웃 기존 55s 유지 — 이미지 1건 최대 지연은 기존의 2배(약 110s)까지 허용 (배치 예산 1200s 내, GH Actions 60분 내)</td>
+</tr>
+<tr>
+<td>NFR-2</td>
+<td>보안</td>
+<td>키는 환경변수로만 관리 (기존 패턴 유지), 로그·오류 메시지에 키 값 미포함, 프론트 노출 없음</td>
+</tr>
+<tr>
+<td>NFR-3</td>
+<td>호환</td>
+<td>기존 pytest 전체 통과 (현재 377 passed), 기존 public API 시그니처·반환형 불변</td>
+</tr>
+<tr>
+<td>NFR-4</td>
+<td>의존성</td>
+<td>외부 라이브러리 추가 금지 — 표준 라이브러리 <code>urllib</code> 유지 (GH Actions·Vercel 바이너리 제약)</td>
+</tr>
+<tr>
+<td>NFR-5</td>
+<td>운영</td>
+<td>임계 초과 시 하루 1회(GH Actions 일일 배치) 실패 알림 — 실시간 알림 아님을 명시</td>
+</tr>
+<tr>
+<td>NFR-6</td>
+<td>관측성</td>
+<td>실패 집계가 배치 실행 이력(<code>collection_runs.result</code>)에 기록되어 사후 분석 가능</td>
+</tr>
+</tbody>
+</table>
+<h2>8. 제약</h2>
+<ol>
+<li><strong>DashScope 별도 계정 키 전제</strong> — Bailian과 같은 Alibaba 계정이면 쿼터 소진이 동시 발생해 폴백이 무의미. <code>DASHSCOPE_API_KEY</code>가 별도 계정 키임을 전제 (키 미설정 시 graceful 비활성 — 사용자 결정)</li>
+<li>외부 라이브러리 추가 금지 (NFR-4)</li>
+<li>DB 스키마 변경 금지, 서버리스 범위 제외 (사용자 결정)</li>
+<li>TDD — 테스트를 먼저 작성하고 구현 (사용자 승인)</li>
+</ol>
+<h2>9. 우선순위 (M/S/C)</h2>
+<table>
+<thead>
+<tr>
+<th>우선순위</th>
+<th>항목</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>M (Must)</strong></td>
+<td>FR-1 폴백 활성, FR-2 graceful 비활성, FR-3 예외 전파, FR-4 실패 집계, FR-5 임계 알림·실패 전파, 테스트 5건, 문서 반영 (02-trd·.env.example·CHANGELOG·VERIFICATION)</td>
+</tr>
+<tr>
+<td><strong>S (Should)</strong></td>
+<td>AC1-4 폴백 로그, AC4-4 실행 이력 기록, AC5-3 임계 미만 무회귀 테스트, 에지 케이스 테스트 (DASHSCOPE 키만 있는 환경)</td>
+</tr>
+<tr>
+<td><strong>C (Could)</strong></td>
+<td>대시보드 표시·DB 스키마 (후속 작업), 서버리스 수동 생성 폴백 (후속 작업)</td>
+</tr>
+</tbody>
+</table>
+<h2>10. 성공 기준 (종합)</h2>
+<ol>
+<li><strong>Bailian 장애/쿼터 소진 시나리오</strong>: <code>DASHSCOPE_API_KEY</code>가 있으면 대표·섹션 이미지가 폴백으로 생성·저장된다 (신규·백필 경로 모두)</li>
+<li><strong>키 미설정 환경</strong>: 동작이 변경 전과 동일하고, 기존 테스트 전부 통과</li>
+<li><strong>연속 5건 또는 실패율 50% 초과</strong>: ERROR 로그 + <code>image_alert</code> → GH Actions 잡 실패로 운영자 인지 가능</li>
+<li><strong>임계 미만</strong>: 기존 warning 로그만, 잡은 성공</li>
+<li><strong>문서 정합</strong>: 02-trd.md 이미지 섹션·.env.example·CHANGELOG·VERIFICATION.md §6에 반영되어 제안서의 "기획 미반영" 해소</li>
+</ol>
+<h2>11. 오픈 질문 · 가정</h2>
+<h3>해소된 결정 (사용자 승인 완료 — 인터뷰 생략 사유)</h3>
+<table>
+<thead>
+<tr>
+<th>질문</th>
+<th>결정</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DashScope 별도 키 보유 여부</td>
+<td>키 있으면 폴백 활성, 없으면 비활성(graceful)</td>
+</tr>
+<tr>
+<td>알림 채널</td>
+<td>GH Actions 로그/실패 전파 (별도 Slack/이메일 없음)</td>
+</tr>
+<tr>
+<td>서버리스 수동 생성 실패</td>
+<td>범위 제외 (이번엔 배치 기준)</td>
+</tr>
+</tbody>
+</table>
+<h3>가정 (assumptions)</h3>
+<ol>
+<li><code>DASHSCOPE_API_KEY</code>는 Bailian과 <strong>다른 계정</strong>의 키로 운영한다 (같은 계정이면 쿼터 소진 동시 발생 — 폴백 의미 없음)</li>
+<li>폴백 트리거는 "Bailian 호출 실패" 전부로 한다 (사유별 분기 없음 — 단순·일관·테스트 용이). 401(키 오류)도 폴백 대상 (DashScope 키가 유효하면 정상 생성 가능)</li>
+<li><code>DASHSCOPE_API_KEY</code>만 설정된 환경에서는 Bailian 호출이 실패(401 등)한 뒤 폴백으로 동작한다 (불필요한 1회 호출 발생 — 기능상 문제 없음, 개선 여지는 tech-design에서 판단)</li>
+<li><code>wanx2.1-t2i-turbo</code>는 동기 응답을 지원한다 (비동기 task 폴링 불필요) — 구현 시 실제 응답 형식 실측 후 DashScope 응답 파싱(<code>output.results[].url</code>) 확정</li>
+<li>실패율 판정은 시도 5건 이상일 때만 적용한다 (소표본 100% 알림 노이즈 방지) — 제안서 수치의 명시적 해석</li>
+</ol>
+<h3>미해결 (구현 시 확정)</h3>
+<table>
+<thead>
+<tr>
+<th>질문</th>
+<th>소유자</th>
+<th>상태</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ERROR 로그만으로는 GH Actions 실패 불가 — <code>collect.py</code> 연동(exit 1) 범위 포함</td>
+<td>사용자/오케스트레이터</td>
+<td><strong>요구사항 FR-5로 포함 제안</strong> (변경 ~3줄). 반대 시 알림은 로그 노출까지만 가능</td>
+</tr>
+<tr>
+<td>DashScope 동기 응답 형식 실측 (<code>image-synthesis</code> 응답 구조)</td>
+<td>개발팀</td>
+<td>구현 시 실측</td>
+</tr>
+<tr>
+<td>폴백 실패 사유를 ERROR 로그에 포함할지 (원본 예외 메시지)</td>
+<td>개발팀</td>
+<td>AC5-4 권장</td>
+</tr>
+</tbody>
+</table>
+<h2>12. 테스트 요구사항 (TDD, 5건)</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>파일</th>
+<th>시나리오</th>
+<th>검증 (수용 기준)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T1</td>
+<td><code>tests/test_image_gen.py</code></td>
+<td>Bailian 실패 + <code>DASHSCOPE_API_KEY</code> 설정 → DashScope 재시도 1회, 성공 URL 반환</td>
+<td>AC1-1, AC1-2, AC1-3</td>
+</tr>
+<tr>
+<td>T2</td>
+<td><code>tests/test_image_gen.py</code></td>
+<td>Bailian 실패 + 키 미설정 → 폴백 미호출, 기존 예외 전파</td>
+<td>AC2-1</td>
+</tr>
+<tr>
+<td>T3</td>
+<td><code>tests/test_image_gen.py</code></td>
+<td>폴백(DashScope)도 실패 → <code>ImageGenerationError</code> 전파 (원본 원인 포함)</td>
+<td>AC3-1</td>
+</tr>
+<tr>
+<td>T4</td>
+<td><code>tests/test_content_batch.py</code></td>
+<td>연속 5건 실패 → ERROR 로그 + 결과 dict <code>image_alert=True</code></td>
+<td>AC5-1, AC5-5</td>
+</tr>
+<tr>
+<td>T5</td>
+<td><code>tests/test_content_batch.py</code></td>
+<td>실패율 50% 초과(시도 5+ 중 3건 실패) → ERROR 로그 / 임계 미만(1건 실패) → ERROR 없음</td>
+<td>AC5-2, AC5-3</td>
+</tr>
+</tbody>
+</table>
+<h2>13. 작업 규모 모드 판정</h2>
+<p><strong>모드: <code>small</code></strong> (요구사항팀 판정)</p>
+<table>
+<thead>
+<tr>
+<th>기준</th>
+<th>판정 근거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>성격</td>
+<td>단일 기능 묶음 — "이미지 생성 복원력" (폴백 + 모니터링은 한 기능의 두 축)</td>
+</tr>
+<tr>
+<td>요구사항 수</td>
+<td>핵심 FR 5개 (FR-1~5) + 문서·테스트 — small 기준(1~5개) 충족</td>
+</tr>
+<tr>
+<td>영향 범위</td>
+<td>소스 3개 파일 내외(<code>image_gen.py</code>·<code>content_batch.py</code> + <code>collect.py</code> 최소 연동), 테스트 2개 파일, 문서 3종 — 신규 서비스·아키텍처 변경 없음</td>
+</tr>
+<tr>
+<td>조사 필요성</td>
+<td><strong>외부 조사 불필요</strong> (경쟁·시장 조사 무관, API 스펙은 구현 시 실측)</td>
+</tr>
+<tr>
+<td>인프라</td>
+<td>DB 스키마·서버리스·배포 인프라 무변경</td>
+</tr>
+</tbody>
+</table>
+<p>→ <strong>small 모드 절차</strong>: ① 요구사항팀(본 문서) → ⑧ 개발팀(간이 plan/tech-design + TDD 구현) → ⑨ 개발QA팀(수용 기준 검증)</p>
+<hr />
+<p><em>산출물: 본 requirements.md · requirements.html · 요약 답신 (모드 판정 포함)</em></p>
+</main>
+</body>
+</html>

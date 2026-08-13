@@ -527,3 +527,33 @@ def test_schedule_run_with_budget_skips_fortune(tmp_path, monkeypatch):
     assert result.get("fortune_created", 0) == 0
     assert d.get_fortune_generation("2026-08-11", "daily_sns") is None
     d.close()
+
+
+# ============ v26: 이미지 임계 초과 시 GH Actions 실패 전파 (TDD — AC5-5, 테스트 T7) ============
+
+def _main_result_base():
+    return {"locked": False, "new_keywords": 0, "snapshotted": 0, "errors": [],
+            "partial": False, "crawl_stopped": None, "retired": 0,
+            "demand_updated": 0, "shop_clicks_updated": 0,
+            "drafts_created": 0, "draft_images_created": 0,
+            "fortune_created": 0}
+
+
+def test_image_alert_makes_main_exit_1(monkeypatch):
+    # v26(AC5-5): image_alert=True → main() exit 1 → GH Actions 잡 실패 전파
+    result = dict(_main_result_base(), image_alert=True,
+                  image_attempts=5, image_failures=5)
+    monkeypatch.setattr(collect, "run_collection", lambda *a, **k: result)
+    with pytest.raises(SystemExit) as exc:
+        collect.main()
+    assert exc.value.code == 1
+
+
+def test_image_alert_absent_or_false_exits_0(monkeypatch):
+    # v26(AC5-6): 임계 미만이면 기존대로 exit 0 (부분 성공 보존)
+    result = dict(_main_result_base(), image_alert=False,
+                  image_attempts=5, image_failures=1)
+    monkeypatch.setattr(collect, "run_collection", lambda *a, **k: result)
+    with pytest.raises(SystemExit) as exc:
+        collect.main()
+    assert exc.value.code == 0

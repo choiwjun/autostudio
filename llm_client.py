@@ -61,24 +61,10 @@ def strip_code_fence(text):
     return text.strip()
 
 
-def post_json(url, payload, api_key, timeout, error_cls, err_prefix):
-    """POST JSON → 응답 dict. HTTP 오류·타임아웃·잘못된 JSON 본문을 전부
+def _open_json(req, timeout, error_cls, err_prefix):
+    """urllib 요청 실행 → JSON dict. HTTP 오류·타임아웃·잘못된 JSON 본문을 전부
     error_cls(모듈 전용 예외)로 정규화 — raw JSONDecodeError가 전용 핸들러를
-    우회하던 경로 차단."""
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            # v23: OpenCode Go(zen/go)는 Cloudflare 앞단에서 urllib 기본 UA(1010)를
-            # 차단 — 브라우저 계열 UA로 통일 (Bailian에도 무해)
-            "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                           "AppleWebKit/537.36 (KHTML, like Gecko) "
-                           "Chrome/126.0.0.0 Safari/537.36"),
-        },
-        method="POST",
-    )
+    우회하던 경로 차단. post_json/get_json 공용 (v26)."""
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8")
@@ -93,3 +79,46 @@ def post_json(url, payload, api_key, timeout, error_cls, err_prefix):
         return json.loads(raw)
     except json.JSONDecodeError as e:
         raise error_cls(f"{err_prefix} bad json: {raw[:200]}") from e
+
+
+def _browser_headers(api_key, content_type=None):
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        # v23: OpenCode Go(zen/go)는 Cloudflare 앞단에서 urllib 기본 UA(1010)를
+        # 차단 — 브라우저 계열 UA로 통일 (Bailian에도 무해)
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/126.0.0.0 Safari/537.36"),
+    }
+    if content_type:
+        headers["Content-Type"] = content_type
+    return headers
+
+
+def post_json(url, payload, api_key, timeout, error_cls, err_prefix, headers=None):
+    """POST JSON → 응답 dict. HTTP 오류·타임아웃·잘못된 JSON 본문을 전부
+    error_cls(모듈 전용 예외)로 정규화 — raw JSONDecodeError가 전용 핸들러를
+    우회하던 경로 차단.
+    v26: headers — 추가 요청 헤더 (예: DashScope X-DashScope-Async). 기본 None =
+    기존 동작과 동일."""
+    req_headers = _browser_headers(api_key, content_type="application/json")
+    if headers:
+        req_headers.update(headers)
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers=req_headers,
+        method="POST",
+    )
+    return _open_json(req, timeout, error_cls, err_prefix)
+
+
+def get_json(url, api_key, timeout, error_cls, err_prefix):
+    """GET JSON → 응답 dict (v26 — DashScope 비동기 task 폴링용).
+    오류 정규화는 post_json과 동일."""
+    req = urllib.request.Request(
+        url,
+        headers=_browser_headers(api_key),
+        method="GET",
+    )
+    return _open_json(req, timeout, error_cls, err_prefix)

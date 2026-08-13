@@ -4,9 +4,17 @@
 # API 키 미설정 시 ImageGenerationError(명확한 안내)를 던져 텍스트 흐름은 유지한다.
 # v15: 키 해석·HTTP·오류 정규화는 llm_client 공용 레이어 사용. timeout/title은
 # 실제로 반영되도록 연결 (기존은 선언만 되고 무시되는 사어 인자였음).
+# v26: DashScope 폴백 (FR-1~FR-3) — Bailian 실패 시 wanx2.1-t2i-turbo로 1회 재시도.
+#   wanx2.1은 동기 호출 미지원(공식 문서 실측) → task 생성 + 폴링(async) 흐름.
+#   실패 집계 stats(attempts/failures/consecutive_failures)는 content_batch가
+#   reset/get — public 함수 시그니처는 불변.
+import logging
+import os
 import time
 
 import llm_client
+
+logger = logging.getLogger(__name__)
 
 IMAGE_MODEL = "wan2.7-image"
 IMAGE_SIZE = "1280*720"
@@ -23,6 +31,37 @@ _SINGLE_SCENE_RULES = (
     "테두리와 프레임 금지, 장면을 여러 개 나누어 그리지 말 것. "
     "이미지 안에 텍스트 없음, 글자·숫자·간판·로고·워터마크를 넣지 말 것."
 )
+
+# v26: DashScope 폴백 (요구사항 FR-1) — wanx2.1-t2i-turbo는 비동기 전용:
+# POST image-synthesis(X-DashScope-Async: enable) → GET /tasks/{id} 폴링.
+# 공식 문서(help.aliyun.com/zh/model-studio/text-to-image-v2-api-reference) 실측:
+# "wan2.5 및 이하 모델은 HTTP 동기 호출 미지원" — 응답은 output.results[].url.
+DASHSCOPE_IMAGE_MODEL = "wanx2.1-t2i-turbo"
+# QA P2: DashScope 리전별 호스트 — 키 발급 리전과 호스트가 다르면 인증 실패.
+#   베이징(중국 본토)      = https://dashscope.aliyuncs.com      (기본값)
+#   싱가포르·국제 리전     = https://dashscope-intl.aliyuncs.com
+# DASHSCOPE_BASE_URL env로 오버라이드 (호출 시점 평가 — 테스트·런타임 반영).
+DASHSCOPE_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com"
+DASHSCOPE_POLL_INTERVAL = 3.0   # 폴링 간격 (공식 권장 10s 이하 — RPS 20 제한 내)
+
+
+def _dashscope_base_url():
+    """DashScope 리전별 베이스 URL (QA P2): 기본 베이징, env 오버라이드 지원."""
+    return os.getenv("DASHSCOPE_BASE_URL", DASHSCOPE_DEFAULT_BASE_URL)
+
+# v26: 배치 실행 단위 실패 집계 (FR-4) — content_batch가 reset/get 호출.
+# public API 시그니처를 바꾸지 않고 모듈 상태로 집계 (서버리스 경로에도 무해).
+_IMAGE_STATS = {"attempts": 0, "failures": 0, "consecutive_failures": 0}
+
+
+def reset_image_stats():
+    """배치 시작 시 집계 초기화 (v26)."""
+    _IMAGE_STATS.update(attempts=0, failures=0, consecutive_failures=0)
+
+
+def get_image_stats():
+    """배치 종료 시 집계 조회 — 사본 반환 (v26)."""
+    return dict(_IMAGE_STATS)
 
 
 class ImageGenerationError(Exception):
@@ -96,6 +135,22 @@ def _build_prompt(keyword, title, thumbnail_ideas=None):
 
 
 def _run_http(image_prompt, timeout=IMAGE_TIMEOUT):
+    """이미지 생성 HTTP 호출 (v26: 시도 집계 + DashScope 폴백 오케스트레이션).
+    - attempts는 진입 시 1 증가 (키 미설정 가드는 generate_image 진입부에서
+      이미 raise되므로 시도로 집계되지 않음 — 요구사항 §5 용어 정의와 일치)
+    - 성공 시 연속 실패 0으로 리셋 / 최종 실패 시 failures·consecutive 증가
+    - Bailian 실패 → DASHSCOPE_API_KEY가 있으면 DashScope로 1회 재시도 (FR-1)"""
+    _IMAGE_STATS["attempts"] += 1
+    try:
+        url = _primary_generate(image_prompt, timeout)
+    except ImageGenerationError as primary_err:
+        url = _dashscope_fallback(image_prompt, timeout, primary_err)
+    _IMAGE_STATS["consecutive_failures"] = 0
+    return url
+
+
+def _primary_generate(image_prompt, timeout):
+    """Bailian(Token Plan) 1차 호출 — v15 코드 경로 그대로 (FR-2 불변)."""
     api_key = llm_client.resolve_api_key()
     base_url = llm_client.resolve_base_url(DEFAULT_BASE_URL)
     if base_url.endswith("/compatible-mode/v1"):
@@ -124,3 +179,79 @@ def _run_http(image_prompt, timeout=IMAGE_TIMEOUT):
     except (KeyError, IndexError, TypeError, StopIteration) as e:
         raise ImageGenerationError(f"image API bad response: {str(data)[:200]}") from e
     return url
+
+
+def _dashscope_fallback(image_prompt, timeout, primary_err):
+    """Bailian 실패 시 DashScope 폴백 (FR-1~FR-3).
+    - DASHSCOPE_API_KEY 미설정 → 폴백 미실행, 원본 예외 그대로 전파 (AC2-1)
+    - 폴백 실패 → ImageGenerationError에 최종 실패 원인 포함 (AC3-1)
+    - 폴백 발생 시 WARNING 로그 (원본 예외 메시지 + 폴백 모델 — AC1-4)"""
+    api_key = os.getenv("DASHSCOPE_API_KEY") or ""
+    if not api_key:
+        # AC2-1/AC2-3: 키 미설정 = graceful 비활성 — 기존 코드 경로·예외 불변
+        _IMAGE_STATS["failures"] += 1
+        _IMAGE_STATS["consecutive_failures"] += 1
+        raise
+    logger.warning("image API primary failed (%s) — retry via DashScope %s",
+                   primary_err, DASHSCOPE_IMAGE_MODEL)
+    try:
+        url = _dashscope_generate(image_prompt, timeout)
+    except ImageGenerationError as e:
+        _IMAGE_STATS["failures"] += 1
+        _IMAGE_STATS["consecutive_failures"] += 1
+        raise ImageGenerationError(
+            f"image API failed after dashscope fallback "
+            f"({DASHSCOPE_IMAGE_MODEL}): {e}") from e
+    return url
+
+
+def _dashscope_generate(image_prompt, timeout):
+    """DashScope wanx2.1-t2i-turbo 비동기 text2image (공식 문서 계약 실측 반영):
+    POST image-synthesis(X-DashScope-Async: enable) → GET /tasks/{id} 폴링(3s)
+    → output.results[0].url. 전체 예산 = timeout(기존 55s 유지 — NFR-1)."""
+    api_key = os.getenv("DASHSCOPE_API_KEY") or ""
+    started = time.monotonic()
+    deadline = started + timeout
+
+    def _remaining():
+        return deadline - time.monotonic()
+
+    base_url = _dashscope_base_url()  # QA P2: 리전별 호스트 (env 오버라이드)
+    data = llm_client.post_json(
+        f"{base_url}/api/v1/services/aigc/text2image/image-synthesis",
+        {
+            "model": DASHSCOPE_IMAGE_MODEL,
+            "input": {"prompt": image_prompt},
+            "parameters": {"size": IMAGE_SIZE, "n": 1},
+        },
+        api_key, max(1.0, min(timeout, _remaining())),
+        ImageGenerationError, "dashscope image API",
+        headers={"X-DashScope-Async": "enable"},
+    )
+    try:
+        task_id = data["output"]["task_id"]
+    except (KeyError, TypeError) as e:
+        raise ImageGenerationError(
+            f"dashscope image API bad response: {str(data)[:200]}") from e
+    while True:
+        remaining = _remaining()
+        if remaining <= 0:
+            raise ImageGenerationError(
+                f"dashscope image API timeout ({timeout}s) — "
+                f"task {task_id} not finished")
+        data = llm_client.get_json(
+            f"{base_url}/api/v1/tasks/{task_id}", api_key,
+            max(1.0, remaining), ImageGenerationError, "dashscope image API")
+        output = data.get("output") or {}
+        status = output.get("task_status", "")
+        if status == "SUCCEEDED":
+            try:
+                return output["results"][0]["url"]
+            except (KeyError, IndexError, TypeError) as e:
+                raise ImageGenerationError(
+                    f"dashscope image API bad response: {str(data)[:200]}") from e
+        if status == "FAILED":
+            raise ImageGenerationError(
+                f"dashscope image API task failed: "
+                f"{output.get('code', '')} {output.get('message', '')}".strip())
+        time.sleep(DASHSCOPE_POLL_INTERVAL)

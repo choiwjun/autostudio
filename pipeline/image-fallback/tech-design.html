@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tech-design</title>
+<style>
+:root { --accent:#2B5FDB; --bg:#ffffff; --fg:#1a1a2e; --muted:#666; --border:#e2e8f0; --code-bg:#f6f8fa; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#0f1117; --fg:#e6e6e6; --muted:#9ca3af; --border:#2a2f3a; --code-bg:#161b26; }
+}
+* { box-sizing: border-box; }
+body { font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; background:var(--bg);
+       color:var(--fg); line-height:1.7; margin:0; padding:2rem 1rem; }
+main { max-width: 860px; margin: 0 auto; }
+h1 { font-size:1.9rem; border-bottom:3px solid var(--accent); padding-bottom:.4rem; }
+h2 { font-size:1.4rem; margin-top:2.2rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.15rem; margin-top:1.6rem; }
+h4 { font-size:1rem; margin-top:1.2rem; color:var(--accent); }
+a { color:var(--accent); }
+code { background:var(--code-bg); padding:.15em .4em; border-radius:4px; font-size:.9em;
+       font-family:'JetBrains Mono','D2Coding',Consolas,monospace; }
+pre { background:var(--code-bg); padding:1rem; border-radius:8px; overflow-x:auto; border:1px solid var(--border); }
+pre code { background:none; padding:0; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.93rem; }
+th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); font-weight:600; }
+tr:nth-child(even) td { background:rgba(127,127,127,.05); }
+blockquote { border-left:4px solid var(--accent); margin:1rem 0; padding:.5rem 1rem;
+             background:rgba(43,95,219,.06); border-radius:0 6px 6px 0; }
+blockquote p { margin:.3rem 0; }
+hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
+li { margin:.25rem 0; }
+strong { font-weight:700; }
+.meta { color:var(--muted); font-size:.85rem; margin-bottom:1.5rem; }
+</style>
+</head>
+<body>
+<main>
+<div class="meta">📄 tech-design · 생성: 2026-08-13 21:07</div>
+<h1>이미지 프로바이더 폴백 + 쿼터 모니터링 — 간이 기술 설계 (tech-design.md)</h1>
+<blockquote>
+<p>작성: 개발팀 · 모드: small · 근거: <code>requirements.md</code> FR-1~FR-5 · 상태: <strong>승인 대기</strong><br />
+실측 기준: 현행 소스(image_gen.py v15·content_batch.py v17·collect.py·llm_client.py v23) + <strong>DashScope 공식 문서(help.aliyun.com, 2026-08-13 실측)</strong></p>
+</blockquote>
+<h2>1. 아키텍처 개요 (변경 전/후)</h2>
+<pre><code>변경 전:  generate_image / generate_section_images
+              └─ _run_http ── llm_client.post_json ──▶ Bailian (단일, 실패=누락+warning)
+변경 후:  generate_image / generate_section_images   (public 시그니처·가드 불변)
+              └─ _run_http (stats 집계 + 폴백 오케스트레이션)
+                   ├─ _primary_generate ──▶ Bailian (기존 코드 그대로 이동)
+                   └─ 실패 시 ── _dashscope_generate ──▶ DashScope wanx2.1 (1회, async task+폴링)
+content_batch: 결과 dict 확장(image_attempts/image_failures/image_alert) + 임계 판정·ERROR 로그
+collect:        run_collection 결과 merge → main() image_alert 시 exit 1 (+ note 병기)
+</code></pre>
+<h2>2. 폴백 레벨 결정 — <code>_run_http</code> 레벨 (FR-1 정합)</h2>
+<p><strong>결정: <code>_run_http</code> 레벨에서 폴백을 구현한다.</strong> (요구사항 §3 타깃 표의 "대표·섹션 공통 <code>_run_http</code> 레벨"과 일치)</p>
+<p>근거:<br />
+1. <strong>대표·섹션 공통 보장</strong>: <code>generate_image</code>(대표)·<code>generate_section_images</code>(섹션, 섹션당 1회 호출) 모두 기본 runner로 <code>_run_http</code>를 경유 → 폴백이 두 경로에 <strong>단일 구현</strong>으로 적용됨 (AC1-1). public 함수 레벨이면 두 곳에 중복 구현 + runner 주입 의미가 흐려짐.<br />
+2. <strong>재시도 1회 제한</strong> (AC1-3): 호출 1회(섹션 1장)당 폴백 1회 — 섹션 8장이면 섹션별 1회씩 최대 8회 재시도가 발생하지만 이는 "이미지 1건당 1회"의 정합 해석 (요구사항 용어: 시도 = 이미지 생성 호출 1회).<br />
+3. <strong>키 미설정 가드 불변</strong> (AC2-2): 가드는 <code>generate_image</code>/<code>generate_section_images</code> 진입부에 그대로 — <code>_run_http</code>에 도달한 호출만 시도로 집계 (요구사항 §5 "키 미설정 가드에서 중단되는 경우 제외"와 일치).<br />
+4. <strong>runner 주입 호환</strong>: <code>tests/test_api.py</code> 등이 <code>_run_http</code>를 monkeypatch하는 기존 테스트 패턴 그대로 유효 (폴백·stats는 교체된 runner에선 동작하지 않음 — 기존 테스트 의미 불변).</p>
+<h2>3. DashScope API 계약 — <strong>실측 결과 (요구사항 가정 대비 변경)</strong></h2>
+<h3>⚠️ 핵심 실측: wanx2.1-t2i-turbo는 <strong>HTTP 동기 호출 미지원, 비동기(task 생성→폴링) 전용</strong></h3>
+<p>출처: Aliyun Model Studio 공식 문서 <code>text-to-image-v2-api-reference</code> (2026-08-13 실측):</p>
+<blockquote>
+<p>"<strong>wan2.5 及以下版本模型</strong>: 支持 HTTP 异步调用…<strong>不支持 HTTP 同步调用</strong>" — wanx2.1-t2i-turbo(万相 2.1) 포함.<br />
+동기 호출은 wan2.6 이상만 지원. 비동기 헤더 누락 시 오류: "current user api does not support synchronous calls".</p>
+</blockquote>
+<p>요구사항 §11 가정 4("동기 응답 지원 — <code>output.results[].url</code> 형식")는 <strong>사실과 다름</strong>. <code>output.results[].url</code> 형식 자체는 폴링 응답에서 확인됨 (형식 유지, 흐름만 async).</p>
+<h3>적용 계약 (공식 문서 기반)</h3>
+<p><strong>① Task 생성 (POST)</strong></p>
+<pre><code>POST https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis
+Headers: Authorization: Bearer $DASHSCOPE_API_KEY · Content-Type: application/json
+         X-DashScope-Async: enable   (필수 — 누락 시 동기 미지원 오류)
+Body: { &quot;model&quot;: &quot;wanx2.1-t2i-turbo&quot;,
+        &quot;input&quot;: { &quot;prompt&quot;: &quot;&lt;동일 프롬프트&gt;&quot; },
+        &quot;parameters&quot;: { &quot;size&quot;: &quot;1280*720&quot;, &quot;n&quot;: 1 } }
+응답: { &quot;output&quot;: { &quot;task_id&quot;: &quot;...&quot;, &quot;task_status&quot;: &quot;PENDING&quot; }, &quot;request_id&quot;: &quot;...&quot; }
+</code></pre>
+<ul>
+<li>size: wan2.2 이하 규격 [512,1440]×[512,1440] — 1280<em>720 유효 (AC1-1 "동일 파라미터 크기 1280</em>720, n=1" 충족)</li>
+<li>prompt 길이: wan2.1 계열 <strong>500자 제한</strong> — 현행 프롬프트(대표 ~300자, 섹션 ~200자) 이내</li>
+<li>
+<p>n=1 (기본 4 — 비용 통제), watermark 기본 false (미전달)</p>
+</li>
+<li>
+<p><strong>리전별 호스트 (QA P2)</strong>: 기본 <code>https://dashscope.aliyuncs.com</code>(베이징),<br />
+<code>DASHSCOPE_BASE_URL</code> env로 오버라이드 — 싱가포르·국제 키는<br />
+<code>https://dashscope-intl.aliyuncs.com</code> (키 발급 리전과 호스트 불일치 시 인증 실패).<br />
+  호출 시점(<code>_dashscope_base_url()</code>) 평가 — import 시점 고정 아님</p>
+</li>
+</ul>
+<p><strong>② Task 조회·폴링 (GET)</strong></p>
+<pre><code>GET https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}
+Headers: Authorization: Bearer $DASHSCOPE_API_KEY
+응답(성공): { &quot;output&quot;: { &quot;task_status&quot;: &quot;SUCCEEDED&quot;,
+                          &quot;results&quot;: [ { &quot;url&quot;: &quot;https://dashscope-result-.../1.png&quot; } ] }, ... }
+응답(실패): { &quot;output&quot;: { &quot;task_status&quot;: &quot;FAILED&quot;, &quot;code&quot;: &quot;...&quot;, &quot;message&quot;: &quot;...&quot; }, ... }
+</code></pre>
+<ul>
+<li>폴링 간격 3초, <strong>예산 = 폴백 타임아웃(기존 55s) 내</strong> (NFR-1: 이미지 1건 최대 지연 ≈ 기존 2배 110s 유지)</li>
+<li>SUCCEEDED → <code>output.results[0].url</code> 반환 / FAILED → 예외(원인 포함) / 예산 소진 → 타임아웃 예외</li>
+<li>결과 URL 24시간 유효 — 기존 저장 흐름(즉시 DB 저장)과 정합</li>
+</ul>
+<h3>llm_client 확장 (순수 추가 — 기존 동작 불변)</h3>
+<ul>
+<li><code>post_json(..., headers=None)</code>: 선택 헤더 병합 (X-DashScope-Async 전달용, 기본 None = 기존과 동일)</li>
+<li><code>get_json(url, api_key, timeout, error_cls, err_prefix)</code>: GET + 동일 오류 정규화 (HTTP/URLError/Timeout/JSON 파싱 → 전용 예외)</li>
+<li>공용 <code>_open_json</code> 헬퍼로 중복 제거 — <strong>기존 post_json 동작·메시지 문자열 불변</strong> (기존 테스트로 증명)</li>
+</ul>
+<h2>4. 키 해석 규칙 (FR-2·가정 3 반영)</h2>
+<table>
+<thead>
+<tr>
+<th>환경</th>
+<th>Bailian 1차 호출</th>
+<th>DashScope 폴백</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>BAILIAN 키만</td>
+<td><code>resolve_api_key()</code>=Bailian 키 → 정상</td>
+<td><code>os.getenv("DASHSCOPE_API_KEY")</code> 없음 → <strong>폴백 미실행</strong>, 기존 예외 그대로 전파 (AC2-1·AC2-3)</td>
+</tr>
+<tr>
+<td>두 키 모두</td>
+<td>Bailian 키</td>
+<td>DASHSCOPE 키로 폴백 (AC1-1)</td>
+</tr>
+<tr>
+<td>DASHSCOPE 키만</td>
+<td><code>resolve_api_key()</code>=DASHSCOPE 키로 Bailian 엔드포인트 호출 → 실패(401) 예상</td>
+<td>DASHSCOPE 키로 폴백 동작 (가정 3 — 불필요한 1차 호출 1회, 기능상 문제 없음)</td>
+</tr>
+<tr>
+<td>키 없음</td>
+<td><code>generate_image</code> 진입부 가드가 raise (기존 메시지 "이미지 키가 필요합니다…")</td>
+<td>해당 없음 (AC2-2)</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>폴백 키는 <code>resolve_api_key()</code>가 아니라 <strong><code>DASHSCOPE_API_KEY</code> 직접 조회</strong> — Bailian 키가 DashScope 엔드포인트로 새는 것 방지 (NFR-2)</li>
+</ul>
+<h2>5. 실패 집계 설계 (FR-4)</h2>
+<h3>image_gen.py — 모듈 레벨 stats (public 시그니처 불변 유지)</h3>
+<pre><code class="language-python">_IMAGE_STATS = {&quot;attempts&quot;: 0, &quot;failures&quot;: 0, &quot;consecutive_failures&quot;: 0}
+def reset_image_stats(): ...   # 배치 시작 시 content_batch가 호출
+def get_image_stats(): ...     # 배치 종료 시 content_batch가 조회
+</code></pre>
+<ul>
+<li><code>_run_http</code> 진입 시 <code>attempts += 1</code> (가드 raise는 미도달 → 미집계 — 요구사항 용어 정의와 일치)</li>
+<li>성공(1차 또는 폴백) 시 <code>consecutive_failures = 0</code></li>
+<li>최종 실패(폴백 없음/폴백 실패) 시 <code>failures += 1</code>, <code>consecutive_failures += 1</code></li>
+<li>섹션 이미지: <code>generate_section_images</code> 내부 per-section catch는 유지 — 각 섹션 실패가 stats에 이미 반영됨 (AC4-2: 신규+백필, 대표+섹션 전부 집계)</li>
+</ul>
+<h3>content_batch.py — 판정 (AC5-1~5-3)</h3>
+<pre><code class="language-python">IMAGE_ALERT_CONSECUTIVE = 5
+IMAGE_ALERT_MIN_ATTEMPTS = 5   # 실패율 판정 최소 시도 (소표본 노이즈 방지 — 가정 5)
+def image_alert_triggered(attempts, failures, consecutive):
+    if consecutive &gt;= IMAGE_ALERT_CONSECUTIVE: return True
+    if attempts &gt;= IMAGE_ALERT_MIN_ATTEMPTS and failures * 2 &gt; attempts: return True
+    return False
+</code></pre>
+<ul>
+<li><code>run_content_batch</code> 시작: <code>image_gen.reset_image_stats()</code> → 종료: stats 조회 → 결과 dict 반영 + 임계 시 <code>logger.error</code> (집계 수치 + 원인 파악 힌트 포함 — AC5-4) + <code>image_alert=True</code> (AC5-5)</li>
+<li>결과 dict: <code>{"drafts_created", "draft_images_created", "image_attempts", "image_failures", "image_alert"}</code> — <strong>키 미설정 스킵 경로에도 신규 키 기본값 포함</strong> (일관성)</li>
+<li>배치 자체는 임계와 무관하게 정상 완주 (AC5-6 — 기존 격리·부분 성공 보존)</li>
+</ul>
+<h2>6. collect.py 연동 (FR-5 — AC5-5)</h2>
+<ul>
+<li><code>run_collection</code>: 결과 dict 초기값에 <code>image_attempts/image_failures/image_alert</code> 추가 + content_batch 결과 merge (~3줄)</li>
+<li><code>main()</code>: 기존 exit-1 조건(차단/전량 실패)에 <code>if result.get("image_alert"): raise SystemExit(1)</code> 추가 → GH Actions 잡 실패 → GitHub 메일 알림</li>
+<li>완료 로그에 이미지 시도/실패 수치 추가 (관측성)</li>
+</ul>
+<h3>⚠️ AC4-4 실측 불일치 대응 (설계 확정)</h3>
+<p>요구사항 AC4-4는 "collect.py가 결과를 <code>collection_runs.result</code>에 저장"을 전제하나 <strong>실측상 해당 컬럼이 없다</strong> (스키마: new_keywords/snapshotted/errors/note만 존재 — db.py 확인). DB 스키마 변경은 범위 제외이므로:<br />
+→ <strong>기존 <code>note</code> JSON 메커니즘에 이미지 집계를 병기</strong> (<code>{"found_raw":…, "image_attempts":…, "image_failures":…, "image_alert":…}</code>). 대시보드가 note의 found_raw만 읽고 미지 키는 무시함을 확인(static/index.html) — 추가 키는 무해. 발굴 없고 이미지 집계만 있으면 이미지 키만 기록. (스키마 무변경·NFR-6 사후 분석 충족)</p>
+<h2>7. 예외·로그 설계 (AC3-1·AC1-4)</h2>
+<ul>
+<li><strong>AC1-4 (폴백 WARNING)</strong>: <code>_dashscope_fallback</code>에서 폴백 직전 <code>logger.warning("image API primary failed (%s) — retry via DashScope %s", primary_err, "wanx2.1-t2i-turbo")</code> — 원본 예외 메시지 포함</li>
+<li><strong>AC3-1 (최종 실패 원인)</strong>: 폴백 실패 시 <code>raise ImageGenerationError(f"image API failed after dashscope fallback: {e}") from e</code> — 메시지에 DashScope 실패 원인, 예외 체인에 원본 보존</li>
+<li><strong>AC2-1 (키 미설정)</strong>: <code>_dashscope_fallback</code>는 키 없으면 카운터만 갱신하고 <strong>원본 예외를 그대로 re-raise</strong> (메시지 불변)</li>
+<li><strong>AC5-4 (ERROR 로그)</strong>: <code>logger.error("이미지 생성 실패 임계 초과: 시도 %d건, 최종 실패 %d건, 연속 실패 %d건 — Bailian/DashScope 키·쿼터 점검 필요…")</code></li>
+<li>NFR-2: 키 값은 로그·예외 메시지에 절대 미포함 (기존 패턴 유지 — post_json은 Bearer 헤더로만 사용)</li>
+</ul>
+<h2>8. 문서 반영 (구현·테스트 통과 후)</h2>
+<table>
+<thead>
+<tr>
+<th>파일</th>
+<th>반영 내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>docs/planning/02-trd.md</code></td>
+<td>이미지 섹션: 폴백(wanx2.1 async)·실패 집계·알림 반영, "키 401 무효" stale 문구 갱신</td>
+</tr>
+<tr>
+<td><code>.env.example</code></td>
+<td><code>DASHSCOPE_API_KEY</code> 옵션 항목 추가 (미설정 = 폴백 비활성 명시)</td>
+</tr>
+<tr>
+<td><code>CHANGELOG.md</code></td>
+<td>v26 항목 (폴백·모니터링·테스트 수)</td>
+</tr>
+<tr>
+<td><code>docs/VERIFICATION.md</code></td>
+<td>§6 "미해결(별도 논의)" → 해소 표기</td>
+</tr>
+</tbody>
+</table>
+<h2>9. 리스크·가정</h2>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>실측 대비 변경</td>
+<td>① wanx2.1 동기→<strong>async(생성+폴링)</strong> 전환 ② AC4-4 result 컬럼→<strong>note JSON 병기</strong> — 둘 다 요구사항의 "구현 시 실측/대비" 위임 범위</td>
+</tr>
+<tr>
+<td>실키 실측 불가</td>
+<td>유효한 DASHSCOPE_API_KEY가 없어 실제 호출 검증은 불가 — 공식 문서 계약으로 구현, 파싱은 실패 시 전용 예외로 정규화. 개발QA팀이 키 보유 시 실측 권장</td>
+</tr>
+<tr>
+<td>폴백 지연</td>
+<td>1건 최대 ~110s (55s×2) — 배치 예산 1200s·GH Actions 60분 내 (NFR-1 충족)</td>
+</tr>
+<tr>
+<td>호환성</td>
+<td>public 시그니처·반환형 불변 (stats는 모듈 함수로 은닉), llm_client는 순수 추가, 기존 377 테스트 전부 통과 목표</td>
+</tr>
+</tbody>
+</table>
+</main>
+</body>
+</html>

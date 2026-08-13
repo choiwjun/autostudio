@@ -507,7 +507,9 @@ def run_collection(cfg, client=None, today=None, trigger="schedule",
               "partial": False, "crawl_stopped": None, "retired": 0,
               "demand_updated": 0, "shop_clicks_updated": 0,
               "drafts_created": 0, "draft_images_created": 0,
-              "fortune_created": 0}
+              "fortune_created": 0,
+              # v26 (FR-4/FR-5): 이미지 실패 집계·알림 — content_batch 결과 merge
+              "image_attempts": 0, "image_failures": 0, "image_alert": False}
     try:
         # v3: 예산은 발굴·스냅샷·개별 호출 타임아웃까지 전 구간 적용
         discover(d, cfg, today, now, trigger, result, budget_seconds)
@@ -537,6 +539,10 @@ def run_collection(cfg, client=None, today=None, trigger="schedule",
                     result["drafts_created"] = batch.get("drafts_created", 0)
                     result["draft_images_created"] = batch.get(
                         "draft_images_created", 0)
+                    # v26 (FR-4/FR-5): 이미지 집계·알림 연동 (AC4-4 note 병기, AC5-5 exit 1)
+                    result["image_attempts"] = batch.get("image_attempts", 0)
+                    result["image_failures"] = batch.get("image_failures", 0)
+                    result["image_alert"] = batch.get("image_alert", False)
                 except Exception as e:
                     logger.warning("content batch failed: %s", e)
                     d.log_collection("(content)", "error", str(e), now)
@@ -556,13 +562,25 @@ def run_collection(cfg, client=None, today=None, trigger="schedule",
             status = "done"
         # v14 §1.2: 노이즈 유입률(거부율) — 발굴이 있었던 실행만 note에 JSON 기록
         # (대시보드는 collection_runs.note 파싱으로 노출 — 스펙 §5)
+        # v26 (AC4-4): collection_runs에는 result 컬럼이 없어(실측) 이미지 실패
+        # 집계를 같은 note JSON에 병기 — 스키마 무변경으로 사후 분석 충족.
+        # 대시보드는 note의 found_raw만 읽고 미지 키는 무시 (static/index.html 확인)
         note = ""
+        note_parts = {}
         if result.get("found_raw"):
-            note = json.dumps({
+            note_parts.update({
                 "found_raw": result["found_raw"],
                 "rejected": result.get("rejected", 0),
                 "reject_rate": round(result.get("rejected", 0) / result["found_raw"], 4),
-            }, ensure_ascii=False)
+            })
+        if result.get("image_attempts"):
+            note_parts.update({
+                "image_attempts": result["image_attempts"],
+                "image_failures": result.get("image_failures", 0),
+                "image_alert": bool(result.get("image_alert")),
+            })
+        if note_parts:
+            note = json.dumps(note_parts, ensure_ascii=False)
         d.finish_run(run_id, status, config_mod.now_kst_iso(), result, note)
     except Exception:
         d.finish_run(run_id, "failed", config_mod.now_kst_iso(), result)
@@ -584,11 +602,12 @@ def main():
         raise SystemExit(0)
     logger.info(
         "완료: 신규 %d개, 스냅샷 %d개, 수요갱신 %d개, 쇼핑클릭 %d개, 은퇴 %d개, "
-        "초안 %d개, 이미지 %d개, 운세 %d개, 오류 %d개%s",
+        "초안 %d개, 이미지 %d개, 운세 %d개, 오류 %d개, 이미지 시도 %d건·실패 %d건%s",
         result["new_keywords"], result["snapshotted"], result["demand_updated"],
         result["shop_clicks_updated"], result["retired"],
         result.get("drafts_created", 0), result.get("draft_images_created", 0),
         result.get("fortune_created", 0), len(result["errors"]),
+        result.get("image_attempts", 0), result.get("image_failures", 0),
         f" — 발굴 중단({result.get('crawl_stopped')})"
         if result.get("crawl_stopped") else "")
     # v3: 자동완성 차단은 스냅샷 성공 여부와 무관하게 exit 1 — 차단을 조기에 인지해야
@@ -598,6 +617,14 @@ def main():
         raise SystemExit(1)
     # 전량 실패 시 exit 1 → GitHub Actions 실패 메일로 조기 인지 (스펙 §5)
     if result["errors"] and result["snapshotted"] == 0:
+        raise SystemExit(1)
+    # v26 (AC5-5): 이미지 실패 임계 초과 시 exit 1 — ERROR 로그만으로는 GH Actions
+    # 잡이 실패하지 않아(실측) 알림이 안 되던 문제 해소. 실패 전파로 운영자 인지.
+    if result.get("image_alert"):
+        logger.error("이미지 생성 실패 임계 초과 (시도 %d건·실패 %d건) — "
+                     "GH Actions 잡 실패 전파: Bailian/DashScope 키·쿼터 점검 필요",
+                     result.get("image_attempts", 0),
+                     result.get("image_failures", 0))
         raise SystemExit(1)
     raise SystemExit(0)
 

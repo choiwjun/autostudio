@@ -20,6 +20,7 @@ from analyzer import analyze_keyword
 from draft_pipeline import generate_two_pass
 from image_gen import (
     ImageGenerationError, generate_image, generate_section_images,
+    get_image_stats, reset_image_stats,
 )
 from naver_client import NaverAPIError, NaverClient
 from outline import build_outline_structure
@@ -30,6 +31,22 @@ logger = logging.getLogger("content_batch")
 IMAGE_BACKFILL_LIMIT = 5          # 1회 실행 백필 대상 초안 수 상한
 HARD_DRAFT_BUDGET_SECONDS = 300   # 배치 초안 1건 생성 상한 (서버리스 아님)
 SECTION_IMAGE_BATCH_BUDGET = 400  # 배치 초안 1건의 섹션 이미지 예산
+# v26 (FR-5): 이미지 실패 임계 — 연속 5건 또는 시도 5건+ 실패율 50% 초과
+IMAGE_ALERT_CONSECUTIVE = 5
+IMAGE_ALERT_MIN_ATTEMPTS = 5      # 실패율 판정 최소 시도 (소표본 노이즈 방지 — 가정 5)
+IMAGE_ALERT_FAILURE_RATE = 0.5    # 실패율 임계 (50% 초과 시 알림)
+
+
+def image_alert_triggered(attempts, failures, consecutive):
+    """이미지 실패 임계 판정 (v26, AC5-1~AC5-3).
+    - 연속 5건: 시도 수 무관
+    - 실패율 50% 초과: 시도 5건 이상일 때만 적용 (소표본 노이즈 방지)"""
+    if consecutive >= IMAGE_ALERT_CONSECUTIVE:
+        return True
+    if attempts >= IMAGE_ALERT_MIN_ATTEMPTS and \
+            failures / attempts > IMAGE_ALERT_FAILURE_RATE:
+        return True
+    return False
 
 
 def _section_titles(body):
@@ -170,11 +187,15 @@ def _create_draft(d, cfg, client, keyword_row, today, now, deadline,
 
 def run_content_batch(d, cfg, today, now, client=None):
     """스케줄 수집 후반부에 실행되는 콘텐츠 배치. 반환: 카운트 dict.
-    LLM 키 없으면 조용히 생략 (수집 전용 환경 호환)."""
-    result = {"drafts_created": 0, "draft_images_created": 0}
+    LLM 키 없으면 조용히 생략 (수집 전용 환경 호환).
+    v26 (FR-4/FR-5): 이미지 생성 시도·최종 실패 집계 + 임계 초과 시
+    ERROR 로그·image_alert=True (collect.py가 exit 1로 전파)."""
+    result = {"drafts_created": 0, "draft_images_created": 0,
+              "image_attempts": 0, "image_failures": 0, "image_alert": False}
     if not llm_client.has_api_key():
         d.log_collection("(content)", "skip", "LLM 키 없음 — 콘텐츠 배치 생략", now)
         return result
+    reset_image_stats()  # v26: 배치 단위 집계 시작
     started = time.monotonic()
     # v17.3: 기본 예산 2400→1200 — 발굴·스냅샷(500키워드)·수요·쇼핑 합계가
     # GH Actions 잡 timeout(60분)을 넘기면 도중 kill로 당일 수집이 유실됨.
@@ -224,4 +245,20 @@ def run_content_batch(d, cfg, today, now, client=None):
                            keyword_row["keyword"], e)
             d.log_collection(keyword_row["keyword"], "error",
                              f"배치 초안 실패: {e}", now)
+    # v26 (FR-4/FR-5): 이미지 실패 집계 — 백필+신규(대표+섹션) 전부 image_gen stats에
+    # 누적됨 (AC4-2). 임계 초과 시 ERROR 로그 + image_alert (AC5-1~AC5-5).
+    stats = get_image_stats()
+    result["image_attempts"] = stats["attempts"]
+    result["image_failures"] = stats["failures"]
+    if image_alert_triggered(
+            stats["attempts"], stats["failures"],
+            stats["consecutive_failures"]):
+        result["image_alert"] = True
+        logger.error(
+            "이미지 생성 실패 임계 초과: 시도 %d건, 최종 실패 %d건, 연속 실패 %d건 — "
+            "Bailian/DashScope 키·쿼터 점검 필요 (임계: 연속 %d건 또는 시도 %d건 이상 "
+            "실패율 %.0f%% 초과)",
+            stats["attempts"], stats["failures"],
+            stats["consecutive_failures"], IMAGE_ALERT_CONSECUTIVE,
+            IMAGE_ALERT_MIN_ATTEMPTS, IMAGE_ALERT_FAILURE_RATE * 100)
     return result
