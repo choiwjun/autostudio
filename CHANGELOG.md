@@ -2,6 +2,20 @@
 
 이 프로젝트의 버전 이력. 버전 규칙: 기능 단위로 커밋 메시지에 표기 (비공식 SemVer).
 
+## v29.8 — 2026-08-14 (쇼츠·KDP 기획 문서 2차 개선 — 제3자 검토 7건 반영)
+
+### 개선
+- **14-shorts-pipeline.md** (쇼츠)
+  - S-1: 공유율 지표 모순 해소 — 채널 소유 시에만 핵심 지표(조건부), API 지표 중심 재구성
+  - S-2: 성과 측정 경로 표 신설 (API v3 / Studio / 수동 구분) + 채널 소유 게이트
+  - S-3: 파일럿 exit criteria — 쇼츠 30일(조회 1만+·완주율 70%+) / KDP 90일(50권+)
+  - S-4: edge-tts 비공식 API 라이선스 위험 + Piper/Kokoro 대체 검토
+- **12-kdp-pipeline.md** (KDP)
+  - K-1: epubcheck Java 의존성 — GH Actions openjdk 설치 + ebook-polish 폴백
+  - K-2: 영어/한국어 책 병행 — 전환율 30% 미만 시 KDP KR 확대
+  - K-3: AI 생성 표지도 AI-generated 공개 대상 명시 (QC #6)
+- 산출물 5종(plan·trd·userflow·tasks·test-design) 동기화 — AC 22·TC 66·태스크 갱신 (추적성 유지)
+
 ## v29.7 — 2026-08-14 (쇼츠+KDP 기획 다듬기 — 파이프라인 5단계)
 
 ### 기획

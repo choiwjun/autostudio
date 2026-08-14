@@ -37,7 +37,7 @@ strong { font-weight:700; }
 </head>
 <body>
 <main>
-<div class="meta">📄 test-design · 생성: 2026-08-14 17:40</div>
+<div class="meta">📄 test-design · 생성: 2026-08-14 18:22</div>
 <h1>쇼츠 + KDP 파이프라인 — 테스트 설계 (test-design.md)</h1>
 <blockquote>
 <p>작성: 기획팀 · 프로젝트: autostudio · 작성일: 2026-08-14 · 상위: <code>plan.md</code>(AC) · 모드: standard<br />
@@ -107,14 +107,14 @@ strong { font-weight:700; }
 <tr>
 <td>T-S1-08</td>
 <td>AC-S1-3</td>
-<td>공유율 ≥ 0.5% 후보 vs 미만 후보</td>
-<td>0.5%+ 후보 우선순위 상향</td>
+<td>공유율 ≥ 0.5% 후보 vs 미만 후보 (채널 소유 전제)</td>
+<td>0.5%+ 후보 우선순위 상향 — 조건부 지표 적용</td>
 </tr>
 <tr>
 <td>T-S1-09</td>
 <td>AC-S1-3</td>
 <td>shareCount API 미제공 (채널 비소유)</td>
-<td>공유율 대체(조회급상승+반응비) 적용 — 파일럿 검증 플래그</td>
+<td>공유율 판정에서 <strong>제외</strong>(참고용) — 조회급상승·조회/구독·반응비로 판정 (S-1)</td>
 </tr>
 <tr>
 <td>T-S1-10</td>
@@ -178,6 +178,12 @@ strong { font-weight:700; }
 <td>자막 폴백 + 대시보드 표시</td>
 </tr>
 <tr>
+<td>T-S2-07</td>
+<td>AC-S2-2</td>
+<td>TTS 라이선스 미검증 (비공식 API 우려)</td>
+<td>대체재(Piper/Kokoro) 검토·교체 결정 — 파일럿 전 게이트 (S-4)</td>
+</tr>
+<tr>
 <td>T-S2-06</td>
 <td>AC-S2-3</td>
 <td>스크립트 ready → 대시보드 조회</td>
@@ -200,7 +206,7 @@ strong { font-weight:700; }
 <td>T-K1-01</td>
 <td>AC-K1-1</td>
 <td>'곧 뜰' 키워드 10개 → 주제 선정</td>
-<td>영어 현지화 키워드 + 스냅샷(상위 20권) + 틈새 판정 + 후보 목록</td>
+<td>영어 현지화 + 스냅샷(상위 20권) + 틈새 판정 + <strong>영어/한국어 양쪽 후보</strong> + 후보 목록 (K-2)</td>
 </tr>
 <tr>
 <td>T-K1-02</td>
@@ -211,8 +217,14 @@ strong { font-weight:700; }
 <tr>
 <td>T-K1-03</td>
 <td>AC-K1-1</td>
-<td>영어 현지화 불가 키워드</td>
-<td>한국어 병행 옵션 플래그 표시</td>
+<td>영어 현지화 불가/영어 수요 낮음</td>
+<td>KDP KR 한국어 전자책 병행 표시 (K-2)</td>
+</tr>
+<tr>
+<td>T-K1-04</td>
+<td>AC-K1-1</td>
+<td>영어 전환율 30% 미만</td>
+<td>한국어 병행 비중 확대 권고 (K-2)</td>
 </tr>
 <tr>
 <td>T-K2-01</td>
@@ -242,7 +254,7 @@ strong { font-weight:700; }
 <td>T-K2-05</td>
 <td>AC-K2-2</td>
 <td>AI-generated 판정 (LLM 초안)</td>
-<td>출간 공개 문구 필수 표기</td>
+<td>출간 공개 문구 필수 표기 — <strong>본문+표지 모두</strong> (K-3)</td>
 </tr>
 <tr>
 <td>T-K2-06</td>
@@ -450,13 +462,19 @@ strong { font-weight:700; }
 <td>T-DB-01</td>
 <td>AC-DB-1</td>
 <td>대시보드 성과 탭 열람</td>
-<td>입력 폼 + 손익분기표 + 월별 집계</td>
+<td>입력 폼 + <strong>지표별 측정 경로(API/Studio/수동)</strong> + 손익분기표 + 월별 집계 (S-2)</td>
 </tr>
 <tr>
 <td>T-DB-02</td>
 <td>AC-DB-1</td>
 <td>미입력 상태</td>
 <td>빈 상태 안내 (0건)</td>
+</tr>
+<tr>
+<td>T-DB-03</td>
+<td>AC-DB-1</td>
+<td>채널 비소유 (완주율·공유수 미측정)</td>
+<td>완주율·공유수 입력 필드 비활성 — API 지표만 표시 (S-2)</td>
 </tr>
 </tbody>
 </table>
@@ -475,7 +493,7 @@ strong { font-weight:700; }
 <td>T-P1-01</td>
 <td>AC-P1-1</td>
 <td>S-2 판정 완료(후보 10개+) → 파일럿 게이트</td>
-<td>선정 기준 5종 스코어 → 상위 5개 쇼츠 확정, OQ-2 비중(운세4+KDP3+일반3) 대조 권고</td>
+<td>선정 기준 5종 스코어 → 상위 5개 쇼츠 확정, OQ-2 비중 대조 + <strong>exit criteria(30일: 조회 1만+·완주율 70%+) 기록 (S-3)</strong></td>
 </tr>
 <tr>
 <td>T-P1-02</td>
@@ -486,8 +504,8 @@ strong { font-weight:700; }
 <tr>
 <td>T-P1-03</td>
 <td>AC-P1-2</td>
-<td>K-1 완료(52주 후보) → KDP 파일럿 게이트</td>
-<td>아마존 스냅샷(상위 20권) 판정 → 경쟁도 통과 시 확정 + 시리즈 후보 표시</td>
+<td>K-1 완료(52주 후보 — 영어/한국어) → KDP 파일럿 게이트</td>
+<td>아마존 스냅샷 판정 → 경쟁도 통과 시 확정 + 시리즈 후보 + <strong>전환율 30% 미만 시 한국어 병행 확대 + exit criteria(90일: 50권+) 기록 (K-2·S-3)</strong></td>
 </tr>
 <tr>
 <td>T-P1-04</td>
@@ -604,8 +622,8 @@ strong { font-weight:700; }
 </tr>
 <tr>
 <td>P1</td>
-<td>T-S1-06~10, T-S2-01~06, T-SY-01~04, T-FT-01~06, T-P1-01~02</td>
-<td>핵심 기능·시너지·파일럿 게이트</td>
+<td>T-S1-06~10, T-S2-01~07, T-SY-01~04, T-FT-01~06, T-P1-01~05, T-K1-04</td>
+<td>핵심 기능·시너지·파일럿 게이트·한국어 병행</td>
 </tr>
 <tr>
 <td>P2</td>

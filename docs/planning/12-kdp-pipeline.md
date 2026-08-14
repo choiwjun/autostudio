@@ -67,17 +67,22 @@ Pillow>=10.0          # 표지 6×9 텍스트 오버레이 (K-3)
 # epubcheck·calibre는 시스템/워크플로우 도구 (아래)
 ```
 
-**GH Actions 러너 (K-3 검증 단계 — calibre 설치 추가)**:
+**GH Actions 러너 (K-3 검증 단계 — calibre + Java/epubcheck 설치)**:
 ```yaml
-- name: Install calibre + epubcheck
+- name: Install calibre + Java + epubcheck
   run: |
-    sudo apt-get update && sudo apt-get install -y calibre   # ebook-convert
-    # epubcheck: java -jar epubcheck.jar (릴리스 다운로드)
-- name: EPUB 검증
+    sudo apt-get update && sudo apt-get install -y calibre openjdk-17-jre-headless   # ebook-convert + Java(epubcheck 필수)
+    # epubcheck: java -jar epubcheck.jar (릴리스 다운로드 — Java 8+ 필요, K-1)
+- name: EPUB 검증 (epubcheck — Java)
   run: |
-    ebook-convert out.epub /tmp/check.mobi --debug-pipeline=2 2>&1 | tee epub-convert.log
     java -jar epubcheck.jar out.epub   # 에러 0 확인
+- name: EPUB 검증 (calibre ebook-polish --check — Java 불필요 대안, K-1)
+  run: |
+    ebook-polish --check out.epub 2>&1 | tee ebook-polish.log   # calibre 자체 검증기
+    ebook-convert out.epub /tmp/check.mobi --debug-pipeline=2 2>&1 | tee epub-convert.log
 ```
+
+> ⚠️ **K-1 (Java 의존성)**: epubcheck는 **Java 기반** — GH Actions 러너에 `openjdk-17-jre-headless` 설치 단계 필수. **Java 불필요 대안**: `calibre ebook-polish --check`로 EPUB 구조·OPF·스타일 검증 가능 → epubcheck 실패/미설치 시 폴백으로 사용. 두 검증 모두 통과 시 업로드 허용.
 
 > 리서치 근거: ebooklib+calibre+epubcheck 조합은 KDP 공식 지원 형식(EPUB)에 유효 — MOBI는 2025.3부터 fixed-layout 전용으로 수용 중단, reflowable EPUB 중심 ([KDP 파일 형식](https://kdp.amazon.com/help/topic/G200634390), [KPG](https://kdp.amazon.com/help/topic/GU72M65VRFPH43L6)).
 
@@ -111,7 +116,7 @@ kdp_publish   id · book_id(FK) · publish_date · price · royalty_rate · expe
 - 입력: v20 '곧 뜰' 프리셋 상위 키워드 + 카테고리(고CPC 우선)
 - **키워드→주제 변환 단계 (개선점 #4)**: ① 한국어 키워드 → 영어 현지화 (번역 + 아마존 검색어 관례 검토) ② **아마존 검색량 검증** (검색 결과 수·상위권 책 존재 여부 — 공개 API 부재로 스냅샷 방식, 12 §7 참조) ③ 수요/경쟁 판정
 - 아마존 검색 경쟁도 스냅샷: 상위권 권수·평점·가격대 → **틈새 판정** (경쟁 적음 + 수요 있음)
-- **한국어 전자책 병행 옵션**: 영어 현지화가 어려운 키워드는 한국어 전자책(KDP KR)으로 병행 명시 — 파일럿에서 판단
+- **한국어 전자책 병행 옵션 (K-2)**: 영어 현지화가 어려운 키워드 또는 영어 검색 수요가 낮은 키워드는 **KDP KR 한국어 전자책으로 병행** — 파일럿 게이트에서 영어/한국어 양쪽 후보 산출, 전환율(30% 미만 시 한국어 비중 확대)로 판정
 - 산출: 책 주제 후보(제목·설명·키워드·카테고리) → kdp_books
 
 ### kdp_book.py — 책 생성 (~5h)
@@ -135,7 +140,7 @@ kdp_publish   id · book_id(FK) · publish_date · price · royalty_rate · expe
 | 3 | 사실성 | 수치·주장 출처 검증 (추정은 "추정" 명시) | 허위 정보 금지 |
 | 4 | 챕터 간 중복 | 의미 중복 문단 검출 (embedding 유사도 ≥ 0.8 재작성) | 독자 경험·품질 |
 | 5 | 길이 | 챕터별 목표 ±20% (워크북 800~1,200단어/챕터), 책 6~12챕터 | 구조화 비소설 표준 |
-| 6 | **AI 표기** | **AI-generated vs AI-assisted 구분 판정 + 출간 시 공개 문구** (아래 상세) | KDP 의무 ([KDP Content Guidelines](https://kdp.amazon.com/help/topic/G200672390)) |
+| 6 | **AI 표기** | **AI-generated vs AI-assisted 구분 판정 + 출간 시 공개 문구** (아래 상세) — ⚠️ **AI 생성 표지(이미지)도 AI 표기 정책 대상** (KDP: "이미지·표지 포함", K-3) | KDP 의무 ([KDP Content Guidelines](https://kdp.amazon.com/help/topic/G200672390)) |
 | 7 | 마크다운 정합 | 코드블록·링크·테이블 파싱 오류 0, EPUB 변환 경고 0 | K-3 게이트 |
 | 8 | 메타데이터 | 제목·부제·설명·키워드(7개)·카테고리 2개·저자(펜네임) 검수 | KDP 검색 노출 |
 
@@ -143,6 +148,7 @@ kdp_publish   id · book_id(FK) · publish_date · price · royalty_rate · expe
 - **AI-generated** = "AI 도구가 실제 콘텐츠 생성 (이후 대폭 수정해도)" — 파이프라인 초안 LLM 생성물은 **AI-generated에 해당** → 출간 시 KDP에 **의무 공개** ([KDP Content Guidelines](https://kdp.amazon.com/help/topic/G200672390), [Authors Guild](https://authorsguild.org/news/amazons-new-disclosure-policy-for-ai-generated-book-content-/))
 - **AI-assisted = 공개 불필요** = "본인이 만들고 AI로 편집·교정·개선" 또는 "AI 브레인스토밍 후 직접 작성"
 - 출간 체크리스트에 "AI 생성 콘텐츠 공개" 항목 필수 포함
+- ⚠️ **K-3 (표지 AI 표기)**: **AI 생성 표지(이미지)도 AI-generated 공개 대상** — KDP 정책: "AI 도구가 이미지(표지·내부 삽화) 생성 시 공개 필수". 파이프라인 `image_gen`(Pillow 텍스트 오버레이 포함)으로 생성한 표지도 AI-generated로 간주 → QC #6에서 **본문 + 표지 모두** AI 표기 검사·공개 문구 포함
 
 ## 5. KDP 정책 게이트 (출간 시) — 개선점 #1·#5 반영
 
@@ -185,6 +191,11 @@ kdp_publish   id · book_id(FK) · publish_date · price · royalty_rate · expe
 
 **파일럿 실행 전 게이트**: 아마존 검색 "52 week money saving challenge" 상위 20권 스냅샷 → 경쟁도 판정 후 확정. '곧 뜰' 키워드와 교차 확인 (개선점 #4·#6 반영).
 
+**K-2 (한국어 책 병행 — 파일럿 게이트 검증 기준)**: '곧 뜰'(한국 트렌드) → 영어 책 전환율이 낮을 수 있으므로, 파일럿에서 **영어/한국어 양쪽 후보를 모두 산출**한다:
+- 영어 후보: '곧 뜰' 키워드 중 영어 현지화 + 아마존 검색 수요(스냅샷 상위 20권) 통과한 주제
+- 한국어 후보 (KDP KR): 영어 현지화가 어렵거나 영어 검색 수요가 낮은 키워드 → **KDP KR 한국어 전자책 병행**
+- **전환율 게이트**: 파일럿 K-1 실행 시 영어 후보 전환율(후보 수/키워드 수) 측정 → 전환율이 낮으면(예: 30% 미만) 한국어 병행 비중 확대. 영어·한국어 양쪽 후보를 파일럿 게이트 체크리스트에 포함 (개선점 #4·K-2)
+
 ### 시리즈 확장 공식
 - 검증된 주제 → 시리즈화 (52주 → 100일·분기·연간 변형, 난이도별 2~3권)
 - **엔진 자산 연계 (v22.5)**: 일주 분석(60일주) 문구 세트 → "60일주 성격 해석 가이드" 시리즈 — 결정적 계산 기반 = AI 환상 아님 (차별화, 11-fortune §1.5 연계)
@@ -193,11 +204,13 @@ kdp_publish   id · book_id(FK) · publish_date · price · royalty_rate · expe
 
 | 리스크 | 완화 |
 |---|---|
-| AI 생성 콘텐츠 제한 (일 3권·공개 표기) | 출간 게이트 체크리스트로 강제 (QC #6) |
+| AI 생성 콘텐츠 제한 (일 3권·공개 표기) | 출간 게이트 체크리스트로 강제 (QC #6 — 본문+표지 모두) |
+| AI 생성 표지 표기 누락 | QC #6에 표지(이미지) AI 표기 포함 — image_gen 산출물도 AI-generated 공개 (K-3) |
 | 전자책 시장 경쟁 | '곧 뜰' 키워드 기반 틈새 주제 + 시리즈 전략 + 경쟁도 스냅샷 |
 | 품질 (AI 소설 반감) | 구조화 워크북/가이드 파일럿 → 검증 후 장르 확장 |
 | 아마존 정책 변경 | 반자동(수동 업로드) 유지 + **48h 모니터링 게이트**로 정책·가격 변동 감지 |
-| 의존성 설치 누락 | requirements-dev.txt + GH Actions calibre/epubcheck 설치 단계 명시 (§2.1) |
+| 의존성 설치 누락 | requirements-dev.txt + GH Actions calibre·Java(epubcheck) 설치 단계 명시 (§2.1) |
+| epubcheck Java 런타임 미설치 | 러너에 openjdk 설치 단계 추가 + calibre ebook-polish --check 폴백 (K-1) |
 | 출간 후 미러/가격 오류 | 48h 확인 게이트 (책 상태·가격·미러) — 대시보드 monitoring 상태 |
 
 ## 9. KDP ↔ 쇼츠 시너지 (개선점 #8 — 14-shorts-pipeline.md §6과 상호 참조)

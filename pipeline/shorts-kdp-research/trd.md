@@ -15,8 +15,8 @@
 | 서버리스 | Vercel (60초 한도) | 조립·검증은 배치 전용, 대시보드는 다운로드만 |
 | 외부 API | YouTube Data API v3 | 무료 티어 10,000 units/일 |
 | LLM | 기존 draft_pipeline (OpenCode Go 우선, Bailian 폴백) | 스크립트·챕터 생성 |
-| TTS | edge-tts (오픈소스·무료) | OQ-4 결정 — 자막 병행 |
-| EPUB | ebooklib + calibre + epubcheck | K-3 — 의존성 명시 (개선점 #2) |
+| TTS | edge-tts (오픈소스·무료) + Piper/Kokoro 대체 검토 | OQ-4 결정 — 자막 병행, ⚠️ 비공식 API — 파일럿 전 라이선스 검증 (S-4) |
+| EPUB | ebooklib + calibre(ebook-polish --check) + epubcheck(Java 필요) | K-3 — 의존성 명시 (개선점 #2), Java 미설치 시 ebook-polish 폴백 (K-1) |
 | 표지 | Pillow + image_gen 확장 | 6×9 텍스트 오버레이 |
 
 ### 1.2 아키텍처 제약
@@ -66,16 +66,17 @@
 | 항목 | 요구사항 | 출처 |
 |---|---|---|
 | 공개 API | **없음** — 검색 경쟁도 스냅샷 방식 유지 (상위 20권 가격·평점·권수) | 리서치 §2.3 한계 |
+| 한국어 병행 | KDP KR 한국어 전자책 — 영어 전환율 30% 미만 시 병행 확대 | K-2 (파일럿 게이트) |
 | EPUB | Kindle Publishing Guidelines 준수, 업로드 전 Kindle Previewer 검증 권장 | [KDP 파일 형식](https://kdp.amazon.com/help/topic/G200634390) |
 | 로열티 | 35%/$0.99~ / 70%/$2.99~$12.99 (2026-07-07 확대) | [KDP Help](https://kdp.amazon.com/help/topic/G200644210) |
 | 타이틀 한도 | 공식 주 10권(포맷별) + 실질 일 3권 (2023.9) — **일 3권 게이트** | [KDP Help](https://kdp.amazon.com/help/topic/G202172740)·[가디언](https://www.theguardian.com/books/2023/sep/20/amazon-restricts-authors-from-self-publishing-more-than-three-books-a-day-after-ai-concerns) |
-| AI 표기 | AI-generated 공개 의무 / AI-assisted 면제 | [KDP Content Guidelines](https://kdp.amazon.com/help/topic/G200672390) |
+| AI 표기 | AI-generated 공개 의무 / AI-assisted 면제 — **본문+표지(이미지) 모두** | [KDP Content Guidelines](https://kdp.amazon.com/help/topic/G200672390) — K-3 |
 
 ### 4.3 기타
 
 | 항목 | 요구사항 |
 |---|---|
-| edge-tts | 오픈소스·무료 — 한국어 품질·목소리 저작권 파일럿 전 검증 |
+| edge-tts | 오픈소스·무료 — ⚠️ **비공식 API(상업 이용 약관 위반 소지)** 한국어 품질·목소리 저작권·대체재(Piper/Kokoro) 파일럿 전 검증 (S-4) |
 | 네이버 '곧 뜰' 프리셋 | K-1 입력 재사용 (기존 자산) |
 | 운세 엔진 | `engine/` Python 모듈 재사용 (60일주·별자리·띠) — 결정적 계산 |
 
@@ -111,6 +112,7 @@ kdp_publish   id · book_id(FK) · publish_date · price · royalty_rate · expe
 ### 5.3 데이터 정합 규칙 (NFR-3)
 
 - **공통 상수**: 일 3권(출간 게이트) · 쿼터 10,000 units/일 · 로열티 35%/70% · 70% 구간 $2.99~$12.99 · 손익분기($9.99→$6.93/권, 월$100=14권) — 14·12·11 문서와 동일 값, config 상수로 단일화 권장
+- **지표 상수 (S-1)**: 공유율(공유/조회 ≥ 0.5%)은 **채널 소유 시에만** 수집·판정 — `share_count` 컬럼은 예약, 비소유 시 NULL (14-shorts §4·§5.1과 동일)
 
 ## 6. 확장성 요건
 
@@ -135,8 +137,8 @@ kdp_publish   id · book_id(FK) · publish_date · price · royalty_rate · expe
 ## 8. 구현 시 주의사항 (개발팀 인계)
 
 1. **search.list 별도 버킷** (100회/일) — 쿼터 계산 로직에 반영, `videos.list`와 혼동 금지
-2. **shareCount 비공개** — 공유율 지표의 대체 설계 (파일럿 검증)
-3. **calibre·epubcheck 설치** — GH Actions 러너에 명시 (12-kdp §2.1), 로컬은 requirements-dev.txt
+2. **shareCount 비공개 (채널 소유 시에만)** — 공유율은 조건부 지표, 비소유 시 조회급상승·조회/구독·반응비로 판정 (S-1)
+3. **calibre·epubcheck 설치** — GH Actions 러너에 **calibre + openjdk(epubcheck Java 필수)** 명시 (12-kdp §2.1), Java 불필요 폴백: ebook-polish --check (K-1)
 4. **AI 표기 QC** — AI-generated 판정 로직 + 출간 체크리스트 (12-kdp QC #6)
 5. **엔진 데이터는 결정적** — 운세 카드 쇼츠는 LLM 환상 콘텐츠 금지 (11-fortune §8-1 원칙)
 6. **수동 업로드 UX** — 스크립트/EPUB/체크리스트 다운로드 중심, 자동 업로드 API 미구현

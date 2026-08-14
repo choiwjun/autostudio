@@ -37,7 +37,7 @@ strong { font-weight:700; }
 </head>
 <body>
 <main>
-<div class="meta">📄 tasks · 생성: 2026-08-14 17:40</div>
+<div class="meta">📄 tasks · 생성: 2026-08-14 18:22</div>
 <h1>쇼츠 + KDP 파이프라인 — 작업 분해 (tasks.md)</h1>
 <blockquote>
 <p>작성: 기획팀 · 프로젝트: autostudio · 작성일: 2026-08-14 · 상위: <code>plan.md</code>(AC) · 모드: standard<br />
@@ -121,7 +121,7 @@ strong { font-weight:700; }
 </tr>
 <tr>
 <td>세부</td>
-<td>① 지표 계산: 조회 급상승(24~48h)·공유율(공유/조회 ≥0.5%, 비공개 시 대체)·조회/구독 비율·반응비(보조) ② 틈새 판정(경쟁도) ③ TF-IDF/LLM 클러스터링 → 주제 추출 ④ evidence JSON 저장 ⑤ shorts_topics 테이블</td>
+<td>① 지표 계산: 조회 급상승(24~48h)·조회/구독 비율·반응비(보조)·틈새(경쟁도) ② <strong>공유율(공유/조회 ≥0.5%)은 채널 소유 시에만 조건부 적용, 비소유 시 제외 (S-1)</strong> ③ TF-IDF/LLM 클러스터링 → 주제 추출 ④ evidence JSON 저장 ⑤ shorts_topics 테이블</td>
 </tr>
 <tr>
 <td>의존성</td>
@@ -156,7 +156,7 @@ strong { font-weight:700; }
 </tr>
 <tr>
 <td>세부</td>
-<td>① draft_pipeline 2패스 재활용(플랫폼=shorts) ② 후킹(첫 3초)·길이(80~120자)·CTA·해시태그 3~5개 생성 ③ 검수: 금지어·허위 주장·길이·후킹 존재 ④ edge-tts 음성(선택) + 자막 폴백 ⑤ shorts_scripts 테이블 + 대시보드 노출용 필드</td>
+<td>① draft_pipeline 2패스 재활용(플랫폼=shorts) ② 후킹(첫 3초)·길이(80~120자)·CTA·해시태그 3~5개 생성 ③ 검수: 금지어·허위 주장·길이·후킹 존재 ④ <strong>edge-tts 음성(선택) + 자막 폴백 — 파일럿 전 TTS 라이선스 검증(비공식 API 우려, Piper/Kokoro 대체 검토, S-4)</strong> ⑤ shorts_scripts 테이블 + 대시보드 노출용 필드</td>
 </tr>
 <tr>
 <td>의존성</td>
@@ -191,7 +191,7 @@ strong { font-weight:700; }
 </tr>
 <tr>
 <td>세부</td>
-<td>① 대시보드 소재 탭: 목록(점수·근거)·상세(스크립트·해시태그·참고영상)·복사 버튼 ② 성과 입력 폼(조회·구독·완주율·수익) ③ 배치 스케줄 통합(daily-collect 패턴) ④ 손익분기 참고 표시(수익 탭)</td>
+<td>① 대시보드 소재 탭: 목록(점수·근거)·상세(스크립트·해시태그·참고영상)·복사 버튼 ② 성과 입력 폼(조회·구독·완주율·수익) — <strong>측정 경로 구분: API(조회·구독·반응비) / Studio(완주율·공유·수익 — 채널 소유 시) / 수동(수익·KDP 전환) (S-2)</strong> ③ 배치 스케줄 통합(daily-collect 패턴) ④ 손익분기 참고 표시(수익 탭)</td>
 </tr>
 <tr>
 <td>의존성</td>
@@ -227,7 +227,7 @@ strong { font-weight:700; }
 </tr>
 <tr>
 <td>세부</td>
-<td>① kdp_books·kdp_chapters·kdp_covers·kdp_publish 테이블 ② 영어 현지화(번역+아마존 검색어 관례) ③ 아마존 검색 스냅샷(상위 20권 가격·평점·권수 — 공개 API 없음, 스냅샷 방식) ④ 틈새 판정(경쟁 적음+수요 있음) ⑤ 한국어 병행 옵션 플래그</td>
+<td>① kdp_books·kdp_chapters·kdp_covers·kdp_publish 테이블 ② 영어 현지화(번역+아마존 검색어 관례) ③ 아마존 검색 스냅샷(상위 20권 가격·평점·권수 — 공개 API 없음, 스냅샷 방식) ④ 틈새 판정(경쟁 적음+수요 있음) ⑤ <strong>영어/한국어 양쪽 후보 산출 + 전환율 30% 미만 시 KDP KR 병행 확대 (K-2)</strong></td>
 </tr>
 <tr>
 <td>의존성</td>
@@ -262,7 +262,7 @@ strong { font-weight:700; }
 </tr>
 <tr>
 <td>세부</td>
-<td>① 아웃라인(6~12챕터) ② 챕터별 2패스 생성 ③ 일관성 보정 패스(어조·용어·시점) ④ QC 8항목: 표절 유사성·금지어·사실성·챕터 간 중복(임베딩 ≥0.8)·길이(±20%)·AI 표기(생성/보조 구분)·마크다운 정합·메타데이터 ⑤ 챕터당 하드 예산 300초(부분 생성·재개)</td>
+<td>① 아웃라인(6~12챕터) ② 챕터별 2패스 생성 ③ 일관성 보정 패스(어조·용어·시점) ④ QC 8항목: 표절 유사성·금지어·사실성·챕터 간 중복(임베딩 ≥0.8)·길이(±20%)·AI 표기(생성/보조 구분 — <strong>본문+표지 모두, K-3</strong>)·마크다운 정합·메타데이터 ⑤ 챕터당 하드 예산 300초(부분 생성·재개)</td>
 </tr>
 <tr>
 <td>의존성</td>
@@ -297,7 +297,7 @@ strong { font-weight:700; }
 </tr>
 <tr>
 <td>세부</td>
-<td>① ebook_builder.py: 목차·챕터·메타 조립 ② 표지: image_gen(6×9)+Pillow 텍스트 오버레이 ③ GH Actions: calibre 설치 + ebook-convert(에러·경고 0) + epubcheck ④ requirements-dev.txt에 ebooklib·Pillow 명시 ⑤ Vercel은 다운로드만 (60초 한도)</td>
+<td>① ebook_builder.py: 목차·챕터·메타 조립 ② 표지: image_gen(6×9)+Pillow 텍스트 오버레이 ③ GH Actions: <strong>calibre + openjdk(epubcheck 필수) 설치</strong> + ebook-convert(에러·경고 0) + epubcheck, <strong>Java 불필요 폴백: calibre ebook-polish --check (K-1)</strong> ④ requirements-dev.txt에 ebooklib·Pillow 명시 ⑤ Vercel은 다운로드만 (60초 한도)</td>
 </tr>
 <tr>
 <td>의존성</td>

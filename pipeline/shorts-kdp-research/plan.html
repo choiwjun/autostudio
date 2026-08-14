@@ -37,7 +37,7 @@ strong { font-weight:700; }
 </head>
 <body>
 <main>
-<div class="meta">📄 plan · 생성: 2026-08-14 17:40</div>
+<div class="meta">📄 plan · 생성: 2026-08-14 18:22</div>
 <h1>쇼츠 + KDP 파이프라인 — 제품 요구사항 (plan.md)</h1>
 <blockquote>
 <p>작성: 기획팀 · 프로젝트: autostudio · 작업 디렉토리: <code>pipeline/shorts-kdp-research/</code><br />
@@ -303,8 +303,8 @@ strong { font-weight:700; }
 </tr>
 <tr>
 <td>AC-S1-3</td>
-<td><strong>Given</strong> 후보 목록 / <strong>When</strong> 공유율·급상승 지표 산출 / <strong>Then</strong> 반응비는 보조 가중치로만 사용, 공유/조회 ≥ 0.5% 후보 우선</td>
-<td>• shareCount API 미제공 시: 조회급상승+반응비 대체(파일럿 검증)</td>
+<td><strong>Given</strong> 후보 목록 / <strong>When</strong> 공유율·급상승 지표 산출 / <strong>Then</strong> ① 반응비는 보조 가중치로만 사용 ② 공유/조회 ≥ 0.5% 후보 우선 — <strong>단, 공유율은 채널 소유 시(파일럿 후)에만 핵심 지표로 승격, 비소유 시 판정에서 제외(참고용)</strong></td>
+<td>• shareCount API 미제공(채널 비소유): 공유율 제외 + 조회급상승·조회/구독·반응비로 판정 (S-1)</td>
 </tr>
 <tr>
 <td>AC-S1-4</td>
@@ -338,8 +338,8 @@ strong { font-weight:700; }
 </tr>
 <tr>
 <td>AC-S2-2</td>
-<td><strong>Given</strong> 스크립트 ready / <strong>When</strong> TTS 실행 / <strong>Then</strong> edge-tts 음성 파일 생성(성공 시), 실패 시 자막만 산출</td>
-<td>• TTS 실패: 자막 폴백, 대시보드 표시</td>
+<td><strong>Given</strong> 스크립트 ready + TTS 라이선스 검증 통과(파일럿 전 게이트) / <strong>When</strong> TTS 실행 / <strong>Then</strong> edge-tts 음성 파일 생성(성공 시), 실패 시 자막만 산출</td>
+<td>• TTS 실패: 자막 폴백, 대시보드 표시 • <strong>라이선스 미검증(비공식 API 우려): 대체재(Piper/Kokoro) 검토 후 교체 (S-4)</strong></td>
 </tr>
 <tr>
 <td>AC-S2-3</td>
@@ -368,8 +368,8 @@ strong { font-weight:700; }
 <tbody>
 <tr>
 <td>AC-K1-1</td>
-<td><strong>Given</strong> '곧 뜰' 키워드 상위 N개 / <strong>When</strong> 주제 선정 실행 / <strong>Then</strong> ① 영어 현지화 키워드 산출 ② 아마존 검색 스냅샷(상위 20권 가격·평점·권수) ③ 틈새 판정(경쟁 적음+수요 있음) ④ 책 주제 후보 목록 저장</td>
-<td>• 검색 결과 0건: 수요 미검증 → 후보 제외 • 한국어 현지화 불가: 한국어 전자책 병행 표시</td>
+<td><strong>Given</strong> '곧 뜰' 키워드 상위 N개 / <strong>When</strong> 주제 선정 실행 / <strong>Then</strong> ① 영어 현지화 키워드 산출 ② 아마존 검색 스냅샷(상위 20권 가격·평점·권수) ③ 틈새 판정(경쟁 적음+수요 있음) ④ <strong>영어/한국어 양쪽 후보 산출</strong> ⑤ 책 주제 후보 목록 저장</td>
+<td>• 검색 결과 0건: 수요 미검증 → 후보 제외 • 한국어 현지화 불가/영어 수요 낮음: <strong>KDP KR 한국어 전자책 병행 (K-2)</strong> • 영어 전환율 30% 미만: 한국어 비중 확대</td>
 </tr>
 <tr>
 <td>AC-K2-1</td>
@@ -378,8 +378,8 @@ strong { font-weight:700; }
 </tr>
 <tr>
 <td>AC-K2-2</td>
-<td><strong>Given</strong> 챕터 완성 / <strong>When</strong> QC 8항목 실행 / <strong>Then</strong> ① 8항목 전부 통과 시 ready ② AI-generated 판정·공개 문구 포함 ③ 실패 항목 리포트</td>
-<td>• AI-assisted로 판정: 공개 불필요 문구 표기</td>
+<td><strong>Given</strong> 챕터 완성 / <strong>When</strong> QC 8항목 실행 / <strong>Then</strong> ① 8항목 전부 통과 시 ready ② AI-generated 판정·공개 문구 포함 — <strong>본문 + 표지(이미지) 모두</strong> ③ 실패 항목 리포트</td>
+<td>• AI-assisted로 판정: 공개 불필요 문구 표기 • <strong>AI 생성 표지: AI-generated 공개 대상 (K-3)</strong></td>
 </tr>
 <tr>
 <td>AC-K3-1</td>
@@ -490,7 +490,8 @@ strong { font-weight:700; }
 <p><strong>규칙/로직</strong>:<br />
 - OQ-2(주제 비중 운세4+KDP3+일반3)·OQ-3(52주 워크북) 결정은 기획 단계의 방향 — <strong>파일럿 실행 직전 K-1/S-2 결과로 최종 확정</strong><br />
 - 쇼츠 파일럿: 소재 후보 10개 → 선정 기준 5종(수요·자동화 궁합·수익 경로·리듬·차별화)으로 5개 쇼츠 확정<br />
-- KDP 파일럿: 52주 워크북 + 아마존 검색 스냅샷(상위 20권) 경쟁도 판정 통과 시 확정<br />
+- KDP 파일럿: 52주 워크북 + 아마존 검색 스냅샷(상위 20권) 경쟁도 판정 통과 시 확정 — <strong>영어/한국어 양쪽 후보 산출, 전환율 30% 미만 시 한국어 병행 확대 (K-2)</strong><br />
+- <strong>파일럿 exit criteria 기록 (S-3)</strong>: 쇼츠 30일(조회 1만+·완주율 70%+·VVSA 70~90%) / KDP 90일(50권+·리뷰 5개+·월 추세) — 14-shorts §6 파일럿 성공/실패 기준과 연동<br />
 - <strong>기술 복잡도: 낮</strong> (게이트 로직·체크리스트)</p>
 <p><strong>수용 기준</strong>:</p>
 <table>
@@ -504,13 +505,13 @@ strong { font-weight:700; }
 <tbody>
 <tr>
 <td>AC-P1-1</td>
-<td><strong>Given</strong> S-2 주제 판정 완료 (후보 10개+) / <strong>When</strong> 파일럿 게이트 실행 / <strong>Then</strong> ① 선정 기준 5종 스코어 산출 ② 상위 5개 쇼츠 확정·대시보드 표시 ③ OQ-2 비중(운세4+KDP3+일반3)과 대조해 조정 권고</td>
-<td>• 후보 &lt; 10개: 수집 재실행 권고 • 기준 충돌(수익 경로 vs 리듬): 가중치 순위 명시</td>
+<td><strong>Given</strong> S-2 주제 판정 완료 (후보 10개+) / <strong>When</strong> 파일럿 게이트 실행 / <strong>Then</strong> ① 선정 기준 5종 스코어 산출 ② 상위 5개 쇼츠 확정·대시보드 표시 ③ OQ-2 비중(운세4+KDP3+일반3)과 대조해 조정 권고 ④ <strong>파일럿 exit criteria(30일: 조회 1만+·완주율 70%+) 기록</strong></td>
+<td>• 후보 &lt; 10개: 수집 재실행 권고 • 기준 충돌(수익 경로 vs 리듬): 가중치 순위 명시 • 채널 비소유: 완주율 대신 API 지표로 판정 (S-2·S-3)</td>
 </tr>
 <tr>
 <td>AC-P1-2</td>
-<td><strong>Given</strong> K-1 주제 선정 완료 (52주 워크북 후보) / <strong>When</strong> KDP 파일럿 게이트 실행 / <strong>Then</strong> ① 아마존 검색 스냅샷(상위 20권 가격·평점·권수) 판정 ② 경쟁도 통과 시 52주 워크북 확정·시리즈 후보(월/분기/연간) 표시 ③ 실패 시 대체 후보 재선정</td>
-<td>• 스냅샷 데이터 부재: 판정 보류·재실행 • 경쟁도 높음: 틈새 변형(니치 세분화) 권고</td>
+<td><strong>Given</strong> K-1 주제 선정 완료 (52주 워크북 후보 — 영어/한국어 양쪽) / <strong>When</strong> KDP 파일럿 게이트 실행 / <strong>Then</strong> ① 아마존 검색 스냅샷(상위 20권 가격·평점·권수) 판정 ② 경쟁도 통과 시 52주 워크북 확정·시리즈 후보(월/분기/연간) 표시 ③ <strong>영어 전환율 30% 미만 시 KDP KR 한국어 병행 후보 확대</strong> ④ 실패 시 대체 후보 재선정 ⑤ <strong>파일럿 exit criteria(90일: 50권+·리뷰 5개+) 기록</strong></td>
+<td>• 스냅샷 데이터 부재: 판정 보류·재실행 • 경쟁도 높음: 틈새 변형(니치 세분화) 권고 (K-2·S-3)</td>
 </tr>
 </tbody>
 </table>
@@ -518,6 +519,7 @@ strong { font-weight:700; }
 <p><strong>기능 설명</strong>: 쇼츠·KDP 성과 입력/추적 + 손익분기 참고 표시.</p>
 <p><strong>규칙/로직</strong>:<br />
 - 수동 입력 (조회·구독·판매·로열티) — 자동 수집 제외<br />
+- <strong>성과 측정 경로 구분 (S-2)</strong>: ① API v3 — 조회·구독·좋아요·댓글 ② YouTube Studio — 완주율·VVSA·공유수·수익 (<strong>채널 소유 시에만</strong>) ③ 수동 — KDP 판매·로열티(아마존 리포트). 채널 비소유 시 완주율·공유수는 성과 판정에서 제외(14-shorts §5.1과 동일)<br />
 - 손익분기표 표시 (§2.2, 가격별)<br />
 - <strong>기술 복잡도: 낮</strong></p>
 <p><strong>수용 기준</strong>:</p>
@@ -532,8 +534,8 @@ strong { font-weight:700; }
 <tbody>
 <tr>
 <td>AC-DB-1</td>
-<td><strong>Given</strong> 대시보드 접속 / <strong>When</strong> 성과 탭 열람 / <strong>Then</strong> ① 쇼츠·KDP 성과 입력 폼 ② 손익분기표 표시 ③ 월별 집계</td>
-<td>• 미입력: 빈 상태 안내</td>
+<td><strong>Given</strong> 대시보드 접속 / <strong>When</strong> 성과 탭 열람 / <strong>Then</strong> ① 쇼츠·KDP 성과 입력 폼 ② <strong>지표별 측정 경로 표시(API/Studio/수동)</strong> ③ 손익분기표 표시 ④ 월별 집계</td>
+<td>• 미입력: 빈 상태 안내 • <strong>채널 비소유: 완주율·공유수 입력 필드 비활성 (S-2)</strong></td>
 </tr>
 </tbody>
 </table>
