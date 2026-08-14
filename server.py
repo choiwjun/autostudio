@@ -223,6 +223,27 @@ def resolve_thresholds(d):
     return thresholds, source
 
 
+def _fortune_target(r, ct, json_mod):
+    """운세 대상 라벨 — grounding.key(쥐띠/물고기자리/계해일) 우선,
+    없으면 content_type 기본 라벨."""
+    try:
+        g = json_mod.loads(r.get("grounding") or "{}")
+        if isinstance(g, dict) and g.get("key"):
+            return str(g["key"])
+    except Exception:
+        pass
+    return {
+        "daily_blog": "오늘의 종합 운세",
+        "daily_sns": "오늘의 SNS 운세",
+        "weekly_blog": "이번 주 종합 운세",
+        "monthly_blog": "이번 달 종합 운세",
+        "animal_blog": "띠 운세",
+        "zodiac_blog": "별자리 운세",
+        "day_pillar_blog": "일주 운세",
+    }.get(ct, ct)
+
+
+
 def create_app(cfg):
     # v15: env 소문자 정규화 — 'Production' 같은 대소문자 변형이 fail-closed와
     # require_token 분기를 모두 우회하던 문제 차단
@@ -473,6 +494,8 @@ def create_app(cfg):
     # 운세 생성 자체를 못 쓰는 문제. v29에서 생성(/fortune/generate)과
     # 발행(/fortune/publish)을 분리한다.
 
+
+
     @app.post("/fortune/generate", dependencies=[Depends(require_token)])
     def fortune_generate():
         """v29: 운세 콘텐츠만 생성 (LLM 1회 시도, 발행 안 함) — 사용자가
@@ -540,6 +563,8 @@ def create_app(cfg):
                         "status": status_label,
                         "has_content": has_content,
                         "title": title, "summary": summary, "preview": preview,
+                        # v29.5: 대상(어느 띠/사주/별자리) 표시 — grounding.key 사용
+                        "target": _fortune_target(r, ct, json_mod),
                         # v29.2: 수동 게시용 전체 본문 (hashtags 포함)
                         "body_full": (parsed.get("body", "")
                                       if isinstance(parsed, dict) else ""),
