@@ -485,61 +485,67 @@ def create_app(cfg):
         def _generate(d):
             created = collect.fortune_generate_step(
                 d, cfg, today, publish=False)
-            # 발행 후보(content_type)별 최신 1건씩 요약 — 오늘자 daily + 고정(01~60)
-            # 고정 콘텐츠(day_pillar 60·zodiac 12·animal 12)는 ref=오늘이 아니라
-            # 번호(01~60)라 list_fortune_generations(limit=200)로 전건 조회
-            rows = d.list_fortune_generations(limit=200)
+            # v29.4: 전체 콘텐츠 표시 — daily/weekly/monthly는 오늘 기준 최신,
+            # 고정 콘텐츠(일주 60·별자리 12·띠 12)는 전부 반환 (각각 다른 운세)
+            rows = d.list_fortune_generations(limit=300)
+            # 오늘자 daily 계열은 최신 1건만, 고정은 전건 유지
             latest = {}
             for r in rows:
-                prev = latest.get(r["content_type"])
-                # 최신순 정렬 보장 안 됨 — (ref, id) 비교로 최신 1건 유지
-                if prev is None or (r["ref_date"], r["id"]) > (prev["ref_date"], prev["id"]):
-                    latest[r["content_type"]] = r
+                ct = r["content_type"]
+                if ct in ("day_pillar_blog", "zodiac_blog", "animal_blog"):
+                    latest.setdefault(ct, []).append(r)
+                else:
+                    prev = latest.get(ct)
+                    if prev is None or (r["ref_date"], r["id"]) > (prev["ref_date"], prev["id"]):
+                        latest[ct] = r
             items = []
             for ct in sorted(latest):
-                r = latest[ct]
-                parsed = {}
-                try:
-                    parsed = json_mod.loads(r["content"] or "{}")
-                except Exception:
-                    pass
-                if not isinstance(parsed, dict):
+                batch = latest[ct]
+                if not isinstance(batch, list):
+                    batch = [batch]
+                for r in sorted(batch, key=lambda x: (x["ref_date"], x["id"])):
                     parsed = {}
-                has_content = bool(r["content"] and r["content"].strip())
-                # daily_sns는 {text, hashtags} 구조 — text를 제목으로 노출
-                if ct == "daily_sns":
-                    title = str(parsed.get("text", "") or "")[:60]
-                    summary = ""
-                else:
-                    title = str(parsed.get("title", "") or "")[:80]
-                    summary = str(parsed.get("summary", "") or "")[:120]
-                body = str(parsed.get("body", "") or "")
-                # 마크다운 헤더·구분선 제거 후 첫 문단만 미리보기
-                plain = body.replace("#", "").replace("*", "").replace("---", " ").strip()
-                preview = " ".join(plain.split())[:100]
-                # 생성 패널용 상태 라벨 — 발행 상태를 "수동 게시 대기" 맥락으로
-                # (publish_failed는 이전 발행 시도 실패 — 콘텐츠는 정상)
-                if not has_content:
-                    status_label = "미생성"
-                elif r["status"] == "qc_failed":
-                    status_label = "검수 실패"
-                elif r["status"] == "published":
-                    status_label = "발행됨"
-                elif r["status"] == "publish_failed":
-                    status_label = "발행 대기 (자동 발행 실패 이력)"
-                else:
-                    status_label = "생성됨"
-                items.append({
-                    "ref": r["ref_date"], "content_type": ct,
-                    "status": status_label,
-                    "has_content": has_content,
-                    "title": title, "summary": summary, "preview": preview,
-                    # v29.2: 수동 게시용 전체 본문 (hashtags 포함)
-                    "body_full": (parsed.get("body", "")
-                                  if isinstance(parsed, dict) else ""),
-                    "sns_full": (parsed.get("text", "")
-                                 if isinstance(parsed, dict) else ""),
-                })
+                    try:
+                        parsed = json_mod.loads(r["content"] or "{}")
+                    except Exception:
+                        pass
+                    if not isinstance(parsed, dict):
+                        parsed = {}
+                    has_content = bool(r["content"] and r["content"].strip())
+                    # daily_sns는 {text, hashtags} 구조 — text를 제목으로 노출
+                    if ct == "daily_sns":
+                        title = str(parsed.get("text", "") or "")[:60]
+                        summary = ""
+                    else:
+                        title = str(parsed.get("title", "") or "")[:80]
+                        summary = str(parsed.get("summary", "") or "")[:120]
+                    body = str(parsed.get("body", "") or "")
+                    # 마크다운 헤더·구분선 제거 후 첫 문단만 미리보기
+                    plain = body.replace("#", "").replace("*", "").replace("---", " ").strip()
+                    preview = " ".join(plain.split())[:100]
+                    # 생성 패널용 상태 라벨 — 발행 상태를 "수동 게시 대기" 맥락으로
+                    # (publish_failed는 이전 발행 시도 실패 — 콘텐츠는 정상)
+                    if not has_content:
+                        status_label = "미생성"
+                    elif r["status"] == "qc_failed":
+                        status_label = "검수 실패"
+                    elif r["status"] == "published":
+                        status_label = "발행됨"
+                    elif r["status"] == "publish_failed":
+                        status_label = "발행 대기 (자동 발행 실패 이력)"
+                    else:
+                        status_label = "생성됨"
+                    items.append({
+                        "ref": r["ref_date"], "content_type": ct,
+                        "status": status_label,
+                        "has_content": has_content,
+                        "title": title, "summary": summary, "preview": preview,
+                        # v29.2: 수동 게시용 전체 본문 (hashtags 포함)
+                        "body_full": (parsed.get("body", "")
+                                      if isinstance(parsed, dict) else ""),
+                        "sns_full": (parsed.get("text", "")
+                                     if isinstance(parsed, dict) else ""),
+                    })
             return created, items
 
         created, items = run_db(_generate)

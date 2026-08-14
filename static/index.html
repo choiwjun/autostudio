@@ -105,6 +105,15 @@
     background: rgba(0,0,0,.25); padding: 10px; border-radius: 6px;
     color: var(--text); margin: 0; width: 100%; max-width: 100%; }
   .fortune-panel tr.fortune-full.hidden { display: none; }
+  .fortune-group { margin-bottom: 12px; }
+  .fortune-group-head {
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    padding: 8px 10px; background: rgba(255,255,255,.06);
+    border-radius: 6px; margin-bottom: 6px; user-select: none; }
+  .fortune-group-head:hover { background: rgba(255,255,255,.1); }
+  .fg-arrow { font-size: 10px; color: var(--text-dim, #888); }
+  .fg-count { font-size: 11px; color: var(--text-dim, #888); margin-left: auto; }
+  .fortune-group-body.hidden { display: none; }
   .filters select, .filters input { height: 34px; padding: 0 10px; border: 1px solid var(--border);
     border-radius: 10px; background: rgba(15, 23, 42, .6); font-size: 13px; color: var(--text);
     font-family: inherit; transition: border-color .15s ease, box-shadow .15s ease; }
@@ -834,32 +843,67 @@ function renderFortuneGenResult(res) {
     itemsEl.innerHTML = '<p class="empty">생성된 콘텐츠가 없습니다 (LLM 키/콘텐츠 상태 확인)</p>';
     return;
   }
-  itemsEl.innerHTML = '<table class="mini-table"><thead><tr><th>기준일</th><th>타입</th><th>상태</th><th>제목</th><th>내용</th><th></th></tr></thead><tbody>'
-    + res.items.map((it, i) => {
-      const cls = (it.status === '검수 실패' || !it.has_content) ? ' class="fail"' : '';
-      let title;
-      if (!it.has_content) {
-        title = '<span class="muted">(내용 미생성 — LLM 키 확인 필요)</span>';
-      } else if (it.content_type === 'daily_sns') {
-        title = it.title ? esc(it.title) + '…' : '(SNS 본문)';
-      } else {
-        title = esc(it.title || '(제목 없음)');
-      }
-      const body = it.summary || it.preview || '';
-      // v29.2: 본문 전체 보기/복사 — 수동 게시용
-      const full = it.content_type === 'daily_sns'
-        ? (it.sns_full || '') : ((it.title || '') + '\n\n' + (it.body_full || ''));
-      const hasFull = it.has_content && full.trim();
-      const btn = hasFull
-        ? `<button class="btn btn-mini" onclick="toggleFortuneFull(${i})">본문 보기</button>
-           <button class="btn btn-mini" onclick="copyFortuneFull(${i})">복사</button>`
-        : '';
-      return `<tr${cls} data-i="${i}"><td>${esc(it.ref)}</td><td>${esc(it.content_type)}</td><td>${esc(it.status)}</td><td>${title}</td><td>${esc(body)}</td><td>${btn}</td></tr>
-        <tr class="fortune-full hidden" data-full="${i}"><td colspan="6"><pre class="fortune-pre">${esc(full)}</pre></td></tr>`;
-    }).join('')
-    + '</tbody></table>';
-  // 전역 접근용 — 클릭 시 전체 본문 표시/숨김
+  // v29.4: 타입별 그룹 + 접이식 — 띠/별자리/일주 전체(12·12·60) 표시
+  const typeMeta = {
+    daily_blog:    { label: '일일 종합 운세', open: true },
+    daily_sns:     { label: 'SNS 요약', open: true },
+    weekly_blog:   { label: '주간 운세', open: false },
+    monthly_blog:  { label: '월간 운세', open: false },
+    animal_blog:   { label: '띠별 운세 (12)', open: true },
+    zodiac_blog:   { label: '별자리 운세 (12)', open: false },
+    day_pillar_blog:{ label: '일주 운세 (60)', open: false },
+  };
+  const groups = {};
+  res.items.forEach((it, i) => {
+    (groups[it.content_type] = groups[it.content_type] || []).push({ it, i });
+  });
+  const order = ['daily_blog','daily_sns','weekly_blog','monthly_blog','animal_blog','zodiac_blog','day_pillar_blog'];
+  const rowsOf = (item, i) => {
+    const cls = (item.status === '검수 실패' || !item.has_content) ? ' class="fail"' : '';
+    let title;
+    if (!item.has_content) {
+      title = '<span class="muted">(내용 미생성 — LLM 키 확인 필요)</span>';
+    } else if (item.content_type === 'daily_sns') {
+      title = item.title ? esc(item.title) + '…' : '(SNS 본문)';
+    } else {
+      title = esc(item.title || '(제목 없음)');
+    }
+    const body = item.summary || item.preview || '';
+    const full = item.content_type === 'daily_sns'
+      ? (item.sns_full || '') : ((item.title || '') + '\n\n' + (item.body_full || ''));
+    const hasFull = item.has_content && full.trim();
+    const btn = hasFull
+      ? `<button class="btn btn-mini" onclick="toggleFortuneFull(${i})">본문 보기</button>
+         <button class="btn btn-mini" onclick="copyFortuneFull(${i})">복사</button>`
+      : '';
+    return `<tr${cls} data-i="${i}"><td>${esc(item.ref)}</td><td>${esc(item.status)}</td><td>${title}</td><td>${esc(body)}</td><td>${btn}</td></tr>
+      <tr class="fortune-full hidden" data-full="${i}"><td colspan="5"><pre class="fortune-pre">${esc(full)}</pre></td></tr>`;
+  };
+  itemsEl.innerHTML = order.filter(ct => groups[ct] && groups[ct].length).map(ct => {
+    const meta = typeMeta[ct] || { label: ct, open: false };
+    const list = groups[ct];
+    return `<div class="fortune-group">
+      <div class="fortune-group-head" onclick="toggleFortuneGroup('g_${ct}')">
+        <span class="fg-arrow" id="arrow_g_${ct}">${meta.open ? '▼' : '▶'}</span>
+        <strong>${meta.label}</strong>
+        <span class="fg-count">${list.length}건</span>
+      </div>
+      <div class="fortune-group-body ${meta.open ? '' : 'hidden'}" id="g_${ct}">
+        <table class="mini-table"><thead><tr><th>기준일</th><th>상태</th><th>제목</th><th>내용</th><th></th></tr></thead><tbody>
+        ${list.map(({ it, i }) => rowsOf(it, i)).join('')}
+        </tbody></table>
+      </div>
+    </div>`;
+  }).join('');
   window._fortuneGenItems = res.items;
+}
+
+function toggleFortuneGroup(id) {
+  const body = document.getElementById(id);
+  const arrow = document.getElementById('arrow_' + id);
+  if (!body) return;
+  const hidden = body.classList.toggle('hidden');
+  if (arrow) arrow.textContent = hidden ? '▶' : '▼';
 }
 
 function toggleFortuneFull(i) {
