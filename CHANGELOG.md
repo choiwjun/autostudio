@@ -2,6 +2,16 @@
 
 이 프로젝트의 버전 이력. 버전 규칙: 기능 단위로 커밋 메시지에 표기 (비공식 SemVer).
 
+## v29.3 — 2026-08-14 (운세 생성 결과 레이아웃 수정)
+
+### 수정
+- 운세 생성 결과 테이블이 긴 본문 요약으로 가로로 밀려나는 문제 해결 (static/index.html)
+  - `table-layout: fixed` + 열 폭 고정 — 긴 텍스트도 셀 안에서 줄바꿈
+  - 셀 `word-break: break-word`·`overflow-wrap: anywhere`·`min-width: 0`
+  - 컨테이너 `overflow-x: auto` — 그래도 넘치면 패널 안에서만 스크롤
+  - 본문 `<pre>` width/max-width 100% + overflow-wrap — 펼쳐도 레이아웃 유지
+- E2E 검증: 페이지 가로 스크롤 없음 (docScrollW 1280 = clientW 1280), 본문 펼친 후에도 정상
+
 ## v29.2 — 2026-08-14 (운세 생성 결과 개선 — 수동 게시 지원)
 
 ### 개선

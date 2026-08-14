@@ -82,15 +82,28 @@
   .fortune-panel { padding: 16px; margin-bottom: 14px; }
   .fortune-panel h2 { margin: 0 0 8px; font-size: 15px; }
   .fortune-panel .summary { margin-bottom: 8px; line-height: 1.7; }
+  .fortune-panel #fortuneGenItems, .fortune-panel #fortuneItems { overflow-x: auto; max-width: 100%; }
+  .fortune-panel table { table-layout: fixed !important; width: 100%; }
+  .fortune-panel table tr.fortune-full td { padding: 0; }
+  .fortune-panel table tr.fortune-full td > * { max-width: 100%; box-sizing: border-box; }
   .fortune-panel table td, .fortune-panel table th { padding: 6px 8px; text-align: left; font-size: 12.5px; }
+  .fortune-panel table td { word-break: break-word; overflow-wrap: anywhere; vertical-align: top; min-width: 0; }
+  .fortune-panel table td:nth-child(4), .fortune-panel table td:nth-child(5) { overflow: hidden; text-overflow: ellipsis; }
+  .fortune-panel table th:nth-child(1) { width: 9%; }
+  .fortune-panel table th:nth-child(2) { width: 13%; }
+  .fortune-panel table th:nth-child(3) { width: 12%; }
+  .fortune-panel table th:nth-child(4) { width: 32%; }
+  .fortune-panel table th:nth-child(5) { width: 24%; }
+  .fortune-panel table th:nth-child(6) { width: 10%; }
   .fortune-panel table tr.fail td { color: var(--warning); }
   .fortune-panel .muted { color: var(--text-dim, #888); font-style: italic; }
   .fortune-panel .btn-mini { font-size: 11px; padding: 2px 8px; margin-right: 4px; }
   .fortune-panel .fortune-pre {
-    white-space: pre-wrap; word-break: break-word; font-size: 12.5px;
-    line-height: 1.6; max-height: 300px; overflow-y: auto;
+    white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
+    font-size: 12.5px; line-height: 1.6; max-height: 300px;
+    overflow-y: auto; overflow-x: hidden;
     background: rgba(0,0,0,.25); padding: 10px; border-radius: 6px;
-    color: var(--text); }
+    color: var(--text); margin: 0; width: 100%; max-width: 100%; }
   .fortune-panel tr.fortune-full.hidden { display: none; }
   .filters select, .filters input { height: 34px; padding: 0 10px; border: 1px solid var(--border);
     border-radius: 10px; background: rgba(15, 23, 42, .6); font-size: 13px; color: var(--text);
