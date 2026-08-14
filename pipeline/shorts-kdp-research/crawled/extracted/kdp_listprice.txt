@@ -1,0 +1,554 @@
+English
+English
+Deutsch
+Français
+Español
+Italiano
+Português
+Nederlands
+|
+Help
+|
+Sign in
+|
+Give Feedback
+How would you rate your experience using this page?
+Very Dissatisfied
+Dissatisfied
+Neutral
+Satisfied
+Very Satisfied
+Visit our
+help center
+for resources to common issues
+Click here
+to take our survey and give us detailed feedback.
+Thank you for your feedback.
+Click here
+to take our survey and give us detailed feedback.
+Bookshelf
+|
+Reports
+|
+Community
+|
+Marketing
+Help Topics
+Help
+KDP Help Center Home
+Account & Taxes
+Set up your KDP account
+Create a KDP Account
+Add or update a bank account
+I set up my bank account, but I haven't received any payments.
+Troubleshooting common bank account errors
+Payment Service Provider Program FAQ
+Payment Service Provider Program Updates
+Payment Service Provider Program Risk Management Controls
+Manage Your KDP Account
+What happens when I close my KDP account?
+Account security and avoiding scams
+Sign in Issues
+Two-Step Verification
+Verify your identity
+Accepted IDs for Identity Verification
+What if my account name or country changes or is different from my ID?
+Taking photos of your ID
+Troubleshoot Identity Verification Errors
+CreateSpace Account
+Tax Information
+Year End Tax Forms
+What is my tax information status?
+Complete Tax Profile
+Tax Withholding
+Kindle Store: BR - BR Tax Withholding
+Goods and Services Tax (GST) for eBooks in Australia and India
+Taiwan VAT
+Applying for a US ITIN
+Applying for a U.S. EIN for Corporations and Non-Individual Entities
+How Taxes Affect List Prices
+Setting Prices for Amazon Japan
+How EU and the UK Taxes Affect Print Books List Price
+How EU Taxes Affect eBooks List Price
+EU VAT Invoices
+Book Formatting
+Format Your Paperback
+Set Trim Size, Bleed, and Margins
+Format Front Matter, Body Matter, and Back Matter
+Save Your Manuscript File
+Paperback and Hardcover Manuscript Templates
+Cover Creator
+Create a Paperback Cover
+Format Images in Your Book
+Paperback Fonts
+Fix Paperback and Hardcover Formatting Issues
+Paperback Submission Guidelines
+Format Your Hardcover
+Create a Hardcover Cover
+Format Your eBook
+What criteria does my eBook's cover image need to meet?
+Why is my cover image not updating on Amazon?
+What file formats are supported for eBook manuscripts?
+Digital Rights Management
+Create a Table of Contents
+Tools and Resources
+KDP Tools and Resources
+Publishing Service Providers & Resources
+Kindle Create Help Overview
+Getting Started with Kindle Create
+Kindle Create Tutorial
+Prepare Reflowable and Print Books with Kindle Create
+Prepare Comic and Kids' eBooks with Kindle Create
+Prepare Print Replica Books with Kindle Create
+Previewing and Publishing Your Kindle Create Book
+Kindle Previewer
+Quality Notifications Dashboard
+Guide to Kindle Content Quality
+Enhanced Typesetting
+X-Ray for Authors
+X-Ray for Authors: Tips and Tricks
+KDP Publishing
+Start publishing with KDP
+KDP Bookshelf
+Book Supported Languages
+Arabic
+Chinese (Traditional) (Beta)
+Publishing in Hebrew, Persian, and Yiddish
+Indian-Language Publishing
+Create a Book
+Book Detail Resources
+Books Titles & Editions
+Fixing typos on a book title or author name
+Authors & Contributors
+Write a Book Description
+Fixing errors or formatting with book descriptions
+Make Your Book More Discoverable with Keywords
+Kindle eBook Pre-Order
+Setting up pre-orders
+Pre-order statuses
+Reschedule a pre-order release
+Delay or cancel a pre-order release
+Pre-order pricing and sales reports
+Primary Audience and Reading Age
+Publishing Public Domain Content
+Language & Reading direction
+Release Date Options
+Schedule a Release
+Upload Book Resources
+Accessibility for eBooks
+Accessibility Features on Detail Page
+What is an ISBN and Imprint?
+Get an ISBN
+Change or view your ISBN
+Troubleshoot ISBN errors
+Barcodes
+Print Options
+Color Ink Options
+Groundwood Paper
+Upload and Preview Book Content
+Convert a Paperback Word File to PDF
+Pricing Resources
+Price Your Book
+Price Troubleshooting
+Paperback Printing Cost
+Hardcover Printing Cost
+RedirectA
+Printing Cost & Royalty Calculator
+Timelines
+Book Status
+Low-Content Books
+Hardcover
+Hardcover Print Elements
+Beta: Audiobooks with virtual voice
+Getting started with audiobooks with virtual voice
+Audiobooks with virtual voice eligibility and troubleshooting
+Virtual voice audio samples
+Pricing, royalties, and reports for audiobooks
+Edit audio in the Virtual Voice Studio
+Terms and Conditions for the Beta Version of Audiobooks with Virtual Voice
+Beta: Kindle Translate
+Getting Started with Kindle Translate
+Kindle Translate Languages
+Kindle Translate Eligibility and Troubleshooting
+Kindle Translate Quality
+Pricing, royalties, and reports for translations
+Terms and Conditions for the Beta Version of Kindle Translate
+Start a Book Series
+Update Your Series
+Edit your Series
+Delete a series
+Set the reading order for your series
+Where can I find my Amazon Series Page?
+How to create a series with multiple authors
+Can I offer discounts to books in my series?
+Series Collections on kdp.amazon.co.jp
+Orders & Book Copies
+Proof and Author Copies
+How do I order a proof or author copy?
+How much do proof or author copies cost?
+What is the cost to ship my proof or author copy?
+When will my proof or author copy arrive?
+I’m getting an error ordering my author copy
+I’m getting an error ordering my proof copy
+My proof or author copy came damaged
+My proof or author copy didn’t arrive on time
+My proof or author copy has printing errors
+Amazon Store & Detail Page
+KDP Categories
+Read Sample (Look Inside the Book)
+Customer Reviews
+Search Results
+How to find your book on Amazon
+Troubleshoot search results
+Link Your Books Together
+Why are my books not linked on Amazon?
+Link Your Books on the KDP Bookshelf
+How do I unlink my books?
+Sales Ranking
+Book Trends Data
+Recaps
+Marketing & Distribution
+Guidelines for use of the Available at Amazon Badge by KDP Publishers
+Ways to Promote Your Book
+KDP Select
+How to enroll in KDP Select
+How to cancel KDP Select
+KDP Select Benefits
+KDP Select Bonus
+Kindle Countdown Deals
+Kindle Unlimited
+Royalties in Kindle Unlimited
+Free Book Promotions
+Author Central
+A+ Content
+Create A+ Content
+A+ Content Examples
+A+ Content Guidelines
+Advertising for KDP books
+Expanded Distribution
+eBook Distribution Rights
+Paperback and Hardcover Distribution Rights
+Merchandising Tips
+Buying and Gifting eBooks for Others
+Sample Chapters
+Audiobooks Through ACX
+Amazon Literary Contests
+Nominate Your eBook for a Promotion (Beta)
+Book Updates
+Update Your Book
+Update your book details
+Update Your Manuscript
+Modify Converted eBook Content
+How to Send Your Updated eBook to Customers or Yourself
+Update Your Cover
+Remove or unpublish a book
+Payments & Reports
+Royalties
+eBook Royalties
+Paperback Royalty
+Hardcover Royalty
+KDP Reports
+How do I view a report of my orders and payment royalties?
+Dashboard
+Orders Report
+KENP Read
+Promotions Report
+Pre-Order Report
+Month-to-Date Report
+Prior Months' Royalties Report
+Royalties Estimator
+Payment Report
+KDP Payments
+KDP Payment Options
+When will I get paid?
+Troubleshoot Payment Issues
+Legal & Content Guidelines
+Kindle Direct Publishing Terms and Conditions
+Digital  Book Pricing Page
+Print Book Pricing Page
+eBook List Price Requirements
+Program Policies
+Content Guidelines
+Metadata Guidelines for Books
+Intellectual Property Rights Frequently Asked Questions
+Reporting Possible Violations of Our Guidelines
+Privacy Notice Information
+Bonus Content
+Featured Offer Eligibility for Third-Party Sellers
+EU Regulation on Deforestation-free Products (EUDR)
+User Guides
+Kindle Publishing Guidelines
+Getting Started
+Introduction
+Paths to Getting Your Content on Kindle
+Comparing Formats
+General Best Practices
+Cover Image Guidelines
+Navigation Guidelines
+HTML and CSS Guidelines
+Hyperlink Guidelines
+QA Standards
+Boxed and Bundles Edition Guidelines (eBook format only)
+Guidelines for Specific Types of eBooks
+Creating Reflowable Books
+Text Guidelines - Reflowable
+Image Guidelines - Reflowable
+Table Guidelines - Reflowable
+Creating Fixed-Layout Books with Text Pop-Ups
+Creating Fixed-Layout Books with Image Pop-Ups or Virtual Panels
+Creating Fixed-Layout Books Without Pop-Ups
+Creating Kindle Editions with Audio/Video Content
+Creating Dictionaries
+Appendices
+Enhanced Typesetting and Page Flip
+Attributes and Tags Supported by Enhanced Typesetting
+HTML and CSS Tags Supported in Kindle Format 8
+Media Queries
+Guidelines for Creating a Source File
+KDP Jumpstart
+1 – Set Up Your KDP Account
+2 – Prepare Your Manuscript
+3 – Prepare Your Cover
+4 – Title Setup: Book Details, Content, & Pricing
+5 – Publishing & Review
+6 – Promoting Your Book & Getting Paid
+KDP University
+Webinars
+Videos
+Contact Us
+Have feedback? Can't find your answer in our Help pages?
+Contact Us
+Search Help
+Legal & Content Guidelines
+Kindle Direct Publishing Terms and Conditions
+eBook List Price Requirements
+eBook List Price Requirements
+Effective July 7, 2026, the 70% royalty option price band is $2.99-$12.99 on Amazon.com, expanding from the previous range of $2.99-$9.99, with equivalent changes in other KDP marketplaces. To change the list price of your eBook, visit
+How to update your book’s price
+. To learn more about this change, visit our
+Price Band Changes FAQs
+section below.
+List Price requirements for eBooks are detailed below based on the
+royalty option
+selected are described below:
+USD List Price Requirements for Amazon.com
+Minimum List Price
+Maximum List Price
+35% Royalty Option
+Less than 3 megabytes
+$ 0.99
+$ 200.00
+Greater than or equal to 3 megabytes and less than 10 megabytes
+$ 1.99
+$ 200.00
+10 megabytes or greater
+$ 2.99
+$ 200.00
+70% Royalty Option
+$ 2.99
+$ 12.99
+INR List Price Requirements for India Kindle Store for www.amazon.in
+Minimum List Price
+Maximum List Price
+35% Royalty Option
+Less than 3 megabytes
+₹ 49
+₹ 10,999
+Greater than or equal to 3 megabytes and less than 10 megabytes
+₹ 69
+₹ 10,999
+10 megabytes or greater
+₹ 99
+₹ 10,999
+70% Royalty Option
+₹ 99
+₹ 599
+CAD List Price Requirements for Amazon.ca
+Minimum List Price
+Maximum List Price
+35% Royalty Option
+Less than 3 megabytes
+C$ 0.99
+C$ 200.00
+Greater than or equal to 3 megabytes and less than 10 megabytes
+C$ 1.99
+C$ 200.00
+10 megabytes or greater
+C$ 2.99
+C$ 200.00
+70% Royalty Option
+C$ 2.99
+C$ 12.99
+BRL List Price Requirements for Amazon.com.br
+Minimum List Price
+Maximum List Price
+35% Royalty Option
+Less than 3 megabytes
+R$ 1.99
+R$ 400.00
+Greater than or equal to 3 megabytes and less than 10 megabytes
+R$ 3.99
+R$ 400.00
+10 megabytes or greater
+R$ 5.99
+R$ 400.00
+70% Royalty Option
+R$ 5.99
+R$ 31.99
+GBP List Price Requirements for Amazon.co.uk
+Minimum List Price
+Maximum List Price
+35% Royalty Option
+Less than 3 megabytes
+£ 0.77
+£ 150.00
+Greater than or equal to 3 megabytes and less than 10 megabytes
+£ 1.25
+£ 150.00
+10 megabytes or greater
+£ 1.49
+£ 150.00
+70% Royalty Option
+£ 1.77
+£ 12.99
+Note:
+Setting European Union list prices changed on January 1, 2015.
+Learn more
+.
+EUR List Price Requirements
+Minimum List Price
+Maximum List Price
+35% Royalty Option
+Less than 3 megabytes
+€ 0.89
+€ 215.00
+Greater than or equal to 3 megabytes and less than 10 megabytes
+€ 1.79
+€ 215.00
+10 megabytes or greater
+€ 2.69
+€ 215.00
+70% Royalty Option
+€ 2.69
+€ 12.99
+Note:
+Setting European Union list prices changed on January 1, 2015.
+Learn more
+.
+JPY List Price Requirements for Amazon.co.jp
+Minimum List Price
+Maximum List Price
+35% Royalty Option
+Less than 3 megabytes
+¥ 99
+¥ 20000
+Greater than or equal to 3 megabytes
+¥ 99
+¥ 20000
+70% Royalty Option
+¥ 250
+¥ 1650
+MXN List Price Requirements for Amazon.com.mx
+Minimum List Price
+Maximum List Price
+35% Royalty Option
+Less than 3 megabytes
+$ 11.99
+$ 2500.00
+Greater than or equal to 3 megabytes and less than 10 megabytes
+$ 23.99
+$ 2500.00
+10 megabytes or greater
+$ 34.99
+$ 2500.00
+70% Royalty Option
+$ 34.99
+$ 199.99
+AUD List Price Requirements for Amazon.com.au
+Minimum List Price
+Maximum List Price
+35% Royalty Option
+Less than 3 megabytes
+$ 0.99
+$ 220.00
+Greater than or equal to 3 megabytes and less than 10 megabytes
+$ 1.99
+$ 220.00
+10 megabytes or greater
+$ 3.99
+$ 220.00
+70% Royalty Option
+$ 3.99
+$ 15.99
+Note:
+The 70% royalty option applies only to purchases of qualifying Digital Books by customers in certain territories. For sales to customers in Brazil, Japan, Mexico, and India, Digital Books must also be enrolled in KDP Select to be eligible for the 70% royalty option. See the
+Pricing Page
+for more information about the available sales territories.
+Price Band Changes FAQs
+Q1. How is the 70% royalty option band changing?
+The maximum list price for the 70% royalty option for eBooks has changed from $9.99 to $12.99 on Amazon.com, with equivalent amounts in other KDP marketplaces. The minimum list price of $2.99 and the 35% royalty option remain unchanged.
+Q2. Why are you making this change?
+The previous $9.99 maximum list price for the 70% royalty option has been in place since 2007. With this change, you have more pricing flexibility for your eBook for the 70% royalty option.
+Q3. Am I required to change my list price?
+No. You don't need to update your list price. Your current price and royalty option stay the same unless you choose to make a change.
+Q4. Can I switch my books to the 70% royalty option at my current list price? How do I reprice my eBook?
+If your eBook is currently on the 35% royalty option, is priced between $2.99 and $12.99, and meets the other eligibility requirements, you can switch to the 70% royalty option. If your eBook is already on the 70% royalty option, you can update your list price at any time. Learn more in
+How to update your book’s price
+.
+Q5. How can I calculate my royalties at different list prices?
+You can preview your estimated royalty payout before publishing. Go to the
+Pricing, royalty, and distribution
+section of the eBook Pricing tab to see estimated royalties for each royalty option at your chosen list price.
+Q6. Does this change affect delivery costs, the 35% royalty option, translated eBooks, or audiobooks with virtual voice?
+This change only expands the list price range for the 70% royalty option. Other areas aren't affected:
+Delivery costs
+– No change. Delivery costs still apply to the 70% royalty option. Learn more in
+Digital Book Pricing Page
+.
+35% royalty option
+– No change. List price minimums and maximums and royalty rates remain the same.
+Translated eBooks
+– Translated editions linked to your original eBook automatically inherit any list price or royalty option updates you make to the original. If you've set a separate royalty option for a translated edition, you need to update it independently. Learn more about
+pricing options for translations
+.
+Audiobooks with virtual voice
+– No change. Minimum and maximum list prices and royalties for audiobooks with virtual voice are managed separately in the title setup add-on. Learn more about
+list prices for audiobooks
+.
+Make more money and reach more readers through Kindle Unlimited.
+Learn More
+Total KDP Select Author Earnings
+June 2026
+•
+$67.0 Million
+©
+      1996-2026, Amazon.com, Inc. or its affiliates. All Rights Reserved.
+Amazon and Kindle are trademarks of Amazon.com Inc. or its affiliates.
+KDP Select
+Earn more money and
+reach new readers
+KDP Community
+Connect with experts
+and fellow authors
+CreateSpace
+Indie print publishing
+made easy
+ACX
+Indie audiobook publishing
+made easy
+KDP Terms and Conditions
+|
+Privacy Notice
+|
+Conditions of Use
+|
+Contact Us
+|
+Join Our Team
+|
+kdp.amazon.co.jp
+An unexpected error occurred.  Please try again later.
+Your session has expired
+Please sign in to continue
+Sign In
+edit

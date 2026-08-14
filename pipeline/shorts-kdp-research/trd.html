@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>trd</title>
+<style>
+:root { --accent:#2B5FDB; --bg:#ffffff; --fg:#1a1a2e; --muted:#666; --border:#e2e8f0; --code-bg:#f6f8fa; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#0f1117; --fg:#e6e6e6; --muted:#9ca3af; --border:#2a2f3a; --code-bg:#161b26; }
+}
+* { box-sizing: border-box; }
+body { font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; background:var(--bg);
+       color:var(--fg); line-height:1.7; margin:0; padding:2rem 1rem; }
+main { max-width: 860px; margin: 0 auto; }
+h1 { font-size:1.9rem; border-bottom:3px solid var(--accent); padding-bottom:.4rem; }
+h2 { font-size:1.4rem; margin-top:2.2rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.15rem; margin-top:1.6rem; }
+h4 { font-size:1rem; margin-top:1.2rem; color:var(--accent); }
+a { color:var(--accent); }
+code { background:var(--code-bg); padding:.15em .4em; border-radius:4px; font-size:.9em;
+       font-family:'JetBrains Mono','D2Coding',Consolas,monospace; }
+pre { background:var(--code-bg); padding:1rem; border-radius:8px; overflow-x:auto; border:1px solid var(--border); }
+pre code { background:none; padding:0; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.93rem; }
+th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); font-weight:600; }
+tr:nth-child(even) td { background:rgba(127,127,127,.05); }
+blockquote { border-left:4px solid var(--accent); margin:1rem 0; padding:.5rem 1rem;
+             background:rgba(43,95,219,.06); border-radius:0 6px 6px 0; }
+blockquote p { margin:.3rem 0; }
+hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
+li { margin:.25rem 0; }
+strong { font-weight:700; }
+.meta { color:var(--muted); font-size:.85rem; margin-bottom:1.5rem; }
+</style>
+</head>
+<body>
+<main>
+<div class="meta">📄 trd · 생성: 2026-08-14 17:19</div>
+<h1>쇼츠 + KDP 파이프라인 — 기술 요구사항 (trd.md)</h1>
+<blockquote>
+<p>작성: 기획팀 · 프로젝트: autostudio · 작업 디렉토리: <code>pipeline/shorts-kdp-research/</code><br />
+작성일: 2026-08-14 · 모드: standard · 상위: <code>plan.md</code> · 근거: <code>research-report.md</code> R-3(API)·R-5(EPUB)·R-2(지표)</p>
+</blockquote>
+<h2>1. 기술 스택·아키텍처 제약</h2>
+<h3>1.1 스택 (기존 autostudio 자산 재사용 원칙)</h3>
+<table>
+<thead>
+<tr>
+<th>계층</th>
+<th>기술</th>
+<th>비고</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>백엔드</td>
+<td>Python 3.x / FastAPI</td>
+<td>기존 server.py 확장</td>
+</tr>
+<tr>
+<td>데이터</td>
+<td>SQLite + Postgres 이중 SQL 패턴 (<code>db.py</code> 확장)</td>
+<td>기존 패턴 재사용</td>
+</tr>
+<tr>
+<td>배치</td>
+<td>GitHub Actions (daily-collect.yml 패턴)</td>
+<td>S-1 매일 1회, K-3 EPUB 검증</td>
+</tr>
+<tr>
+<td>서버리스</td>
+<td>Vercel (60초 한도)</td>
+<td>조립·검증은 배치 전용, 대시보드는 다운로드만</td>
+</tr>
+<tr>
+<td>외부 API</td>
+<td>YouTube Data API v3</td>
+<td>무료 티어 10,000 units/일</td>
+</tr>
+<tr>
+<td>LLM</td>
+<td>기존 draft_pipeline (OpenCode Go 우선, Bailian 폴백)</td>
+<td>스크립트·챕터 생성</td>
+</tr>
+<tr>
+<td>TTS</td>
+<td>edge-tts (오픈소스·무료)</td>
+<td>OQ-4 결정 — 자막 병행</td>
+</tr>
+<tr>
+<td>EPUB</td>
+<td>ebooklib + calibre + epubcheck</td>
+<td>K-3 — 의존성 명시 (개선점 #2)</td>
+</tr>
+<tr>
+<td>표지</td>
+<td>Pillow + image_gen 확장</td>
+<td>6×9 텍스트 오버레이</td>
+</tr>
+</tbody>
+</table>
+<h3>1.2 아키텍처 제약</h3>
+<ul>
+<li><strong>Vercel 서버리스 60초 한도</strong>: 쇼츠 수집·주제 판정은 GH Actions 배치로 (API 호출+LLM은 60초 초과 가능). 대시보드 API는 경량(조회·다운로드)만</li>
+<li><strong>SQLite/Postgres 이중 SQL</strong>: 모든 신규 쿼리는 두 엔진 모두에서 동작 (기존 <code>db.py</code> 헬퍼 패턴)</li>
+<li><strong>GH Actions 배치 패턴 재사용</strong>: daily-collect.yml의 스케줄·시크릿·런너 구조 복제</li>
+<li><strong>자동 업로드 금지</strong>: 아마존·유튜브 모두 수동 — 파이프라인은 산출물(스크립트/EPUB/체크리스트) 제공까지만</li>
+</ul>
+<h2>2. 성능 요건</h2>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>요구사항</th>
+<th>근거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>쇼츠 수집 (S-1)</td>
+<td>매일 1회, <strong>≤ 2분</strong> (API 80회+ 저장)</td>
+<td>GH Actions 배치 타임아웃 내</td>
+</tr>
+<tr>
+<td>쿼터 예산</td>
+<td><strong>≤ 100 units/일</strong> (10,000 대비 1%)</td>
+<td>리서치 R-3 시뮬레이션 — 여유 확보</td>
+</tr>
+<tr>
+<td>주제 판정 (S-2)</td>
+<td>10개+ 후보 산출 ≤ 1분 (LLM 제외)</td>
+<td>지표 계산은 로컬</td>
+</tr>
+<tr>
+<td>스크립트 생성 (S-3)</td>
+<td>1건당 ≤ 90초 (LLM 호출 2회+검수)</td>
+<td>content_batch 하드 예산 패턴</td>
+</tr>
+<tr>
+<td>책 생성 (K-2)</td>
+<td>챕터당 하드 예산 <strong>300초</strong>, 책 1권 = 여러 날 배치 분산</td>
+<td>기존 content_batch 패턴</td>
+</tr>
+<tr>
+<td>EPUB 조립·검증 (K-3)</td>
+<td>1권 ≤ 3분 (GH Actions)</td>
+<td>calibre 변환 + epubcheck</td>
+</tr>
+<tr>
+<td>대시보드 API</td>
+<td>P95 &lt; 500ms (조회·다운로드)</td>
+<td>Vercel 서버리스</td>
+</tr>
+</tbody>
+</table>
+<h2>3. 보안 요건</h2>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>요구사항</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>API 키</td>
+<td><code>YOUTUBE_API_KEY</code>는 <code>.env.local</code>/GH Actions 시크릿 — 소스 커밋 금지 (기존 패턴)</td>
+</tr>
+<tr>
+<td>LLM 호출</td>
+<td>기존 프롬프트·예산 패턴 (외부 키 없음 — 기존 자산)</td>
+</tr>
+<tr>
+<td>발행 API</td>
+<td>autoblog 발행 API 토큰 인증 재사용 (운세 쇼츠 아님 — 콘텐츠 생성만)</td>
+</tr>
+<tr>
+<td>민감정보</td>
+<td>운세 쇼츠는 <strong>날짜만 입력</strong> (띠·별자리) — 생년월일·시간(사주 4기둥) 미수집 (개인정보보호법, 11-fortune §9)</td>
+</tr>
+<tr>
+<td>아마존·유튜브</td>
+<td>자동 업로드 도구(kdp-api류·yt-dlp 업로드) 미사용 — 계정 제재 리스크 회피</td>
+</tr>
+<tr>
+<td>ToS 준수</td>
+<td>유튜브 스크래핑 금지 원칙 (API v3 우선) — 14-shorts §2.2</td>
+</tr>
+</tbody>
+</table>
+<h2>4. 외부 시스템/API 연동 요구사항</h2>
+<h3>4.1 YouTube Data API v3 (S-1)</h3>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>요구사항</th>
+<th>출처</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>기본 쿼터</td>
+<td>10,000 units/일 (태평양 자정 리셋)</td>
+<td><a href="https://developers.google.com/youtube/v3/determine_quota_cost">공식 문서</a></td>
+</tr>
+<tr>
+<td><code>search.list</code></td>
+<td><strong>100회/일 별도 버킷</strong> (1회 = 1 unit, 2026 개편)</td>
+<td><a href="https://developers.google.com/youtube/v3/determine_quota_cost">공식 문서</a></td>
+</tr>
+<tr>
+<td>사용 엔드포인트</td>
+<td>videos.list(1)·channels.list(1)·commentThreads.list(1)·search.list(1)·playlistItems.list(1)</td>
+<td>공식 쿼터 표</td>
+</tr>
+<tr>
+<td>실패 정책</td>
+<td>실패 요청도 최소 1 unit 소모 — 재시도는 지수 백오프, 4xx는 재시도 금지</td>
+<td><a href="https://developers.google.com/youtube/v3/determine_quota_cost">공식 문서</a></td>
+</tr>
+<tr>
+<td>페이지네이션</td>
+<td>페이지당 비용 발생 — 1페이지만 수집 (상위 50개)</td>
+<td>공식</td>
+</tr>
+</tbody>
+</table>
+<h3>4.2 아마존 KDP (K-1~K-4)</h3>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>요구사항</th>
+<th>출처</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>공개 API</td>
+<td><strong>없음</strong> — 검색 경쟁도 스냅샷 방식 유지 (상위 20권 가격·평점·권수)</td>
+<td>리서치 §2.3 한계</td>
+</tr>
+<tr>
+<td>EPUB</td>
+<td>Kindle Publishing Guidelines 준수, 업로드 전 Kindle Previewer 검증 권장</td>
+<td><a href="https://kdp.amazon.com/help/topic/G200634390">KDP 파일 형식</a></td>
+</tr>
+<tr>
+<td>로열티</td>
+<td>35%/$0.99~ / 70%/$2.99~$12.99 (2026-07-07 확대)</td>
+<td><a href="https://kdp.amazon.com/help/topic/G200644210">KDP Help</a></td>
+</tr>
+<tr>
+<td>타이틀 한도</td>
+<td>공식 주 10권(포맷별) + 실질 일 3권 (2023.9) — <strong>일 3권 게이트</strong></td>
+<td><a href="https://kdp.amazon.com/help/topic/G202172740">KDP Help</a>·<a href="https://www.theguardian.com/books/2023/sep/20/amazon-restricts-authors-from-self-publishing-more-than-three-books-a-day-after-ai-concerns">가디언</a></td>
+</tr>
+<tr>
+<td>AI 표기</td>
+<td>AI-generated 공개 의무 / AI-assisted 면제</td>
+<td><a href="https://kdp.amazon.com/help/topic/G200672390">KDP Content Guidelines</a></td>
+</tr>
+</tbody>
+</table>
+<h3>4.3 기타</h3>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>요구사항</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>edge-tts</td>
+<td>오픈소스·무료 — 한국어 품질·목소리 저작권 파일럿 전 검증</td>
+</tr>
+<tr>
+<td>네이버 '곧 뜰' 프리셋</td>
+<td>K-1 입력 재사용 (기존 자산)</td>
+</tr>
+<tr>
+<td>운세 엔진</td>
+<td><code>engine/</code> Python 모듈 재사용 (60일주·별자리·띠) — 결정적 계산</td>
+</tr>
+</tbody>
+</table>
+<h2>5. 데이터 요구사항</h2>
+<h3>5.1 쇼츠 데이터 모델 (14-shorts §4 확정)</h3>
+<pre><code class="language-sql">youtube_raw       id · video_id(UNIQUE) · title · tags(JSON) · description · channel_id ·
+                  channel_title · published_at · view_count · like_count · comment_count ·
+                  share_count? · region · fetched_at
+shorts_topics     id · label · score · evidence(JSON) · status · created_at
+shorts_scripts    id · topic · hook · script_md · hashtags(JSON) · ref_video_ids(JSON) ·
+                  status(draft/ready/published) · created_at · updated_at
+</code></pre>
+<ul>
+<li><code>share_count</code>: API statistics의 shareCount는 채널 소유 시에만 — <strong>수집 불가 시 공유율 대체 지표</strong>(조회급상승+반응비) 사용, 파일럿에서 검증</li>
+<li>멱등성: <code>video_id UNIQUE</code> UPSERT (재수집 안전)</li>
+</ul>
+<h3>5.2 KDP 데이터 모델 (12-kdp §3 확정)</h3>
+<pre><code class="language-sql">kdp_books     id · title · description · keywords(JSON) · category · status
+              (draft/assembling/ready/published/monitoring) · created_at · updated_at
+kdp_chapters  id · book_id(FK) · seq · title · body_md · word_count · status
+kdp_covers    id · book_id(FK) · image_url · size(6×9) · created_at
+kdp_publish   id · book_id(FK) · publish_date · price · royalty_rate · expected_royalty
+              · status(pending/published/verified/failed) · verified_at   [48h 모니터링]
+</code></pre>
+<ul>
+<li><code>kdp_publish</code>는 개선점 #3(출간 후 모니터링)의 기록 저장소</li>
+</ul>
+<h3>5.3 데이터 정합 규칙 (NFR-3)</h3>
+<ul>
+<li><strong>공통 상수</strong>: 일 3권(출간 게이트) · 쿼터 10,000 units/일 · 로열티 35%/70% · 70% 구간 $2.99~$12.99 · 손익분기($9.99→$6.93/권, 월$100=14권) — 14·12·11 문서와 동일 값, config 상수로 단일화 권장</li>
+</ul>
+<h2>6. 확장성 요건</h2>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>요구사항</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>쇼츠 수집 확장</td>
+<td>regionCode 파라미터로 국가 확장 (KR → US·JP), 쿼터 예산 내 자동 조절</td>
+</tr>
+<tr>
+<td>KDP 볼륨</td>
+<td>일 3권 게이트로 상한 — DB·배치는 100권 시리즈 수용 (테이블 인덱스 필수)</td>
+</tr>
+<tr>
+<td>시리즈 확장</td>
+<td>검증된 주제 → 시리즈화 (52주 → 100일·분기·연간) — 생성 파라미터 재사용</td>
+</tr>
+<tr>
+<td>채널 분리</td>
+<td>운세(한국어)·KDP(영어)·일반(한국어) — 태그·설명 템플릿 분리 (OQ-5)</td>
+</tr>
+</tbody>
+</table>
+<h2>7. ADR (아키텍처 결정 기록)</h2>
+<table>
+<thead>
+<tr>
+<th>ADR</th>
+<th>결정</th>
+<th>대안</th>
+<th>근거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ADR-1</td>
+<td>YouTube API v3 유일 정식 소스</td>
+<td>yt-dlp·스크래핑</td>
+<td>ToS 위반 리스크 (2020 RIAA DMCA 선례), 공식·무료·안정</td>
+</tr>
+<tr>
+<td>ADR-2</td>
+<td>EPUB=ebooklib+calibre+epubcheck</td>
+<td>pandoc DOCX·Kindle Create</td>
+<td>공식 지원 형식, 검증 자동화 (KDP 파일 형식)</td>
+</tr>
+<tr>
+<td>ADR-3</td>
+<td>배치는 GH Actions (Vercel 밖)</td>
+<td>Vercel cron</td>
+<td>60초 한도 — EPUB 조립·LLM 생성은 배치 전용</td>
+</tr>
+<tr>
+<td>ADR-4</td>
+<td>edge-tts (OQ-4)</td>
+<td>유료 TTS·자막만</td>
+<td>무료·오픈소스, 운세 카드에 적합 — 자막 폴백 유지</td>
+</tr>
+<tr>
+<td>ADR-5</td>
+<td>채널 분리 (OQ-5)</td>
+<td>단일 채널</td>
+<td>알고리즘 주제 일관성 — 파일럿 최소 2채널(한국어/영어)</td>
+</tr>
+<tr>
+<td>ADR-6</td>
+<td>일 3권 게이트 (OQ-3 관련)</td>
+<td>주 10권</td>
+<td>보수적 상한, AI 콘텐츠 시대 실질 한도 (가디언·KDP 커뮤니티)</td>
+</tr>
+</tbody>
+</table>
+<h2>8. 구현 시 주의사항 (개발팀 인계)</h2>
+<ol>
+<li><strong>search.list 별도 버킷</strong> (100회/일) — 쿼터 계산 로직에 반영, <code>videos.list</code>와 혼동 금지</li>
+<li><strong>shareCount 비공개</strong> — 공유율 지표의 대체 설계 (파일럿 검증)</li>
+<li><strong>calibre·epubcheck 설치</strong> — GH Actions 러너에 명시 (12-kdp §2.1), 로컬은 requirements-dev.txt</li>
+<li><strong>AI 표기 QC</strong> — AI-generated 판정 로직 + 출간 체크리스트 (12-kdp QC #6)</li>
+<li><strong>엔진 데이터는 결정적</strong> — 운세 카드 쇼츠는 LLM 환상 콘텐츠 금지 (11-fortune §8-1 원칙)</li>
+<li><strong>수동 업로드 UX</strong> — 스크립트/EPUB/체크리스트 다운로드 중심, 자동 업로드 API 미구현</li>
+</ol>
+<hr />
+<p><em>작성: 기획팀 · 상태: 기획 문서 패키지 2/5 · 상위: plan.md · 근거: research-report.md R-3·R-5</em></p>
+</main>
+</body>
+</html>

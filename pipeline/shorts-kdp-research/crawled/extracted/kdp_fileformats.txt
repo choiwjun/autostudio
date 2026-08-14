@@ -1,0 +1,429 @@
+English
+English
+Deutsch
+Français
+Español
+Italiano
+Português
+Nederlands
+|
+Help
+|
+Sign in
+|
+Give Feedback
+How would you rate your experience using this page?
+Very Dissatisfied
+Dissatisfied
+Neutral
+Satisfied
+Very Satisfied
+Visit our
+help center
+for resources to common issues
+Click here
+to take our survey and give us detailed feedback.
+Thank you for your feedback.
+Click here
+to take our survey and give us detailed feedback.
+Bookshelf
+|
+Reports
+|
+Community
+|
+Marketing
+Help Topics
+Help
+KDP Help Center Home
+Account & Taxes
+Set up your KDP account
+Create a KDP Account
+Add or update a bank account
+I set up my bank account, but I haven't received any payments.
+Troubleshooting common bank account errors
+Payment Service Provider Program FAQ
+Payment Service Provider Program Updates
+Payment Service Provider Program Risk Management Controls
+Manage Your KDP Account
+What happens when I close my KDP account?
+Account security and avoiding scams
+Sign in Issues
+Two-Step Verification
+Verify your identity
+Accepted IDs for Identity Verification
+What if my account name or country changes or is different from my ID?
+Taking photos of your ID
+Troubleshoot Identity Verification Errors
+CreateSpace Account
+Tax Information
+Year End Tax Forms
+What is my tax information status?
+Complete Tax Profile
+Tax Withholding
+Kindle Store: BR - BR Tax Withholding
+Goods and Services Tax (GST) for eBooks in Australia and India
+Taiwan VAT
+Applying for a US ITIN
+Applying for a U.S. EIN for Corporations and Non-Individual Entities
+How Taxes Affect List Prices
+Setting Prices for Amazon Japan
+How EU and the UK Taxes Affect Print Books List Price
+How EU Taxes Affect eBooks List Price
+EU VAT Invoices
+Book Formatting
+Format Your Paperback
+Set Trim Size, Bleed, and Margins
+Format Front Matter, Body Matter, and Back Matter
+Save Your Manuscript File
+Paperback and Hardcover Manuscript Templates
+Cover Creator
+Create a Paperback Cover
+Format Images in Your Book
+Paperback Fonts
+Fix Paperback and Hardcover Formatting Issues
+Paperback Submission Guidelines
+Format Your Hardcover
+Create a Hardcover Cover
+Format Your eBook
+What criteria does my eBook's cover image need to meet?
+Why is my cover image not updating on Amazon?
+What file formats are supported for eBook manuscripts?
+Digital Rights Management
+Create a Table of Contents
+Tools and Resources
+KDP Tools and Resources
+Publishing Service Providers & Resources
+Kindle Create Help Overview
+Getting Started with Kindle Create
+Kindle Create Tutorial
+Prepare Reflowable and Print Books with Kindle Create
+Prepare Comic and Kids' eBooks with Kindle Create
+Prepare Print Replica Books with Kindle Create
+Previewing and Publishing Your Kindle Create Book
+Kindle Previewer
+Quality Notifications Dashboard
+Guide to Kindle Content Quality
+Enhanced Typesetting
+X-Ray for Authors
+X-Ray for Authors: Tips and Tricks
+KDP Publishing
+Start publishing with KDP
+KDP Bookshelf
+Book Supported Languages
+Arabic
+Chinese (Traditional) (Beta)
+Publishing in Hebrew, Persian, and Yiddish
+Indian-Language Publishing
+Create a Book
+Book Detail Resources
+Books Titles & Editions
+Fixing typos on a book title or author name
+Authors & Contributors
+Write a Book Description
+Fixing errors or formatting with book descriptions
+Make Your Book More Discoverable with Keywords
+Kindle eBook Pre-Order
+Setting up pre-orders
+Pre-order statuses
+Reschedule a pre-order release
+Delay or cancel a pre-order release
+Pre-order pricing and sales reports
+Primary Audience and Reading Age
+Publishing Public Domain Content
+Language & Reading direction
+Release Date Options
+Schedule a Release
+Upload Book Resources
+Accessibility for eBooks
+Accessibility Features on Detail Page
+What is an ISBN and Imprint?
+Get an ISBN
+Change or view your ISBN
+Troubleshoot ISBN errors
+Barcodes
+Print Options
+Color Ink Options
+Groundwood Paper
+Upload and Preview Book Content
+Convert a Paperback Word File to PDF
+Pricing Resources
+Price Your Book
+Price Troubleshooting
+Paperback Printing Cost
+Hardcover Printing Cost
+RedirectA
+Printing Cost & Royalty Calculator
+Timelines
+Book Status
+Low-Content Books
+Hardcover
+Hardcover Print Elements
+Beta: Audiobooks with virtual voice
+Getting started with audiobooks with virtual voice
+Audiobooks with virtual voice eligibility and troubleshooting
+Virtual voice audio samples
+Pricing, royalties, and reports for audiobooks
+Edit audio in the Virtual Voice Studio
+Terms and Conditions for the Beta Version of Audiobooks with Virtual Voice
+Beta: Kindle Translate
+Getting Started with Kindle Translate
+Kindle Translate Languages
+Kindle Translate Eligibility and Troubleshooting
+Kindle Translate Quality
+Pricing, royalties, and reports for translations
+Terms and Conditions for the Beta Version of Kindle Translate
+Start a Book Series
+Update Your Series
+Edit your Series
+Delete a series
+Set the reading order for your series
+Where can I find my Amazon Series Page?
+How to create a series with multiple authors
+Can I offer discounts to books in my series?
+Series Collections on kdp.amazon.co.jp
+Orders & Book Copies
+Proof and Author Copies
+How do I order a proof or author copy?
+How much do proof or author copies cost?
+What is the cost to ship my proof or author copy?
+When will my proof or author copy arrive?
+I’m getting an error ordering my author copy
+I’m getting an error ordering my proof copy
+My proof or author copy came damaged
+My proof or author copy didn’t arrive on time
+My proof or author copy has printing errors
+Amazon Store & Detail Page
+KDP Categories
+Read Sample (Look Inside the Book)
+Customer Reviews
+Search Results
+How to find your book on Amazon
+Troubleshoot search results
+Link Your Books Together
+Why are my books not linked on Amazon?
+Link Your Books on the KDP Bookshelf
+How do I unlink my books?
+Sales Ranking
+Book Trends Data
+Recaps
+Marketing & Distribution
+Guidelines for use of the Available at Amazon Badge by KDP Publishers
+Ways to Promote Your Book
+KDP Select
+How to enroll in KDP Select
+How to cancel KDP Select
+KDP Select Benefits
+KDP Select Bonus
+Kindle Countdown Deals
+Kindle Unlimited
+Royalties in Kindle Unlimited
+Free Book Promotions
+Author Central
+A+ Content
+Create A+ Content
+A+ Content Examples
+A+ Content Guidelines
+Advertising for KDP books
+Expanded Distribution
+eBook Distribution Rights
+Paperback and Hardcover Distribution Rights
+Merchandising Tips
+Buying and Gifting eBooks for Others
+Sample Chapters
+Audiobooks Through ACX
+Amazon Literary Contests
+Nominate Your eBook for a Promotion (Beta)
+Book Updates
+Update Your Book
+Update your book details
+Update Your Manuscript
+Modify Converted eBook Content
+How to Send Your Updated eBook to Customers or Yourself
+Update Your Cover
+Remove or unpublish a book
+Payments & Reports
+Royalties
+eBook Royalties
+Paperback Royalty
+Hardcover Royalty
+KDP Reports
+How do I view a report of my orders and payment royalties?
+Dashboard
+Orders Report
+KENP Read
+Promotions Report
+Pre-Order Report
+Month-to-Date Report
+Prior Months' Royalties Report
+Royalties Estimator
+Payment Report
+KDP Payments
+KDP Payment Options
+When will I get paid?
+Troubleshoot Payment Issues
+Legal & Content Guidelines
+Kindle Direct Publishing Terms and Conditions
+Digital  Book Pricing Page
+Print Book Pricing Page
+eBook List Price Requirements
+Program Policies
+Content Guidelines
+Metadata Guidelines for Books
+Intellectual Property Rights Frequently Asked Questions
+Reporting Possible Violations of Our Guidelines
+Privacy Notice Information
+Bonus Content
+Featured Offer Eligibility for Third-Party Sellers
+EU Regulation on Deforestation-free Products (EUDR)
+User Guides
+Kindle Publishing Guidelines
+Getting Started
+Introduction
+Paths to Getting Your Content on Kindle
+Comparing Formats
+General Best Practices
+Cover Image Guidelines
+Navigation Guidelines
+HTML and CSS Guidelines
+Hyperlink Guidelines
+QA Standards
+Boxed and Bundles Edition Guidelines (eBook format only)
+Guidelines for Specific Types of eBooks
+Creating Reflowable Books
+Text Guidelines - Reflowable
+Image Guidelines - Reflowable
+Table Guidelines - Reflowable
+Creating Fixed-Layout Books with Text Pop-Ups
+Creating Fixed-Layout Books with Image Pop-Ups or Virtual Panels
+Creating Fixed-Layout Books Without Pop-Ups
+Creating Kindle Editions with Audio/Video Content
+Creating Dictionaries
+Appendices
+Enhanced Typesetting and Page Flip
+Attributes and Tags Supported by Enhanced Typesetting
+HTML and CSS Tags Supported in Kindle Format 8
+Media Queries
+Guidelines for Creating a Source File
+KDP Jumpstart
+1 – Set Up Your KDP Account
+2 – Prepare Your Manuscript
+3 – Prepare Your Cover
+4 – Title Setup: Book Details, Content, & Pricing
+5 – Publishing & Review
+6 – Promoting Your Book & Getting Paid
+KDP University
+Webinars
+Videos
+Contact Us
+Have feedback? Can't find your answer in our Help pages?
+Contact Us
+Search Help
+Book Formatting
+Format Your eBook
+What file formats are supported for eBook manuscripts?
+What file formats are supported for eBook manuscripts?
+KDP supports a variety of formats. Below, you’ll find information about our recommended and most commonly used formats.
+Format
+Overview & Tips
+Tools to use*
+Compatible with this device(s)
+Microsoft Word (DOC/DOCX)
+Most DOC/DOCX files convert well to eBooks. However, some files with complex formatting may not convert as well.
+Use Kindle Previewer to check if your eBook converted successfully.
+For details on formatting, see our
+eBook Manuscript Formatting Guide
+.
+For details, visit
+Microsoft Support
+.
+Fire tablets
+Kindle App**
+Kindle E Ink
+Kindle Package Format (KPF)
+Using KPF files allows your eBook to easily format and fit all Kindle devices. It’s a go-to method for avoiding any formatting issues.
+You can create a KPF file using
+Kindle Create
+.
+What are the benefits of using Kindle Create?
+Kindle Create takes care of typesetting your eBook so that it works well on all Kindle devices and applications, including tablets, phones, and E-readers.
+Select from a variety of themes and styles to customize the look and feel of your eBook.
+Easily create a table of contents page and Kindle Interactive TOC for your eBook.
+Insert and place high quality images in your eBook.
+Preview how your eBook looks before publishing.
+If you want to change from reflowable to Print Replica or vice versa, you can unpublish the previous version and then add it as a new title using the desired format.
+For more information on how to install or use Kindle Create, check out our
+Getting Started with Kindle Create
+page.
+Fire tablets
+Kindle App**
+Kindle E Ink
+EPUB
+We support books in EPUB format that meet the specifications outlined in the
+Kindle Publishing Guidelines
+.
+Use any third-party tool available on the internet to create your EPUB file.
+We recommend validating the file with
+Kindle Previewer
+before you upload your book.
+Fire tablets
+Kindle App**
+Kindle E Ink
+MOBI
+Effective March 2025, we will no longer accept MOBI files for fixed-layout eBooks. To learn more about this change visit our
+MOBI Support for eBooks Frequently Asked Questions help page
+.
+The table above is a list of our suggested and most commonly used formats. Additional accepted formats included but aren't limited to the following:
+HTML (ZIP, HTM, or HTML)
+Rich Text Format (RTF)
+Plain Text (TXT)
+Adobe PDF (PDF)
+Note:
+We only support PDF files in the following languages: English, French, German, Italian, Portuguese, Spanish, Catalan, Galician, and Basque.
+* These are suggestions provided by KDP. However, you’re welcome to use the service or program of your preference to create your eBook.
+** Kindle App is available for iOS, Android, Mac, and PC.
+Title creation limit
+To ensure a positive experience for all authors, we limit the number of titles you can create at the same time to 10 per book format each week. If you expect to regularly create a large number of titles, please
+contact us
+to inquire about an exception.
+Was this article helpful?
+Yes
+|
+No
+Make more money and reach more readers through Kindle Unlimited.
+Learn More
+Total KDP Select Author Earnings
+June 2026
+•
+$67.0 Million
+©
+      1996-2026, Amazon.com, Inc. or its affiliates. All Rights Reserved.
+Amazon and Kindle are trademarks of Amazon.com Inc. or its affiliates.
+KDP Select
+Earn more money and
+reach new readers
+KDP Community
+Connect with experts
+and fellow authors
+CreateSpace
+Indie print publishing
+made easy
+ACX
+Indie audiobook publishing
+made easy
+KDP Terms and Conditions
+|
+Privacy Notice
+|
+Conditions of Use
+|
+Contact Us
+|
+Join Our Team
+|
+kdp.amazon.co.jp
+An unexpected error occurred.  Please try again later.
+Your session has expired
+Please sign in to continue
+Sign In
+edit

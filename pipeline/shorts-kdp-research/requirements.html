@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>requirements</title>
+<style>
+:root { --accent:#2B5FDB; --bg:#ffffff; --fg:#1a1a2e; --muted:#666; --border:#e2e8f0; --code-bg:#f6f8fa; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#0f1117; --fg:#e6e6e6; --muted:#9ca3af; --border:#2a2f3a; --code-bg:#161b26; }
+}
+* { box-sizing: border-box; }
+body { font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; background:var(--bg);
+       color:var(--fg); line-height:1.7; margin:0; padding:2rem 1rem; }
+main { max-width: 860px; margin: 0 auto; }
+h1 { font-size:1.9rem; border-bottom:3px solid var(--accent); padding-bottom:.4rem; }
+h2 { font-size:1.4rem; margin-top:2.2rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.15rem; margin-top:1.6rem; }
+h4 { font-size:1rem; margin-top:1.2rem; color:var(--accent); }
+a { color:var(--accent); }
+code { background:var(--code-bg); padding:.15em .4em; border-radius:4px; font-size:.9em;
+       font-family:'JetBrains Mono','D2Coding',Consolas,monospace; }
+pre { background:var(--code-bg); padding:1rem; border-radius:8px; overflow-x:auto; border:1px solid var(--border); }
+pre code { background:none; padding:0; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.93rem; }
+th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); font-weight:600; }
+tr:nth-child(even) td { background:rgba(127,127,127,.05); }
+blockquote { border-left:4px solid var(--accent); margin:1rem 0; padding:.5rem 1rem;
+             background:rgba(43,95,219,.06); border-radius:0 6px 6px 0; }
+blockquote p { margin:.3rem 0; }
+hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
+li { margin:.25rem 0; }
+strong { font-weight:700; }
+.meta { color:var(--muted); font-size:.85rem; margin-bottom:1.5rem; }
+</style>
+</head>
+<body>
+<main>
+<div class="meta">📄 requirements · 생성: 2026-08-14 16:21</div>
+<h1>쇼츠+KDP 기획 다듬기 (유튜브 기반 쇼츠 파이프라인 · KDP 개선 반영) — 요구사항 명세</h1>
+<blockquote>
+<p>작성: 요구사항팀 · 프로젝트: autostudio · 작업 디렉토리: <code>pipeline/shorts-kdp-research/</code><br />
+작성일: 2026-08-14 · 인터뷰: Socratic 질문 7개 → 사용자 답변 (<code>user-answers.md</code> 참조)<br />
+대상 문서: <code>docs/planning/14-shorts-pipeline.md</code>(쇼츠 기획 초안) · <code>docs/planning/12-kdp-pipeline.md</code>(KDP 설계 확정) · <code>docs/planning/11-fortune-channel.md</code> §9(쇼츠 향후 과제)</p>
+</blockquote>
+<h2>1. 배경 (실측 현황)</h2>
+<h3>1.1 쇼츠 파이프라인 (14-shorts-pipeline.md — 기획 초안, 구현 전)</h3>
+<ul>
+<li><strong>핵심 차별점</strong>: 네이버 인기키워드(블로그 검색)가 아니라 <strong>유튜브 인기 주제·채널·키워드 기반 발굴</strong> — "유튜브에서 뜨는 주제 = 쇼츠 소재"</li>
+<li>현재 구조: 유튜브 데이터 수집(API v3 우선, 무료 스크래핑/yt-dlp 보조) → 주제 후보 판정(조회/구독·성장률·반응비 + 틈새) → 쇼츠 스크립트 생성(30~45초, 후킹, CTA) → 수동 업로드</li>
+<li>데이터 모델: <code>youtube_raw</code> · <code>shorts_topics</code> · <code>shorts_scripts</code> (SQLite/Postgres 이중 SQL 패턴 재사용)</li>
+<li>실행 순서: S-1 수집 → S-2 주제 판정 → S-3 스크립트 → S-4 배치+대시보드 → 파일럿(인기 주제 10개 소재 → 5개 쇼츠)</li>
+<li><strong>부족한 점</strong>: 시장 근거(왜 유튜브인가·규모·경쟁·수익화 경로)가 수치로 제시되지 않음, 파일럿 선정 근거 부재, 수익 모델 미정의</li>
+</ul>
+<h3>1.2 KDP 파이프라인 (12-kdp-pipeline.md — 설계 확정, 구현 전)</h3>
+<ul>
+<li>K-1~K-4 미구현 (kdp_research.py·kdp_book.py·ebook_builder.py·배치/대시보드)</li>
+<li><strong>개선점 8건 식별 완료</strong> (오케스트레이터 실측, 2026-08-14):</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>구분</th>
+<th>개선점</th>
+<th>상태</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>🔴 수정</td>
+<td><strong>주간 10권/일 3권 한도 혼용</strong> — §5(주당 10권)·§8(일 3권)·§2(일 3권 게이트) 불일치 → <strong>일 3권 통일</strong> (아마존 정책 현재 기준)</td>
+<td>미반영</td>
+</tr>
+<tr>
+<td>2</td>
+<td>🔴 수정</td>
+<td><strong>의존성 미기재</strong> — ebooklib·Pillow·calibre 미설치, GH Actions 러너 calibre 설치 단계 없음 → requirements-dev.txt·워크플로우에 명시</td>
+<td>미반영</td>
+</tr>
+<tr>
+<td>3</td>
+<td>🟡 보강</td>
+<td><strong>출간 후 모니터링 게이트 부재</strong> — 출간 후 48h 확인(책 상태·가격·미러) 추가</td>
+<td>미반영</td>
+</tr>
+<tr>
+<td>4</td>
+<td>🟡 보강</td>
+<td><strong>'곧 뜰' 키워드 → 책 주제 변환 단절</strong> — 한국어 키워드의 영어 현지화·아마존 검색량 검증 단계 추가 (또는 한국어 전자책 병행 명시)</td>
+<td>미반영</td>
+</tr>
+<tr>
+<td>5</td>
+<td>🟡 보강</td>
+<td><strong>QC 8항목 미정의</strong> — 표절 유사성·금지어·사실성·챕터 간 중복·길이·AI 표기·마크다운 정합·메타데이터 명시</td>
+<td>미반영</td>
+</tr>
+<tr>
+<td>6</td>
+<td>🟡 보강</td>
+<td><strong>파일럿 주제 선정 근거 부족</strong> — "52주 절약 챌린지 워크북"의 선택 근거·검색 수요·경쟁·시리즈 확장성 명시</td>
+<td>미반영</td>
+</tr>
+<tr>
+<td>7</td>
+<td>🟡 보강</td>
+<td><strong>수익성/비용 모델 부재</strong> — KDP 로열티(35%/70%)·가격대·손익분기 계산 추가</td>
+<td>미반영</td>
+</tr>
+<tr>
+<td>8</td>
+<td>🟢 연계</td>
+<td><strong>KDP↔쇼츠 시너지 미정의</strong> — 책 챕터 → 쇼츠 대본 → 아마존 링크 흐름을 양 문서에 상호 참조</td>
+<td>미반영</td>
+</tr>
+</tbody>
+</table>
+<h3>1.3 운세 채널 (11-fortune-channel.md §9 — 쇼츠 향후 과제)</h3>
+<ul>
+<li>현재 <strong>이연 상태</strong>: 한국어 운세 쇼츠 = "B2C 웹 출시 후" · 영어권 KDP 쇼츠 = "Phase K 완료 후"</li>
+<li><strong>사용자 답변: 이연 앞당김</strong> — 이번 기획에서 두 쇼츠 모두 다룬다</li>
+<li>운세 엔진 자산: 일주 분석(60일주)·별자리·띠별 문구 세트, 결정적 계산 기반 (AI 환상 콘텐츠 아님)</li>
+</ul>
+<h2>2. 목표 &amp; 비목표</h2>
+<h3>목표</h3>
+<ol>
+<li><strong>쇼츠 파이프라인 기획 고도화</strong> — 14-shorts-pipeline.md를 시장·경쟁·정책 자료조사 기반으로 다듬어 실행 가능한 기획 문서로 개정</li>
+<li><strong>KDP 기획 개선</strong> — 12-kdp-pipeline.md 개선점 <strong>8건 전부 반영</strong> (수정 2건 + 보강 5건 + 연계 1건)</li>
+<li><strong>시너지 정의</strong> — KDP↔쇼츠(책 챕터 → 쇼츠 → 아마존 링크) 및 운세엔진↔쇼츠(운세 카드 쇼츠) 연계를 양 문서에 반영</li>
+<li><strong>이연 해소</strong> — 11-fortune §9의 쇼츠 이연(한국어 운세·영어권 KDP)을 앞당겨 이번 기획 범위에 포함</li>
+</ol>
+<h3>비목표</h3>
+<ul>
+<li><strong>구현(코드 작성) 제외</strong> — 사용자 Q3(a): 기획 문서만 다듬기</li>
+<li><strong>자동 업로드 제외</strong> — 수동 업로드 원칙 유지 (KDP·쇼츠 공통)</li>
+<li>실제 데이터 수집/파일럿 실행 (후속 턴)</li>
+<li>B2C 웹 출시 (별도 작업)</li>
+</ul>
+<h2>3. 타깃 사용자/세그먼트</h2>
+<table>
+<thead>
+<tr>
+<th>세그먼트</th>
+<th>역할</th>
+<th>니즈</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>사용자 본인</strong> (autostudio 운영자)</td>
+<td>1차 — 파이프라인 운영</td>
+<td>소재 발굴~스크립트 자동화로 제작 효율화, 업로드·편집은 수동</td>
+</tr>
+<tr>
+<td><strong>쇼츠 시청자 (한국어)</strong></td>
+<td>2차 — 유입/수익원</td>
+<td>운세/사주 카드, KDP 책 소개, 일반 트렌드·잡지식 30~45초 콘텐츠</td>
+</tr>
+<tr>
+<td><strong>쇼츠 시청자 (영어권)</strong></td>
+<td>2차 — KDP 홍보</td>
+<td>KDP 책 챕터 기반 쇼츠 → 아마존 링크 유입</td>
+</tr>
+<tr>
+<td><strong>KDP 독자 (영어권)</strong></td>
+<td>3차 — 책 구매</td>
+<td>구조화 비소설(워크북/가이드) — AI 생성 콘텐츠 표기 수용 가능한 실용서</td>
+</tr>
+</tbody>
+</table>
+<h2>4. 핵심 문제 &amp; 페인포인트</h2>
+<ol>
+<li><strong>데이터 소스 궁합</strong>: 네이버 인기키워드(블로그 검색)는 쇼츠 소재와 궁합이 낮음 — 쇼츠는 조회·시청 완료율이 지표이고 주제는 유튜브 트렌드에서 나옴</li>
+<li><strong>시장 근거 부재</strong>: 쇼츠 초안에 "왜 유튜브인가·시장 규모·경쟁·수익화 경로"가 출처 있는 수치로 없음</li>
+<li><strong>KDP 문서 결함</strong>: 정책 한도 혼용·의존성 미기재·QC 미정의·파일럿 근거·수익 모델 등 8건</li>
+<li><strong>문서 간 단절</strong>: 쇼츠↔KDP↔운세 시너지가 어떤 문서에도 구체적으로 정의 안 됨 (11-fortune §9는 이연만 언급)</li>
+<li><strong>이연 상태</strong>: 한국어 운세 쇼츠·영어권 KDP 쇼츠가 "나중에"로 미뤄져 있어 실행 계획 부재</li>
+</ol>
+<h2>5. 범위</h2>
+<h3>포함</h3>
+<ul>
+<li><strong>쇼츠 기획</strong>: 데이터 소스(API v3 우선·스크래핑/yt-dlp 보조·네이버 보조), 수집 로직, 주제 판정 지표(조회/구독·성장률·반응비·틈새), 스크립트 생성(30~45초·후킹·CTA·검수), 데이터 모델, 배치/발행(수동), 실행 순서, 리스크 — 전부 자료조사 기반으로 고도화</li>
+<li><strong>KDP 기획</strong>: 개선점 8건 전부 반영 + 시장·정책 근거 보강</li>
+<li><strong>시너지</strong>: KDP↔쇼츠(책 챕터 → 쇼츠 → 아마존 링크), 운세엔진↔쇼츠(운세 카드 쇼츠), 11-fortune §9 개정</li>
+<li><strong>파일럿 설계</strong>: 쇼츠·KDP 각각 파일럿 주제 선정 기준과 후보 (리서치 결과 기반)</li>
+<li><strong>수익 모델</strong>: 쇼츠(광고/유입) · KDP(로열티·가격·손익분기) 근거 있는 수치로 명시</li>
+</ul>
+<h3>제외</h3>
+<ul>
+<li>코드 구현 (신규 모듈 작성)</li>
+<li>자동 업로드/발행 (수동 유지)</li>
+<li>실제 데이터 수집·파일럿 실행</li>
+<li>B2C 웹·SaaS·리드 판매 등 11-fortune §9의 다른 보류 항목</li>
+</ul>
+<h2>6. 성공 기준</h2>
+<ol>
+<li><strong>출처 있는 수치 반영</strong>: 유튜브 쇼츠 시장 규모·성장률, 유튜브 Data API v3 쿼터/정책, KDP 로열티(35%/70%)·타이틀 한도(일 3권)·EPUB 요구사항 등이 출처와 함께 문서에 반영</li>
+<li><strong>실행 가능성</strong>: 리서치 결과가 파일럿 주제·우선순위 결정에 실제 반영 (쇼츠 소재 후보 10개·KDP 책 후보 선정 근거)</li>
+<li><strong>KDP 8건 반영 추적 가능</strong>: 개선점 8건 각각이 문서 어디에 반영됐는지 추적 가능</li>
+<li><strong>문서 개정 완료 + 사용자 승인</strong>: 14-shorts-pipeline.md·12-kdp-pipeline.md·11-fortune-channel.md §9 개정 후 사용자 승인</li>
+</ol>
+<h2>7. 제약</h2>
+<table>
+<thead>
+<tr>
+<th>제약</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>비용</td>
+<td>전부 <strong>무료/오픈소스</strong> 유지 (유튜브 API 무료 티어, yt-dlp, ebooklib, calibre)</td>
+</tr>
+<tr>
+<td>유튜브 API</td>
+<td><strong>YouTube Data API v3 키 발급 가능</strong> (사용자 발급 예정 — Google Cloud Console) — 하루 10,000 쿼터</td>
+</tr>
+<tr>
+<td>아마존</td>
+<td>공개 API 없음 → <strong>크롤링/검색 경쟁도 스냅샷 방식 유지</strong></td>
+</tr>
+<tr>
+<td>업로드</td>
+<td>자동 업로드 금지 — <strong>수동 유지</strong> (계정 제재 리스크)</td>
+</tr>
+<tr>
+<td>인프라</td>
+<td>기존 Vercel 서버리스 60초 한도, SQLite/Postgres 이중 SQL 패턴, GH Actions 배치 패턴 재사용</td>
+</tr>
+<tr>
+<td>언어</td>
+<td>산출물·문서는 한국어 (KDP 책·쇼츠 콘텐츠는 영어 포함 가능)</td>
+</tr>
+</tbody>
+</table>
+<h2>8. 우선순위 (M/S/C)</h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>요구사항</th>
+<th>우선순위</th>
+<th>사유</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R-1</td>
+<td>쇼츠 파이프라인 기획 고도화 (유튜브 기반 발굴 로직·수치 근거)</td>
+<td><strong>M</strong></td>
+<td>핵심 요청 1 — "유튜브 인기 주제/채널/키워드 기반"</td>
+</tr>
+<tr>
+<td>R-2</td>
+<td>KDP 개선점 8건 전부 반영</td>
+<td><strong>M</strong></td>
+<td>핵심 요청 2 — "KDP 기획 관련 확인 및 개선"</td>
+</tr>
+<tr>
+<td>R-3</td>
+<td>KDP↔쇼츠·운세엔진↔쇼츠 시너지 정의</td>
+<td><strong>M</strong></td>
+<td>문서 간 통합 — 11-fortune §9 이연 해소</td>
+</tr>
+<tr>
+<td>R-4</td>
+<td>쇼츠·KDP 수익 모델 명시 (근거 수치)</td>
+<td>S</td>
+<td>수익원 확장 목표의 근거</td>
+</tr>
+<tr>
+<td>R-5</td>
+<td>파일럿 주제 선정 기준·후보 (리서치 기반)</td>
+<td>S</td>
+<td>실행 단계 진입 조건</td>
+</tr>
+<tr>
+<td>R-6</td>
+<td>대시보드·성과 추적 상세</td>
+<td>C</td>
+<td>구현 단계에서 확정 가능</td>
+</tr>
+</tbody>
+</table>
+<h2>9. 비기능 요구사항 (NFR)</h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>항목</th>
+<th>요구사항</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NFR-1</td>
+<td>근거성</td>
+<td>모든 핵심 수치·정책에 출처 명시 (1차 출처 우선: YouTube 공식 문서, 아마존 KDP Help)</td>
+</tr>
+<tr>
+<td>NFR-2</td>
+<td>검증 가능성</td>
+<td>리서치 QA팀이 출처 URL·수치를 교차 검증할 수 있어야 함</td>
+</tr>
+<tr>
+<td>NFR-3</td>
+<td>정합성</td>
+<td>14-shorts·12-kdp·11-fortune §9 간 상호 참조와 수치(일 3권, 쿼터 1만, 로열티) 불일치 금지</td>
+</tr>
+<tr>
+<td>NFR-4</td>
+<td>추적성</td>
+<td>KDP 개선점 8건 → 문서 반영 위치 매핑표 유지</td>
+</tr>
+<tr>
+<td>NFR-5</td>
+<td>실행성</td>
+<td>기획 문서를 보고 개발팀이 S-1~S-4 / K-1~K-4 태스크로 분해 가능해야 함</td>
+</tr>
+<tr>
+<td>NFR-6</td>
+<td>한국어</td>
+<td>산출물 전부 한국어 (코드·콘텐츠 예시는 영어 허용)</td>
+</tr>
+</tbody>
+</table>
+<h2>10. 오픈 질문 &amp; 가정</h2>
+<h3>오픈 질문 (후속 팀이 리서치/기획 과정에서 확정)</h3>
+<ul>
+<li><strong>OQ-1</strong>: 유튜브 쇼츠 수집 빈도·배치 스케줄 (매일 1회 vs 주 N회) — API 쿼터 예산과 파일럿 규모에 따라</li>
+<li><strong>OQ-2</strong>: 쇼츠 주제 카테고리 확정 (운세/사주 vs KDP 책 홍보 vs 일반 트렌드의 비중) — 리서치 결과로 파일럿 주제 결정</li>
+<li><strong>OQ-3</strong>: KDP 파일럿 주제 재선정 — "52주 절약 챌린지 워크북" 유지 vs '곧 뜰' 키워드+아마존 수요 검증 기반 새 후보</li>
+<li><strong>OQ-4</strong>: TTS(edge-tts) 포함 여부 — 음성 자동화 vs 자막 텍스트만 산출(수동 녹음)</li>
+</ul>
+<h3>가정 (assumptions)</h3>
+<ul>
+<li><strong>A-1</strong>: 사용자 Q1~Q7 답변이 이번 작업의 요구사항 확정 근거 (<code>user-answers.md</code> 참조) — 목표 복합(수익원 확장+제작 효율화), 이연 앞당김, 기획 문서만, KDP 8건 전부, 성공 기준 3종 전부, 무료/오픈소스, 쇼츠+KDP 대등 병행</li>
+<li><strong>A-2</strong>: YouTube Data API v3 키는 리서치/기획 단계에서 발급 예정 (문서 작성엔 불필요, 구현 시 필요)</li>
+<li><strong>A-3</strong>: KDP 한도는 <strong>일 3권</strong> 기준으로 통일 (아마존 정책 현재 기준 — 리서치팀이 1차 출처로 재확인)</li>
+<li><strong>A-4</strong>: 업로드·편집은 사용자 수동 — 파이프라인은 소재~스크립트까지 자동화</li>
+<li><strong>A-5</strong>: 이번 턴은 요구사항~기획QA까지 (구현 X) — 기획 확정 후 개발팀/개발QA팀은 후속 턴</li>
+</ul>
+<h2>11. 리서치팀 조사 지시 (다음 단계 전달용)</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>조사 주제</th>
+<th>산출 기대</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R-1</td>
+<td>유튜브 쇼츠 시장 규모·성장률·광고 수익화 (한국·글로벌)</td>
+<td>출처 있는 수치 (시장 규모, CPM, 성장률)</td>
+</tr>
+<tr>
+<td>R-2</td>
+<td>유튜브 쇼츠 알고리즘·트렌드 판정 지표 근거 (조회/구독·성장률·반응비가 유효한 이유)</td>
+<td>지표 근거 + 사례</td>
+</tr>
+<tr>
+<td>R-3</td>
+<td>YouTube Data API v3 쿼터·엔드포인트·비용·대안(yt-dlp·스크래핑) 정책</td>
+<td>API 한도·리스크 실측</td>
+</tr>
+<tr>
+<td>R-4</td>
+<td>KDP 전자책 시장: 규모·카테고리 성과·수익 모델(로열티 35/70%·가격대·손익분기)</td>
+<td>수익 모델 수치</td>
+</tr>
+<tr>
+<td>R-5</td>
+<td>KDP 정책: 타이틀 한도(일 3권)·AI 콘텐츠 표기·EPUB 요구사항 (1차 출처)</td>
+<td>정책 게이트 근거</td>
+</tr>
+<tr>
+<td>R-6</td>
+<td>책 홍보 쇼츠(KDP↔쇼츠) 모범 사례</td>
+<td>시너지 설계 근거</td>
+</tr>
+<tr>
+<td>R-7</td>
+<td>한국어 운세/사주 쇼츠 사례·성과·규제</td>
+<td>운세 쇼츠 설계 근거</td>
+</tr>
+</tbody>
+</table>
+<h2>12. 작업 규모 모드 판정</h2>
+<p><strong>판정: standard</strong></p>
+<table>
+<thead>
+<tr>
+<th>기준</th>
+<th>판정 근거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>신규 서비스</td>
+<td>쇼츠 파이프라인 = <strong>신규 파이프라인 기획</strong> (KDP는 기존 기획 개정)</td>
+</tr>
+<tr>
+<td>요구사항 수</td>
+<td><strong>10개+</strong> (쇼츠 목표·데이터소스·판정로직·스크립트·모델·배치 + KDP 8건 + 시너지 + 수익 모델) — 5~20 범위</td>
+</tr>
+<tr>
+<td>조사 필요</td>
+<td><strong>시장/경쟁/정책/수익화 조사 필수</strong> — 사용자 명시 "제대로 자료조사 시장조사"</td>
+</tr>
+<tr>
+<td>팀 구성</td>
+<td>요구사항 → <strong>리서치 → 리서치QA → 기획 → 기획QA</strong> (이번 턴: 구현 제외 per Q3-a) → (후속 턴) 개발 → 개발QA</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>standard 모드</strong> 판정. 단, 사용자 Q3(a)("기획 문서만, 구현 X")에 따라 <strong>이번 턴 실행 범위는 요구사항~기획QA까지</strong> — 개발팀·개발QA팀은 기획 문서 확정·승인 후 후속 턴에 실행한다. 리서치팀부터 기획팀까지의 5단계(요구사항·리서치·리서치QA·기획·기획QA)가 이번 턴의 파이프라인이다.</p>
+</blockquote>
+<hr />
+<p><em>작성: 요구사항팀 · 상태: 사용자 답변 수신 완료, 모드 판정: standard (이번 턴: 요구사항~기획QA)</em></p>
+</main>
+</body>
+</html>
