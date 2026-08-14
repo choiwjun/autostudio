@@ -155,3 +155,44 @@ def test_list_drafts_unpublished(tmp_path):
     d.set_draft_published_url(a, "https://blog.example.com/x")
     assert [x["id"] for x in d.list_drafts_unpublished(10)] == [b]
     d.close()
+
+
+# ---------- v28: BlogPublishError.status_code (401/429 힌트 판별용) ----------
+
+def test_blog_publish_error_carries_status_code(monkeypatch, tmp_path):
+    # OQ-2: status_code 속성 — 401 즉시 실패 / 429·5xx 재시도 후 최종 실패 /
+    # 네트워크 None. 메시지 포맷 "HTTP {status}: ..."은 기존과 불변.
+    monkeypatch.setattr(publish_client.time, "sleep", lambda s: None)
+
+    def publish_with(resp_factory):
+        d = _open(tmp_path)
+        kid = _keyword(d)
+        did = _draft(d, kid)
+        monkeypatch.setattr(publish_client.requests, "post", resp_factory)
+        with pytest.raises(publish_client.BlogPublishError) as ei:
+            publish_client.publish_draft(_cfg(tmp_path), d, d.get_draft(did),
+                                         d.get_keyword(kid))
+        return ei.value
+
+    e401 = publish_with(lambda *a, **kw: _Resp(401, "bad token"))
+    assert e401.status_code == 401
+    assert str(e401).startswith("HTTP 401:")
+    e429 = publish_with(lambda *a, **kw: _Resp(429, "quota"))
+    assert e429.status_code == 429
+    assert str(e429).startswith("HTTP 429:")
+    e503 = publish_with(lambda *a, **kw: _Resp(503, "boom"))
+    assert e503.status_code == 503
+    assert str(e503).startswith("HTTP 503:")
+
+    def net_error(url, json, headers, timeout):
+        raise requests.RequestException("boom")
+
+    d = _open(tmp_path)
+    kid = _keyword(d)
+    did = _draft(d, kid)
+    monkeypatch.setattr(publish_client.requests, "post", net_error)
+    with pytest.raises(publish_client.BlogPublishError) as ei:
+        publish_client.publish_draft(_cfg(tmp_path), d, d.get_draft(did),
+                                     d.get_keyword(kid))
+    assert ei.value.status_code is None
+    assert str(ei.value).startswith("network error:")

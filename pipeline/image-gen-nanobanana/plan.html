@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>plan</title>
+<style>
+:root { --accent:#2B5FDB; --bg:#ffffff; --fg:#1a1a2e; --muted:#666; --border:#e2e8f0; --code-bg:#f6f8fa; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#0f1117; --fg:#e6e6e6; --muted:#9ca3af; --border:#2a2f3a; --code-bg:#161b26; }
+}
+* { box-sizing: border-box; }
+body { font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; background:var(--bg);
+       color:var(--fg); line-height:1.7; margin:0; padding:2rem 1rem; }
+main { max-width: 860px; margin: 0 auto; }
+h1 { font-size:1.9rem; border-bottom:3px solid var(--accent); padding-bottom:.4rem; }
+h2 { font-size:1.4rem; margin-top:2.2rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.15rem; margin-top:1.6rem; }
+h4 { font-size:1rem; margin-top:1.2rem; color:var(--accent); }
+a { color:var(--accent); }
+code { background:var(--code-bg); padding:.15em .4em; border-radius:4px; font-size:.9em;
+       font-family:'JetBrains Mono','D2Coding',Consolas,monospace; }
+pre { background:var(--code-bg); padding:1rem; border-radius:8px; overflow-x:auto; border:1px solid var(--border); }
+pre code { background:none; padding:0; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.93rem; }
+th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); font-weight:600; }
+tr:nth-child(even) td { background:rgba(127,127,127,.05); }
+blockquote { border-left:4px solid var(--accent); margin:1rem 0; padding:.5rem 1rem;
+             background:rgba(43,95,219,.06); border-radius:0 6px 6px 0; }
+blockquote p { margin:.3rem 0; }
+hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
+li { margin:.25rem 0; }
+strong { font-weight:700; }
+.meta { color:var(--muted); font-size:.85rem; margin-bottom:1.5rem; }
+</style>
+</head>
+<body>
+<main>
+<div class="meta">📄 plan · 생성: 2026-08-13 21:58</div>
+<h1>Google Nano Banana 이미지 생성 통합 — 구현 계획 (간이 plan, small 모드)</h1>
+<blockquote>
+<p>작성: 개발팀 · 프로젝트: autostudio · 작업 디렉토리: <code>pipeline/image-gen-nanobanana/</code><br />
+상위 문서: <code>requirements.md</code> (요구사항팀, FR-1~FR-6) · 오케스트레이터 승인: small 모드, FR-4 data URI 저장 기본 확정<br />
+기준: v26 코드 (2026-08-13, 테스트 388 passed / 10 skipped = 398 수집)</p>
+</blockquote>
+<h2>1. 목표</h2>
+<p><code>GEMINI_API_KEY</code>가 설정된 환경에서는 이미지 생성(대표·섹션·백필 전 경로)의 1차 프로바이더를<br />
+<strong>Google Nano Banana</strong>(기본 <code>gemini-3.1-flash-image</code>, 16:9·1K·JPEG)로 전환하고,<br />
+실패 시 기존 체인(Bailian → DashScope)으로 폴백한다. <code>GEMINI_API_KEY</code> 미설정 환경은<br />
+<strong>기존 동작 100% 불변</strong> + 기존 테스트 398개 전부 통과가 최우선 제약이다.</p>
+<p>핵심 난제는 나노바나나가 URL이 아닌 <strong>base64 인라인 데이터</strong>를 반환하는 점 — 승인된 기본안<br />
+<strong>① data URI 저장</strong>(<code>data:{mime};base64,{data}</code>)으로 DB 스키마 무변경·인프라 신설 없이 정합한다.</p>
+<h2>2. 수용 기준 (요구사항 AC → 구현 검증)</h2>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>수용 기준</th>
+<th>구현 방법 (요약)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AC1-1/AC1-5</td>
+<td>GEMINI 키 설정 + 성공 → 나노바나나 1차, Bailian·DashScope 0회 (대표·섹션 공통)</td>
+<td><code>_run_http</code> 진입부 키 분기 → <code>_nanobanana_generate</code> 1차 (공통 단일 지점)</td>
+</tr>
+<tr>
+<td>AC1-2</td>
+<td><code>response_format {type:image, mime_type:image/jpeg, aspect_ratio:16:9, image_size:1K}</code></td>
+<td>요청 본문에 고정 포함, <code>GEMINI_IMAGE_SIZE</code> env로 크기만 오버라이드</td>
+</tr>
+<tr>
+<td>AC1-3</td>
+<td>프롬프트는 <code>_build_prompt</code>/<code>section_image_prompt</code> 그대로</td>
+<td>프롬프트 생성부 무변경 (재작성 없음)</td>
+</tr>
+<tr>
+<td>AC1-4</td>
+<td><code>GEMINI_IMAGE_MODEL</code> env 오버라이드</td>
+<td>호출 시점 <code>os.getenv</code> 평가 (테스트 친화)</td>
+</tr>
+<tr>
+<td>AC1-6</td>
+<td><code>steps[].content[]</code>에서 <code>type=="image"</code> 블록의 <code>data</code>+<code>mime_type</code> 파싱</td>
+<td>raw REST — SDK 미사용, steps 순회 파서</td>
+</tr>
+<tr>
+<td>AC2-1~AC2-3</td>
+<td>키 미설정 시 나노바나나 0회 + 기존 체인 + 기존 테스트 398개 통과</td>
+<td><code>os.getenv("GEMINI_API_KEY")</code> 호출 시점 분기 — 미설정 경로 코드 불변</td>
+</tr>
+<tr>
+<td>AC3-1~AC3-5</td>
+<td>나노바나나 실패 → Bailian 1회 → 실패 시 DashScope 1회, 최종 실패만 집계</td>
+<td><code>_nanobanana_generate</code> 내 Bailian 재시도 + 기존 <code>_dashscope_fallback</code> 체인</td>
+</tr>
+<tr>
+<td>AC4-1</td>
+<td>data URI 문자열 반환·저장 (호출부 무변경)</td>
+<td><code>data:{mime};base64,{data}</code> 문자열 — <code>str</code> 타입 그대로</td>
+</tr>
+<tr>
+<td>AC4-2</td>
+<td>대시보드 <code>&lt;img src&gt;</code> data URI 렌더링</td>
+<td><code>static/index.html</code> 확인만 (브라우저 기본 지원 — 코드 무변경)</td>
+</tr>
+<tr>
+<td>AC4-3</td>
+<td>다운로드 프록시 data URI 처리</td>
+<td><code>server.py _fetch_image_bytes</code>에 data URI 분기 (base64 디코드 + 크기·MIME 검사)</td>
+</tr>
+<tr>
+<td>AC4-4</td>
+<td>publish.py data URI 방침 명시</td>
+<td><code>_image_lines</code>에서 data URI 라인 <strong>생략 + 경고 주석</strong> (수동 업로드 안내). 네이버 플레인 무영향</td>
+</tr>
+<tr>
+<td>AC4-5</td>
+<td>URL 기반 프로바이더는 URL 저장 유지</td>
+<td>Bailian/DashScope 경로 무변경 — 혼합 저장 허용</td>
+</tr>
+<tr>
+<td>AC5-1~AC5-4</td>
+<td>v26 stats·알림 동일 적용</td>
+<td><code>_IMAGE_STATS</code> 위치 불변, <code>test_content_batch.py</code> 수정 금지</td>
+</tr>
+<tr>
+<td>AC6-1~AC6-4</td>
+<td>GEMINI 키만으로 동작 (가드 확장)</td>
+<td><code>image_gen</code> 내부 <code>_has_image_api_key()</code> — 전역 <code>has_api_key()</code> 불변</td>
+</tr>
+<tr>
+<td>NFR-1</td>
+<td>55s 타임아웃 유지 + 실측</td>
+<td><code>IMAGE_TIMEOUT=55</code> 유지. 실측 불가(로컬 키 없음) → thinking 최소화 옵션 명시</td>
+</tr>
+<tr>
+<td>NFR-5</td>
+<td>외부 라이브러리 금지, urllib 유지</td>
+<td><code>llm_client.post_json</code> 재사용 + <code>headers={"x-goog-api-key": ...}</code></td>
+</tr>
+<tr>
+<td>NFR-7</td>
+<td><code>GEMINI_BASE_URL</code> 오버라이드</td>
+<td>호출 시점 <code>os.getenv</code> 평가 (테스트·차단 대응)</td>
+</tr>
+</tbody>
+</table>
+<h2>3. 구현 범위</h2>
+<h3>변경 (소스)</h3>
+<table>
+<thead>
+<tr>
+<th>파일</th>
+<th>변경 성격</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>image_gen.py</code></td>
+<td>⭐ 핵심 — 나노바나나 1차 경로 + <code>_run_http</code> 분기 + 내부 키 가드 확장 (FR-6)</td>
+</tr>
+<tr>
+<td><code>server.py</code></td>
+<td><code>_fetch_image_bytes</code> data URI 분기 추가 (AC4-3, 최소 변경)</td>
+</tr>
+<tr>
+<td><code>publish.py</code></td>
+<td><code>_image_lines</code> data URI 생략+경고 주석 (AC4-4)</td>
+</tr>
+</tbody>
+</table>
+<h3>변경 (문서·설정)</h3>
+<table>
+<thead>
+<tr>
+<th>파일</th>
+<th>변경</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.env.example</code></td>
+<td><code>GEMINI_API_KEY</code>·<code>GEMINI_IMAGE_MODEL</code>·<code>GEMINI_IMAGE_SIZE</code>·<code>GEMINI_BASE_URL</code></td>
+</tr>
+<tr>
+<td><code>.github/workflows/daily-collect.yml</code></td>
+<td><code>GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}</code> env 1줄</td>
+</tr>
+<tr>
+<td><code>docs/planning/02-trd.md</code></td>
+<td>이미지 생성 섹션에 나노바나나 반영</td>
+</tr>
+<tr>
+<td><code>CHANGELOG.md</code></td>
+<td>v27 항목 추가</td>
+</tr>
+<tr>
+<td><code>tests/test_image_gen.py</code></td>
+<td>신규 7건 추가 (기존 8건 <strong>수정 금지</strong>)</td>
+</tr>
+</tbody>
+</table>
+<h3>비변경 (명시적 제외)</h3>
+<ul>
+<li><code>llm_client.py</code> — <code>has_api_key()</code>·<code>post_json</code> 시그니처 불변 (내부 동작 무변경)</li>
+<li><code>content_batch.py</code>·<code>collect.py</code>·<code>db.py</code> — stats 집계·알림·저장 호출부 무변경</li>
+<li><code>tests/test_content_batch.py</code> — 알림 테스트 11건 그대로</li>
+<li>DB 스키마 · 스토리지 인프라 · 서버리스 수동 생성(<code>/drafts/{id}/image</code>) 경로</li>
+</ul>
+<h2>4. 테스트 계획 (TDD, tests/test_image_gen.py 신규 7건)</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>시나리오</th>
+<th>검증 AC</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T1</td>
+<td>GEMINI 키 + 나노바나나 성공 → data URI 반환, 요청 본문·헤더 검증</td>
+<td>AC1-1, AC1-2, AC1-6, AC4-1</td>
+</tr>
+<tr>
+<td>T2</td>
+<td>GEMINI 키 + 성공 → Bailian/DashScope 0회, 프롬프트 <code>_SINGLE_SCENE_RULES</code> 포함</td>
+<td>AC1-1, AC1-3</td>
+</tr>
+<tr>
+<td>T3</td>
+<td>GEMINI 키 미설정 → Bailian 1차 그대로, 나노바나나 0회</td>
+<td>AC2-1, AC2-2</td>
+</tr>
+<tr>
+<td>T4</td>
+<td>나노바나나 실패 → Bailian 1회 → 성공 URL 반환 (최종 실패 아님)</td>
+<td>AC3-1, AC3-5</td>
+</tr>
+<tr>
+<td>T5</td>
+<td>나노바나나·Bailian 실패 → DashScope 1회 / 전부 실패 → Error + failures 집계</td>
+<td>AC3-2, AC3-3, AC5-2</td>
+</tr>
+<tr>
+<td>T6</td>
+<td>GEMINI 키만 설정 → 가드 통과 + <code>GEMINI_IMAGE_MODEL</code> 오버라이드</td>
+<td>AC6-1, AC1-4</td>
+</tr>
+<tr>
+<td>T7</td>
+<td>data URI 파싱(b64decode 복원) + 폴백 WARNING 로그</td>
+<td>AC4-1, AC3-4</td>
+</tr>
+</tbody>
+</table>
+<p>검증 게이트: <code>./.venv/Scripts/python.exe -m pytest -q</code> 전체 통과 (기존 388 + 신규 7 = 395 passed, 10 skipped).</p>
+<h2>5. 문서 산출물</h2>
+<p><code>plan.md/html</code> · <code>tech-design.md/html</code> (승인 게이트 후) · <code>implementation-report.md/html</code></p>
+<h2>6. 리스크</h2>
+<table>
+<thead>
+<tr>
+<th>리스크</th>
+<th>대응</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GEMINI_API_KEY 로컬 부재 → 실통신 검증 불가</td>
+<td>mock 기반 테스트 + QA 실검증 포인트 명시 (report)</td>
+</tr>
+<tr>
+<td>55s 내 응답 여부 미실측 (thinking 모델)</td>
+<td>tech-design에 thinking 최소화 옵션·generateContent 대안 명시</td>
+</tr>
+<tr>
+<td><code>Authorization: Bearer</code>(빈 값) + <code>x-goog-api-key</code> 병행 — 게이트웨이 거부 가능성</td>
+<td>빈 Bearer는 미인증으로 처리되는 것이 일반적. 실패 시 <code>llm_client._browser_headers</code>에 빈 키 스킵 가드 1줄 추가 예정 (리스크 기록)</td>
+</tr>
+<tr>
+<td>data URI DB 용량 증가 (초안당 최대 ~2~5MB)</td>
+<td>JPEG 1K 기본 (AC4-6), 스키마 무변경 — 수용</td>
+</tr>
+</tbody>
+</table>
+</main>
+</body>
+</html>

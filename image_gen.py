@@ -8,6 +8,9 @@
 #   wanx2.1은 동기 호출 미지원(공식 문서 실측) → task 생성 + 폴링(async) 흐름.
 #   실패 집계 stats(attempts/failures/consecutive_failures)는 content_batch가
 #   reset/get — public 함수 시그니처는 불변.
+# v27: Google Nano Banana 1차 프로바이더 (FR-1~FR-6) — GEMINI_API_KEY 설정 시
+#   Interactions API(raw REST)로 생성. 응답 base64는 data URI로 저장 (FR-4).
+#   실패 시 기존 체인(Bailian → DashScope) 폴백, 키 미설정 시 기존 경로 100% 불변.
 import logging
 import os
 import time
@@ -44,6 +47,28 @@ DASHSCOPE_IMAGE_MODEL = "wanx2.1-t2i-turbo"
 DASHSCOPE_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com"
 DASHSCOPE_POLL_INTERVAL = 3.0   # 폴링 간격 (공식 권장 10s 이하 — RPS 20 제한 내)
 
+# v27: Google Nano Banana (Gemini 이미지 모델) — 요구사항 FR-1~FR-6.
+# 기본 gemini-3.1-flash-image (Nano Banana 2, 공식 go-to — 비용·속도·품질 균형).
+# 1K 16:9 JPEG 요청 (AC1-2/AC4-6) — 블로그 16:9 가로 사진 요구 충족.
+# 모델·크기·베이스 URL은 env로 호출 시점 오버라이드 (테스트·차단 대응, NFR-7).
+GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image"
+GEMINI_IMAGE_MIME = "image/jpeg"
+GEMINI_IMAGE_ASPECT_RATIO = "16:9"
+GEMINI_IMAGE_SIZE = "1K"
+GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
+
+
+def _gemini_base_url():
+    """Gemini 베이스 URL — GEMINI_BASE_URL env 오버라이드 (NFR-7, 호출 시점 평가)."""
+    return os.getenv("GEMINI_BASE_URL", GEMINI_DEFAULT_BASE_URL)
+
+
+def _has_image_api_key():
+    """이미지 생성 키 가드 (FR-6) — GEMINI_API_KEY만 설정돼도 통과.
+    전역 llm_client.has_api_key()는 초안 LLM·content_batch 게이트용으로
+    **불변 유지** (AC6-4) — 확장은 image_gen 내부에서만."""
+    return bool((os.getenv("GEMINI_API_KEY") or "").strip() or llm_client.has_api_key())
+
 
 def _dashscope_base_url():
     """DashScope 리전별 베이스 URL (QA P2): 기본 베이징, env 오버라이드 지원."""
@@ -73,8 +98,11 @@ def generate_image(keyword, title, prompt=None, runner=None, timeout=IMAGE_TIMEO
     """제목 기반 이미지 프롬프트로 이미지를 생성, 이미지 URL을 반환한다.
     v19: thumbnail_ideas — 초안이 생성한 썸네일 콘셉트를 프롬프트 재료로 사용
     (첫 번째 아이디어 우선, 없으면 기존 키워드+제목 프롬프트)."""
-    if not llm_client.has_api_key():
-        raise ImageGenerationError("이미지 키가 필요합니다 (BAILIAN_TOKEN_PLAN_API_KEY)")
+    if not _has_image_api_key():
+        # AC2-2/AC6-3: 기존 "이미지 키" 메시지 유지 + GEMINI 안내 추가 (substring 검증 호환)
+        raise ImageGenerationError(
+            "이미지 키가 필요합니다 "
+            "(BAILIAN_TOKEN_PLAN_API_KEY / DASHSCOPE_API_KEY / GEMINI_API_KEY)")
     image_prompt = prompt or _build_prompt(keyword, title, thumbnail_ideas)
     run = runner or (lambda p: _run_http(p, timeout=timeout))
     return run(image_prompt)
@@ -102,8 +130,10 @@ def generate_section_images(keyword, title, sections, runner=None, timeout=IMAGE
     v17 증분 생성: start_index부터 생성하고 budget_seconds 초과 시 중단 —
     호출 측이 반환분(부분 성공)을 즉시 저장하면 서버리스 중도 종료에도 비용
     손실이 없다. 반환: 이번에 생성된 URL 리스트 (부분 성공 가능)."""
-    if not llm_client.has_api_key():
-        raise ImageGenerationError("이미지 키가 필요합니다 (BAILIAN_TOKEN_PLAN_API_KEY)")
+    if not _has_image_api_key():
+        raise ImageGenerationError(
+            "이미지 키가 필요합니다 "
+            "(BAILIAN_TOKEN_PLAN_API_KEY / DASHSCOPE_API_KEY / GEMINI_API_KEY)")
     urls = []
     started = time.monotonic()
     for sec in sections[start_index:8]:
@@ -135,18 +165,86 @@ def _build_prompt(keyword, title, thumbnail_ideas=None):
 
 
 def _run_http(image_prompt, timeout=IMAGE_TIMEOUT):
-    """이미지 생성 HTTP 호출 (v26: 시도 집계 + DashScope 폴백 오케스트레이션).
+    """이미지 생성 HTTP 호출 (v27: 나노바나나 1차 분기 + DashScope 폴백 오케스트레이션).
     - attempts는 진입 시 1 증가 (키 미설정 가드는 generate_image 진입부에서
-      이미 raise되므로 시도로 집계되지 않음 — 요구사항 §5 용어 정의와 일치)
+      이미 raise되므로 시도로 집계되지 않음 — 요구사항 §5 용어 정의와 일치, AC5-1)
+    - GEMINI_API_KEY 설정 시 나노바나나 1차 (실패 시 내부에서 Bailian 1회 재시도)
+      미설정 시 기존 Bailian 1차 — 경로 불변 (AC2-1)
     - 성공 시 연속 실패 0으로 리셋 / 최종 실패 시 failures·consecutive 증가
-    - Bailian 실패 → DASHSCOPE_API_KEY가 있으면 DashScope로 1회 재시도 (FR-1)"""
+    - 1차(나노바나나+Bailian 또는 Bailian) 실패 → DASHSCOPE_API_KEY가 있으면
+      DashScope로 1회 재시도 (FR-1·FR-3)"""
     _IMAGE_STATS["attempts"] += 1
     try:
-        url = _primary_generate(image_prompt, timeout)
+        if os.getenv("GEMINI_API_KEY"):
+            url = _nanobanana_generate(image_prompt, timeout)
+        else:
+            url = _primary_generate(image_prompt, timeout)
     except ImageGenerationError as primary_err:
         url = _dashscope_fallback(image_prompt, timeout, primary_err)
     _IMAGE_STATS["consecutive_failures"] = 0
     return url
+
+
+def _nanobanana_generate(image_prompt, timeout):
+    """나노바나나 1차 호출 (FR-1) + 실패 시 Bailian 1회 재시도 (FR-3).
+    - GEMINI_API_KEY 설정 환경에서만 _run_http가 이 경로를 호출 (AC2-1)
+    - 실패 시 WARNING 로그(원본 원인 + Bailian 모델) 후 Bailian 재시도 (AC3-4)
+    - Bailian 키 없으면 원본 예외 그대로 전파 (기존 DashScope 폴백 단계로)
+    - 성공 반환: data URI (data:{mime};base64,{data}) 또는 Bailian URL (AC4-1/AC4-5)"""
+    try:
+        return _nanobanana_call(image_prompt, timeout)
+    except ImageGenerationError as nb_err:
+        logger.warning("image API nano banana failed (%s) — retry via Bailian %s",
+                       nb_err, IMAGE_MODEL)
+        if not llm_client.resolve_api_key():
+            raise
+        try:
+            return _primary_generate(image_prompt, timeout)
+        except ImageGenerationError as bailian_err:
+            raise ImageGenerationError(
+                f"image API failed after nano banana fallback "
+                f"({IMAGE_MODEL}): {bailian_err}") from bailian_err
+
+
+def _nanobanana_call(image_prompt, timeout):
+    """Google Interactions API raw REST 호출 (FR-1, AC1-6) —
+    POST {base}/v1beta/interactions, x-goog-api-key 헤더 인증.
+    응답 steps[].content[]에서 type=="image" 블록의 data(base64)+mime_type 추출
+    → data URI 문자열 반환 (FR-4). SDK 미사용 — 표준 라이브러리 urllib (NFR-5).
+    Bearer: API 키를 Bearer로 보내면 게이트웨이가 OAuth 오판할 수 있어
+    post_json에는 빈 키를 전달하고 x-goog-api-key 단일 인증 사용
+    (llm_client가 빈 키 시 Authorization 헤더 생략 — v27 가드)."""
+    api_key = (os.getenv("GEMINI_API_KEY") or "").strip()  # B1: trailing LF/공백 방어
+    base_url = _gemini_base_url()
+    data = llm_client.post_json(
+        f"{base_url}/v1beta/interactions",
+        {
+            "model": os.getenv("GEMINI_IMAGE_MODEL", GEMINI_IMAGE_MODEL),
+            "input": [{"type": "text", "text": image_prompt}],
+            "response_format": {
+                "type": "image",
+                "mime_type": GEMINI_IMAGE_MIME,
+                "aspect_ratio": GEMINI_IMAGE_ASPECT_RATIO,
+                "image_size": os.getenv("GEMINI_IMAGE_SIZE", GEMINI_IMAGE_SIZE),
+            },
+        },
+        "", timeout, ImageGenerationError, "gemini image API",
+        headers={"x-goog-api-key": api_key},
+    )
+    try:
+        for step in data["steps"]:
+            for content in step.get("content") or []:
+                if isinstance(content, dict) and content.get("type") == "image":
+                    b64 = content.get("data")
+                    if not b64:
+                        continue
+                    mime = content.get("mime_type") or GEMINI_IMAGE_MIME
+                    return f"data:{mime};base64,{b64}"
+        raise ImageGenerationError(
+            f"gemini image API bad response: {str(data)[:200]}")
+    except (KeyError, TypeError, StopIteration) as e:
+        raise ImageGenerationError(
+            f"gemini image API bad response: {str(data)[:200]}") from e
 
 
 def _primary_generate(image_prompt, timeout):

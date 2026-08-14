@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dev-qa-report</title>
+<style>
+:root { --accent:#2B5FDB; --bg:#ffffff; --fg:#1a1a2e; --muted:#666; --border:#e2e8f0; --code-bg:#f6f8fa; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#0f1117; --fg:#e6e6e6; --muted:#9ca3af; --border:#2a2f3a; --code-bg:#161b26; }
+}
+* { box-sizing: border-box; }
+body { font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; background:var(--bg);
+       color:var(--fg); line-height:1.7; margin:0; padding:2rem 1rem; }
+main { max-width: 860px; margin: 0 auto; }
+h1 { font-size:1.9rem; border-bottom:3px solid var(--accent); padding-bottom:.4rem; }
+h2 { font-size:1.4rem; margin-top:2.2rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.15rem; margin-top:1.6rem; }
+h4 { font-size:1rem; margin-top:1.2rem; color:var(--accent); }
+a { color:var(--accent); }
+code { background:var(--code-bg); padding:.15em .4em; border-radius:4px; font-size:.9em;
+       font-family:'JetBrains Mono','D2Coding',Consolas,monospace; }
+pre { background:var(--code-bg); padding:1rem; border-radius:8px; overflow-x:auto; border:1px solid var(--border); }
+pre code { background:none; padding:0; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.93rem; }
+th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); font-weight:600; }
+tr:nth-child(even) td { background:rgba(127,127,127,.05); }
+blockquote { border-left:4px solid var(--accent); margin:1rem 0; padding:.5rem 1rem;
+             background:rgba(43,95,219,.06); border-radius:0 6px 6px 0; }
+blockquote p { margin:.3rem 0; }
+hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
+li { margin:.25rem 0; }
+strong { font-weight:700; }
+.meta { color:var(--muted); font-size:.85rem; margin-bottom:1.5rem; }
+</style>
+</head>
+<body>
+<main>
+<div class="meta">📄 dev-qa-report · 생성: 2026-08-13 22:42</div>
+<h1>Google Nano Banana 이미지 생성 통합 — 개발QA 검증 보고서 (dev-qa-report)</h1>
+<blockquote>
+<p>작성: 개발QA팀 · 프로젝트: autostudio · 작업 디렉토리: <code>pipeline/image-gen-nanobanana/</code><br />
+모드: small · 상위 문서: requirements.md(FR-1~FR-6, AC1-1~AC6-4, NFR 7종) · tech-design.md(승인 완료) · implementation-report.md<br />
+검증일: 2026-08-13 · 검증 환경: WSL + Windows 하이브리드 (Windows venv <code>./.venv/Scripts/python.exe</code>)</p>
+</blockquote>
+<h2>0. 최종 판정</h2>
+<h1>✅ 승인 (조건부)</h1>
+<p>구현 품질·테스트·소비처 정합·보안 모두 검증 통과. <strong>단, 아래 필수 후속 조치(계정/환경)를 수행하기 전까지는 나노바나나 실제 이미지 생성이 동작하지 않는다</strong> (코드 결함이 아니라 계정 결제·환경변수 데이터 문제).</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>필수 후속 조치</th>
+<th>대상</th>
+<th>근거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>Google 계정에 결제(billing) 활성화</strong> — 나노바나나 4종은 전부 유료 전용(무료 티어 없음). 현재 키는 텍스트 모델 정상(실측)이나 이미지 모델 쿼터 <code>limit: 0</code> → 429</td>
+<td>사용자(계정)</td>
+<td>§2.2</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Windows User 환경변수 <code>GEMINI_API_KEY</code> 값에서 trailing LF 제거</strong> — 레지스트리 값이 <code>AIza…</code> + <code>\n</code>(끝 0x0A)으로 저장됨. 미조치 시 로컬 실행이 <code>ValueError: Invalid header value</code>로 즉시 실패하고 <strong>폴백 체인·stats 집계까지 붕괴</strong></td>
+<td>사용자(환경) + 권장 코드 보강</td>
+<td>§2.3</td>
+</tr>
+<tr>
+<td>3</td>
+<td>(권장) <code>_nanobanana_call</code>에서 키 읽기 시 <code>.strip()</code> 1줄 방어 — 붙여넣기 공백/개행 오염 차단</td>
+<td>개발팀</td>
+<td>§2.3</td>
+</tr>
+<tr>
+<td>4</td>
+<td>(재실측) 결제 활성화 후 <strong>55s 내 성공 생성 1회 재실측</strong> (NFR-1 완결)</td>
+<td>QA 후속</td>
+<td>§2.2</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>1. 검증 요약</h2>
+<table>
+<thead>
+<tr>
+<th>영역</th>
+<th>방법</th>
+<th>결과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>실통신 (직접 REST + 코드 경로, 실키 1회)</td>
+<td>실제 <code>GEMINI_API_KEY</code>로 <code>generate_image()</code> 전체 경로 호출</td>
+<td>✅ 인증·요청 계약·오류 정규화·폴백 진입 확인 / ❌ 이미지 생성 완료는 <strong>계정 쿼터(429)로 차단</strong></td>
+</tr>
+<tr>
+<td>전체 회귀 테스트</td>
+<td><code>./.venv/Scripts/python.exe -m pytest -q</code></td>
+<td>✅ <strong>395 passed / 10 skipped</strong> (수집 405)</td>
+</tr>
+<tr>
+<td>신규 나노바나나 테스트</td>
+<td><code>tests/test_image_gen.py -v</code></td>
+<td>✅ 15 passed (기존 8 + 신규 7)</td>
+</tr>
+<tr>
+<td>코드 리뷰</td>
+<td>diff 전체 + 폴백 체인·stats·파싱·소비처 분기</td>
+<td>✅ 이상 없음 (P3 참고 3건)</td>
+</tr>
+<tr>
+<td>정적 보안</td>
+<td>semgrep (p/secrets + p/python, 188 rules)</td>
+<td>✅ 0 findings</td>
+</tr>
+<tr>
+<td>시크릿 스캔</td>
+<td>저장소 grep <code>AIza...</code></td>
+<td>✅ 0건 (키 미노출)</td>
+</tr>
+<tr>
+<td>소비처 스모크</td>
+<td>server.py data URI 분기 8케이스 + publish.py 내보내기 4케이스</td>
+<td>✅ 전부 PASS</td>
+</tr>
+<tr>
+<td>테스트 격리</td>
+<td>Windows env 키 상속 상태에서 pytest 실행</td>
+<td>✅ conftest autouse 차단 실증 (키가 실제 상속됨을 확인 후 통과)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>2. ⭐ 실통신 검증 (실제 키, 1회 호출) — 가장 중요</h2>
+<h3>2.1 환경 실측 (키 값은 일절 출력·기록하지 않음)</h3>
+<ul>
+<li>Windows User 환경변수 <code>GEMINI_API_KEY</code> 존재 (AIza… 39자 + <strong>trailing LF 1자 = 40자</strong> — PowerShell <code>[Environment]::GetEnvironmentVariable(...,'User')</code> 실측: <code>len=40, tail=10</code>)</li>
+<li>WSL(Linux) 쪽 미설정. Windows venv(Windows 프로세스)는 레지스트리 env를 상속 → <strong>실제 키가 pytest 프로세스에도 들어옴</strong> (conftest 격리가 이를 차단함을 395 통과로 실증)</li>
+<li>키 자체는 유효: <code>gemini-2.5-flash:generateContent</code> 텍스트 호출 200 OK (4.31s, 응답 "네") — <strong>텍스트 모델은 정상 동작</strong></li>
+</ul>
+<h3>2.2 직접 REST 실측 — <code>POST /v1beta/interactions</code> (실제 코드 경로 <code>_nanobanana_generate</code> → <code>_nanobanana_call</code>)</h3>
+<p>프롬프트: <code>_SINGLE_SCENE_RULES</code> 스타일 단문(209자), timeout 55s. 요청 스파이로 계약 실측:</p>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>실측값</th>
+<th>판정</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>엔드포인트</td>
+<td><code>https://generativelanguage.googleapis.com/v1beta/interactions</code></td>
+<td>✅ 계약 일치</td>
+</tr>
+<tr>
+<td>인증 헤더</td>
+<td><code>x-goog-api-key: ***</code> 단일, <strong>Authorization(Bearer) 없음</strong> (<code>api_key_used_for_bearer: empty</code>)</td>
+<td>✅ Bearer 생략 가드 동작</td>
+</tr>
+<tr>
+<td>모델</td>
+<td><code>gemini-3.1-flash-image</code> (기본)</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>response_format</td>
+<td><code>{type:image, mime_type:image/jpeg, aspect_ratio:16:9, image_size:1K}</code></td>
+<td>✅ AC1-2/AC4-6</td>
+</tr>
+<tr>
+<td>프롬프트</td>
+<td><code>_SINGLE_SCENE_RULES</code> 포함 (<code>카툰 금지</code>·<code>16:9</code>·<code>실사 사진 스타일</code> 검증)</td>
+<td>✅ AC1-3</td>
+</tr>
+<tr>
+<td>응답 시간</td>
+<td>0.72s (HTTP 429 거부 응답) — <strong>55s 내</strong></td>
+<td>✅ (성공 케이스 지연은 미실측)</td>
+</tr>
+<tr>
+<td>인증 결과</td>
+<td><strong>401 아님</strong> — <code>x-goog-api-key</code> 단일 인증이 게이트웨이 통과</td>
+<td>✅ 핵심 리스크 해소</td>
+</tr>
+<tr>
+<td>생성 결과</td>
+<td><strong>HTTP 429</strong>: <code>Quota exceeded for metric: generate_content_free_tier_requests, limit: 0, model: gemini-3.1-flash-image</code> (lite 모델도 동일 <code>limit: 0</code>)</td>
+<td>❌ <strong>계정 결제 미설정</strong> (나노바나나 유료 전용)</td>
+</tr>
+<tr>
+<td>오류 정규화</td>
+<td>raw HTTPError/ValueError가 아닌 <code>ImageGenerationError("gemini image API http 429: …")</code></td>
+<td>✅ v26 정규화 패턴</td>
+</tr>
+<tr>
+<td>폴백 체인</td>
+<td>WARNING 실측: <code>image API nano banana failed (…) — retry via Bailian wan2.7-image</code> → Bailian/DashScope 키 없음 → 원본 예외 재전파 → <code>_dashscope_fallback</code>이 failures/consecutive 증가 후 전파</td>
+<td>✅ AC3-4/AC6-2 <strong>실전 재현</strong></td>
+</tr>
+</tbody>
+</table>
+<h3>2.3 발견: Windows env 키 trailing LF → raw <code>ValueError</code> (재현 2회, API 비용 0)</h3>
+<ul>
+<li><strong>재현</strong>: env 값 그대로(개행 포함) 코드 실행 → urllib 헤더 검증에서 <code>ValueError: Invalid header value b'AIza…\n'</code> (네트워크 요청 전 0.08s 중단 — API 비용 0)</li>
+<li><strong>영향</strong>: 이 예외는 <code>ImageGenerationError</code>가 아니므로 <code>_nanobanana_generate</code>·<code>_run_http</code>의 <code>except ImageGenerationError</code>를 통과하지 못해 <strong>Bailian/DashScope 폴백 미실행, stats(failures/consecutive) 미집계</strong> — 오류 계약·실패 집계 모두 붕괴</li>
+<li><strong>원인</strong>: 환경변수 데이터 오염(레지스트리 값 끝 LF). GH Actions secret(사용자 직접 입력)은 가능성 낮으나 붙여넣기 오염 시 동일 경로 재현 가능</li>
+<li><strong>조치</strong>: ① env var 재설정(필수) ② <code>_nanobanana_call</code> 키 읽기 시 <code>.strip()</code> 1줄(권장 — 동일 실패류 전면 차단)</li>
+</ul>
+<hr />
+<h2>3. 자동화 테스트 — 전체 회귀</h2>
+<pre><code class="language-text">$ ./.venv/Scripts/python.exe -m pytest -q
+395 passed, 10 skipped in 47.18s        (수집 405 — 신규 7 포함, 기존 388 유지)
+</code></pre>
+<ul>
+<li><code>tests/test_image_gen.py</code>: <strong>15 passed</strong> (기존 8건 무수정 — git diff로 0 removed / 227 added 확인, 신규 T1~T7)</li>
+<li><code>tests/test_content_batch.py</code>: 수정 0 (git diff 확인) — 알림 임계(T4/T5 계열) 포함 통과 → AC5-3/AC5-4</li>
+<li><code>content_batch.py</code>·<code>llm_client.resolve_api_key()</code>·<code>has_api_key()</code>: 수정 0 (git diff 확인) → AC6-4</li>
+<li><strong>테스트 격리 실증</strong>: pytest 실행 시 Windows env 키가 실제 상속됨(§2.1)에도 395 통과 — conftest autouse 픽스처(<code>monkeypatch.delenv("GEMINI_API_KEY")</code>)가 GEMINI 미설정 전제의 기존 테스트를 보호. 신규 테스트는 본문에서 명시 설정</li>
+</ul>
+<h2>4. 코드 리뷰 (diff 전체 검토)</h2>
+<table>
+<thead>
+<tr>
+<th>검토 항목</th>
+<th>결과</th>
+<th>근거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>폴백 체인 각 1회</td>
+<td>✅</td>
+<td>T4: 나노바나나 실패→Bailian <strong>정확히 1회</strong>·성공 URL 반환·<code>failures==0</code>(AC3-1/3-5). T5 ①: 나노바나나+Bailian 실패→DashScope 1회·POST 총 3회(AC3-2). 라이브에서도 폴백 WARNING 진입 실측</td>
+</tr>
+<tr>
+<td>stats 조건 v26 불변</td>
+<td>✅</td>
+<td><code>attempts</code> 증가는 <code>_run_http</code> 진입 1회(AC5-1), <code>failures</code>·<code>consecutive</code>는 <code>_dashscope_fallback</code> 최종 실패 시에만(AC5-2) — v26 코드 위치·조건 그대로 (diff 확인)</td>
+</tr>
+<tr>
+<td>data URI 파싱</td>
+<td>✅</td>
+<td><code>steps[].content[]</code>에서 <code>type=="image"</code> 블록 <code>data</code>+<code>mime_type</code> 추출, mime 누락 시 <code>image/jpeg</code> 기본, 구조 불량 시 <code>ImageGenerationError</code> 정규화 (T1/T7 + 코드 검토)</td>
+</tr>
+<tr>
+<td>server.py 분기</td>
+<td>✅</td>
+<td><code>_fetch_image_bytes</code> 선두 data URI 분기 — MIME <code>image/</code> 강제, <code>b64decode(validate=True)</code>, 20MB 상한, HTTPS 가드·리다이렉트·스트리밍 경로 무변경</td>
+</tr>
+<tr>
+<td>publish.py 방침</td>
+<td>✅</td>
+<td><code>_image_lines</code> — data URI는 라인 생략 + 수동 업로드 경고 주석, URL은 기존 임베드, 네이버(<code>_export_naver</code>)는 <code>_image_lines</code> 미호출이라 무영향</td>
+</tr>
+<tr>
+<td>테스트 격리</td>
+<td>✅</td>
+<td>conftest autouse — Windows env 키 상속 차단, 기존 테스트 파일 수정 0</td>
+</tr>
+<tr>
+<td>llm_client Bearer 생략</td>
+<td>✅</td>
+<td><code>_browser_headers</code> — api_key 빈 값 시 Authorization 생략. 기존 호출자(항상 키 존재)는 동작 불변. 라이브 실측으로 <code>empty</code> 확인</td>
+</tr>
+<tr>
+<td>문법/파일</td>
+<td>✅</td>
+<td>daily-collect.yml YAML 파싱 정상, .env.example·02-trd.md·CHANGELOG 반영 일치</td>
+</tr>
+</tbody>
+</table>
+<h3>참고 (P3, 수정 불필요)</h3>
+<ol>
+<li><code>_nanobanana_call</code>의 <code>except (KeyError, TypeError, StopIteration)</code> — <code>StopIteration</code>은 실제 발생 경로 없음(무해)</li>
+<li><code>_decode_data_uri</code> — 디코드 <strong>후</strong> 크기 검사라 초대형 data URI(수백 MB)는 메모리에 전체 적재 후 거부. DB 저장값·토큰 보호라 노출 제한적이나, <code>len(b64)</code> 사전 검사가 더 견고(선택)</li>
+<li><code>data:;base64,...</code>(빈 MIME)은 <code>image/jpeg</code>로 기본 처리 — 관대하나 무해</li>
+</ol>
+<h2>5. 정적 보안 (semgrep)</h2>
+<pre><code class="language-text">semgrep scan --config p/secrets --config p/python (변경 8개 파일)
+✅ Scan completed successfully. Findings: 0 (0 blocking) · Rules run: 188
+</code></pre>
+<ul>
+<li>저장소 전체 grep <code>AIza[0-9A-Za-z_-]{20,}</code> → <strong>0건</strong> (키 미노출, NFR-3)</li>
+<li>키는 env에서만 읽고 로그·오류 메시지에 키 값 미포함 (라이브 검증 중 키 마스킹 확인)</li>
+</ul>
+<h2>6. 소비처 스모크 (직접 실행)</h2>
+<h3>server.py 다운로드 프록시 (<code>_fetch_image_bytes</code> / <code>_decode_data_uri</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>케이스</th>
+<th>기대</th>
+<th>결과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>정상 data URI (JPEG)</td>
+<td>디코드 (bytes, mime)</td>
+<td>✅ mime=image/jpeg</td>
+</tr>
+<tr>
+<td>비이미지 MIME (<code>data:text/plain…</code>)</td>
+<td>400</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>오염 base64</td>
+<td>400</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>페이로드 없음 (<code>data:image/jpeg;base64,</code>)</td>
+<td>400</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>빈 URL / None</td>
+<td>400</td>
+<td>✅</td>
+</tr>
+<tr>
+<td><code>http://</code> URL</td>
+<td>400 (HTTPS 가드 유지)</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>20MB 초과 data URI</td>
+<td>502</td>
+<td>✅</td>
+</tr>
+</tbody>
+</table>
+<h3>publish.py 마크다운 내보내기 (<code>build_export_markdown</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>케이스</th>
+<th>기대</th>
+<th>결과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>대표 data URI</td>
+<td>라인 생략 + <code>&lt;!-- 대표 이미지: data URI … 업로드하세요 --&gt;</code></td>
+<td>✅</td>
+</tr>
+<tr>
+<td>섹션 data URI</td>
+<td>라인 생략 + <code>&lt;!-- 섹션 이미지 N: … --&gt;</code></td>
+<td>✅</td>
+</tr>
+<tr>
+<td>섹션 URL</td>
+<td>기존 <code>![섹션 이미지 N](url)</code> 임베드 유지</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>data URI 본문 누출</td>
+<td>없음 (원본 문자열이 export에 등장하지 않음)</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>URL 대표/섹션</td>
+<td>기존 임베드 그대로</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>네이버 export</td>
+<td>data URI 미등장 (플레인 경로 무영향)</td>
+<td>✅</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>7. AC·NFR 매핑 (전수)</h2>
+<table>
+<thead>
+<tr>
+<th>AC</th>
+<th>내용</th>
+<th>판정</th>
+<th>근거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AC1-1</td>
+<td>나노바나나 1차, Bailian/DashScope 0회</td>
+<td>✅</td>
+<td>T1/T2 (calls==1) + 라이브 경로 진입</td>
+</tr>
+<tr>
+<td>AC1-2</td>
+<td>response_format 4필드 (16:9·1K·JPEG)</td>
+<td>✅</td>
+<td>T1 + <strong>라이브 요청 실측 일치</strong></td>
+</tr>
+<tr>
+<td>AC1-3</td>
+<td>기존 프롬프트 재사용 (<code>_SINGLE_SCENE_RULES</code>)</td>
+<td>✅</td>
+<td>T2/T7 + 라이브 prompt_has_rules</td>
+</tr>
+<tr>
+<td>AC1-4</td>
+<td><code>GEMINI_IMAGE_MODEL</code> 오버라이드</td>
+<td>✅</td>
+<td>T6 (lite 모델 반영)</td>
+</tr>
+<tr>
+<td>AC1-5</td>
+<td>대표·섹션 공통 적용</td>
+<td>✅</td>
+<td>T2 (<code>generate_section_images</code> 동일 분기)</td>
+</tr>
+<tr>
+<td>AC1-6</td>
+<td>steps[].content[] image 블록 파싱</td>
+<td>✅</td>
+<td>T1/T7 (raw REST mock 파싱 + b64 복원)</td>
+</tr>
+<tr>
+<td>AC2-1</td>
+<td>키 미설정 → Bailian 1차 그대로, 나노바나나 0회</td>
+<td>✅</td>
+<td>T3 + conftest 격리 하 395 통과</td>
+</tr>
+<tr>
+<td>AC2-2</td>
+<td>키 전체 미설정 기존 메시지 유지</td>
+<td>✅</td>
+<td>T3 2부 + 기존 테스트 통과</td>
+</tr>
+<tr>
+<td>AC2-3</td>
+<td>기존 테스트 전부 통과</td>
+<td>✅</td>
+<td>395 passed/10 skipped (기존 388)</td>
+</tr>
+<tr>
+<td>AC2-4</td>
+<td>GEMINI 키만 설정 → 나노바나나 경로</td>
+<td>✅</td>
+<td>T6 + <strong>라이브 가드 통과·경로 진입</strong></td>
+</tr>
+<tr>
+<td>AC3-1</td>
+<td>나노바나나 실패 → Bailian 정확히 1회, URL 반환</td>
+<td>✅</td>
+<td>T4 (calls==2)</td>
+</tr>
+<tr>
+<td>AC3-2</td>
+<td>Bailian까지 실패 → DashScope 1회</td>
+<td>✅</td>
+<td>T5 ① (POST 3회)</td>
+</tr>
+<tr>
+<td>AC3-3</td>
+<td>전부 실패 → ImageGenerationError + 최종 원인</td>
+<td>✅</td>
+<td>T5 ② + <strong>라이브 재현</strong> (429 원인 포함 전파)</td>
+</tr>
+<tr>
+<td>AC3-4</td>
+<td>폴백 WARNING 로그 (원인 + 프로바이더)</td>
+<td>✅</td>
+<td>T4 caplog + <strong>라이브 STDERR 실측</strong></td>
+</tr>
+<tr>
+<td>AC3-5</td>
+<td>폴백 성공은 최종 실패 아님 (집계 0)</td>
+<td>✅</td>
+<td>T4 (failures==0, consecutive==0)</td>
+</tr>
+<tr>
+<td>AC4-1</td>
+<td>data URI 반환·저장 (호출부 무변경)</td>
+<td>✅</td>
+<td>T1/T7 (data URI + b64decode 복원). 라이브 성공 반환은 쿼터로 미실측 — 단위 검증으로 갈음</td>
+</tr>
+<tr>
+<td>AC4-2</td>
+<td>대시보드 data URI 렌더링</td>
+<td>✅</td>
+<td>static/index.html 변경 0 — <code>&lt;img src&gt;</code> data URI 브라우저 기본 지원 (코드 확인)</td>
+</tr>
+<tr>
+<td>AC4-3</td>
+<td>다운로드 프록시 data URI 처리</td>
+<td>✅</td>
+<td>스모크 8케이스 (§6)</td>
+</tr>
+<tr>
+<td>AC4-4</td>
+<td>publish.py data URI 방침 (생략+주석)</td>
+<td>✅</td>
+<td>스모크 6케이스 (§6) + tech-design §5② 일치</td>
+</tr>
+<tr>
+<td>AC4-5</td>
+<td>URL 프로바이더는 URL 저장 유지</td>
+<td>✅</td>
+<td>T3/T4/T5 URL 반환 + 코드 경로 무변경</td>
+</tr>
+<tr>
+<td>AC4-6</td>
+<td>JPEG·1K 기본 (비용 통제)</td>
+<td>✅</td>
+<td><strong>라이브 요청 실측</strong> (mime image/jpeg, size 1K) + T6 2K 오버라이드</td>
+</tr>
+<tr>
+<td>AC5-1</td>
+<td>attempts _run_http 진입 1회</td>
+<td>✅</td>
+<td>T4/T5 (attempts==1) + 코드 위치 확인</td>
+</tr>
+<tr>
+<td>AC5-2</td>
+<td>최종 실패만 failures·consecutive 증가</td>
+<td>✅</td>
+<td>T5 ② + <strong>라이브 재현</strong> (429 최종 실패 경로)</td>
+</tr>
+<tr>
+<td>AC5-3</td>
+<td>임계 초과 알림 (기존 로직)</td>
+<td>✅</td>
+<td>content_batch 무변경 + test_content_batch 11건 통과</td>
+</tr>
+<tr>
+<td>AC5-4</td>
+<td>reset/get 시그니처 불변</td>
+<td>✅</td>
+<td>무변경 + test_content_batch 통과</td>
+</tr>
+<tr>
+<td>AC6-1</td>
+<td>GEMINI 키만 → 가드 통과</td>
+<td>✅</td>
+<td>T6 + <strong>라이브 가드 통과</strong></td>
+</tr>
+<tr>
+<td>AC6-2</td>
+<td>GEMINI만 + 실패 → Error 전파 (최종 실패 집계)</td>
+<td>✅</td>
+<td><strong>라이브 재현</strong> — 429 → 폴백 키 없음 → 원본 예외 전파</td>
+</tr>
+<tr>
+<td>AC6-3</td>
+<td>키 전부 미설정 기존 메시지 유지</td>
+<td>✅</td>
+<td>T3 2부 + 기존 <code>test_no_key_raises_clear_error</code> 통과</td>
+</tr>
+<tr>
+<td>AC6-4</td>
+<td><code>has_api_key()</code> 불변 (배치 게이트 영향 0)</td>
+<td>✅</td>
+<td>llm_client·content_batch 수정 0 (git diff)</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>NFR</th>
+<th>내용</th>
+<th>판정</th>
+<th>근거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NFR-1</td>
+<td>55s 타임아웃 유지 + 1회 실측</td>
+<td>⚠️ 부분</td>
+<td><code>IMAGE_TIMEOUT=55</code> 유지 확인, 라이브 응답 0.72s(거부) — <strong>성공 생성 지연은 결제 활성화 후 재실측 필요</strong></td>
+</tr>
+<tr>
+<td>NFR-2</td>
+<td>비용 통제 (1K·16:9·JPEG 기본)</td>
+<td>✅</td>
+<td>라이브 요청 실측 + 모델/크기 env 오버라이드만 허용</td>
+</tr>
+<tr>
+<td>NFR-3</td>
+<td>키 env 관리·로그 미노출</td>
+<td>✅</td>
+<td>semgrep 0건 + 저장소 grep 0건 + 라이브 마스킹</td>
+</tr>
+<tr>
+<td>NFR-4</td>
+<td>시그니처·반환형 불변, SQLite/Postgres 호환</td>
+<td>✅</td>
+<td>public API 무변경 (diff) + 395 통과</td>
+</tr>
+<tr>
+<td>NFR-5</td>
+<td>외부 라이브러리 추가 0 (urllib)</td>
+<td>✅</td>
+<td>diff 확인 — import 추가 없음 (server.py <code>base64</code> 표준 라이브러리 제외)</td>
+</tr>
+<tr>
+<td>NFR-6</td>
+<td>알림 일 1회 (v26 유지)</td>
+<td>✅</td>
+<td>content_batch 무변경</td>
+</tr>
+<tr>
+<td>NFR-7</td>
+<td>GEMINI_BASE_URL env 오버라이드</td>
+<td>✅</td>
+<td><code>_gemini_base_url()</code> 호출 시점 평가 (코드 확인)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>8. 발견 사항·버그 목록</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>심각도</th>
+<th>제목</th>
+<th>재현</th>
+<th>영향</th>
+<th>조치</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>B1</td>
+<td><strong>P2</strong> (환경+방어)</td>
+<td>Windows User env <code>GEMINI_API_KEY</code>에 trailing LF — 코드가 그대로 쓰면 raw <code>ValueError</code>로 폴백·stats 붕괴</td>
+<td>2회 (실키, 비용 0)</td>
+<td>로컬 Windows 실행 시 이미지 생성 전면 불능 + 오류 계약 위반</td>
+<td>env var 재설정(필수) + <code>_nanobanana_call</code> <code>.strip()</code>(권장)</td>
+</tr>
+<tr>
+<td>B2</td>
+<td><strong>P2</strong> (계정)</td>
+<td>GEMINI 키에 이미지 모델 쿼터 0 (<code>free_tier_requests limit: 0</code>) — 나노바나나 유료 전용인데 결제 미연결</td>
+<td>2회 (flash/lite 모델)</td>
+<td>나노바나나 실제 생성 불가 (GH Actions 포함) — 텍스트 모델은 정상</td>
+<td>사용자: AI Studio/Cloud Console 결제 활성화</td>
+</tr>
+<tr>
+<td>B3</td>
+<td>P3</td>
+<td><code>_decode_data_uri</code> 디코드 후 크기 검사 (초대형 data URI 메모리)</td>
+<td>정적 분석</td>
+<td>제한적 (DB값·토큰 보호)</td>
+<td>선택 — <code>len(b64)</code> 사전 검사</td>
+</tr>
+<tr>
+<td>B4</td>
+<td>P3</td>
+<td><code>StopIteration</code> catch 불필요 / 빈 MIME 기본 처리</td>
+<td>정적 분석</td>
+<td>무해</td>
+<td>참고</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>9. 스킬 사용 로그</h2>
+<table>
+<thead>
+<tr>
+<th>스킬</th>
+<th>사용 지점</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>fable-prove-it</strong></td>
+<td>모든 주장을 실행 증거로 검증 — 395 pytest 실측, 실키 1회 호출 실측(요청 스파이+타이밍), 스모크 8+6케이스 직접 실행, PowerShell로 env 값 바이트 실측, semgrep·grep 실행 후 완료 주장</td>
+</tr>
+<tr>
+<td><strong>qa-tools</strong></td>
+<td>semgrep 실행 (<code>/home/wj941/.agents/skills/qa-tools/.venv/bin/semgrep scan --config p/secrets --config p/python</code>, 0 findings)</td>
+</tr>
+<tr>
+<td><strong>systematic-debugging</strong></td>
+<td>실키 호출이 <code>ValueError: Invalid header value</code>로 실패 → 근본 원인 추적(코드가 아니라 env 값의 trailing LF) → PowerShell <code>GetEnvironmentVariable</code>로 레지스트리 값 바이트 실측으로 확정</td>
+</tr>
+<tr>
+<td><strong>wsl-windows-hybrid-runner</strong></td>
+<td>Windows venv pytest·실키 스크립트 실행, cmd.exe env 조회, WSL↔Windows env 상속 특성(레지스트리 env 우선) 활용</td>
+</tr>
+<tr>
+<td><strong>md-to-html</strong></td>
+<td>본 보고서 .html 생성 (실제 경로 <code>/home/wj941/.agents/skills/md-to-html/.venv/bin/python scripts/md2html.py</code>)</td>
+</tr>
+</tbody>
+</table>
+<h2>10. 산출물</h2>
+<ul>
+<li><code>pipeline/image-gen-nanobanana/dev-qa-report.md</code> · <code>dev-qa-report.html</code> (본 보고서)</li>
+<li>검증 스크립트는 실행 후 삭제 (키 미보존 — 로그·파일 어디에도 키 값 없음)</li>
+</ul>
+<hr />
+<p><em>작성: 개발QA팀 · 검증 완료 · 판정: ✅ 승인 (조건부 — 필수 후속: 계정 결제 활성화 + Windows env 개행 정리)</em></p>
+</main>
+</body>
+</html>

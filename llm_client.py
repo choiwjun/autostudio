@@ -83,13 +83,19 @@ def _open_json(req, timeout, error_cls, err_prefix):
 
 def _browser_headers(api_key, content_type=None):
     headers = {
-        "Authorization": f"Bearer {api_key}",
         # v23: OpenCode Go(zen/go)는 Cloudflare 앞단에서 urllib 기본 UA(1010)를
         # 차단 — 브라우저 계열 UA로 통일 (Bailian에도 무해)
         "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                        "AppleWebKit/537.36 (KHTML, like Gecko) "
                        "Chrome/126.0.0.0 Safari/537.36"),
     }
+    # v27: api_key가 비어 있으면 Authorization 헤더 자체를 생략 — Gemini
+    # Interactions API는 x-goog-api-key 헤더로 인증하므로, 빈 Bearer('Bearer ')
+    # 또는 API 키를 Bearer로 보내면 게이트웨이가 OAuth 토큰으로 오판해
+    # 401 거부할 위험이 있음. 기존 호출자(Bailian/DashScope)는 키가 항상
+    # 존재하므로 동작 변화 없음 (오케스트레이터 승인 보완 조건).
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     if content_type:
         headers["Content-Type"] = content_type
     return headers

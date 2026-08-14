@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tech-design</title>
+<style>
+:root { --accent:#2B5FDB; --bg:#ffffff; --fg:#1a1a2e; --muted:#666; --border:#e2e8f0; --code-bg:#f6f8fa; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#0f1117; --fg:#e6e6e6; --muted:#9ca3af; --border:#2a2f3a; --code-bg:#161b26; }
+}
+* { box-sizing: border-box; }
+body { font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; background:var(--bg);
+       color:var(--fg); line-height:1.7; margin:0; padding:2rem 1rem; }
+main { max-width: 860px; margin: 0 auto; }
+h1 { font-size:1.9rem; border-bottom:3px solid var(--accent); padding-bottom:.4rem; }
+h2 { font-size:1.4rem; margin-top:2.2rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.15rem; margin-top:1.6rem; }
+h4 { font-size:1rem; margin-top:1.2rem; color:var(--accent); }
+a { color:var(--accent); }
+code { background:var(--code-bg); padding:.15em .4em; border-radius:4px; font-size:.9em;
+       font-family:'JetBrains Mono','D2Coding',Consolas,monospace; }
+pre { background:var(--code-bg); padding:1rem; border-radius:8px; overflow-x:auto; border:1px solid var(--border); }
+pre code { background:none; padding:0; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.93rem; }
+th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); font-weight:600; }
+tr:nth-child(even) td { background:rgba(127,127,127,.05); }
+blockquote { border-left:4px solid var(--accent); margin:1rem 0; padding:.5rem 1rem;
+             background:rgba(43,95,219,.06); border-radius:0 6px 6px 0; }
+blockquote p { margin:.3rem 0; }
+hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
+li { margin:.25rem 0; }
+strong { font-weight:700; }
+.meta { color:var(--muted); font-size:.85rem; margin-bottom:1.5rem; }
+</style>
+</head>
+<body>
+<main>
+<div class="meta">📄 tech-design · 생성: 2026-08-13 21:58</div>
+<h1>Google Nano Banana 이미지 생성 통합 — 기술 설계 (간이 tech-design, small 모드)</h1>
+<blockquote>
+<p>작성: 개발팀 · 프로젝트: autostudio · 상위: <code>requirements.md</code> FR-1~FR-6 + 오케스트레이터 승인 (FR-4 data URI 저장 기본 확정)<br />
+기준 코드: v26 (image_gen.py v8, llm_client.py v15, server.py v15.1 프록시, publish.py v19 플랫폼 export)<br />
+승인 게이트: <strong>본 문서 승인 전 구현 금지</strong></p>
+</blockquote>
+<h2>1. 나노바나나 호출 설계 (FR-1, NFR-5·NFR-7)</h2>
+<h3>1.1 엔드포인트·인증 (raw REST — SDK 미사용)</h3>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>엔드포인트</td>
+<td><code>POST {GEMINI_BASE_URL}/v1beta/interactions</code> (기본 <code>https://generativelanguage.googleapis.com</code>)</td>
+</tr>
+<tr>
+<td>인증</td>
+<td>헤더 <code>x-goog-api-key: $GEMINI_API_KEY</code> — <code>llm_client.post_json(headers=...)</code>로 전달</td>
+</tr>
+<tr>
+<td>베이스 URL</td>
+<td><code>GEMINI_BASE_URL</code> env로 호출 시점 오버라이드 (NFR-7 — 테스트·차단 대응)</td>
+</tr>
+<tr>
+<td>Bearer 정책</td>
+<td><code>post_json</code>의 <code>Authorization</code>에는 <strong>빈 키</strong>를 전달 (<code>api_key=""</code>). API 키를 Bearer로 보내면 Google 게이트웨이가 OAuth 토큰으로 오판해 401 가능 → <code>x-goog-api-key</code> 단일 인증 유지 (리스크 §8)</td>
+</tr>
+<tr>
+<td>라이브러리</td>
+<td>표준 라이브러리 urllib (llm_client 공용 레이어) — <strong>외부 라이브러리 추가 0</strong> (NFR-5)</td>
+</tr>
+</tbody>
+</table>
+<h3>1.2 요청 본문 (AC1-2)</h3>
+<pre><code class="language-json">{
+  &quot;model&quot;: &quot;gemini-3.1-flash-image&quot;,
+  &quot;input&quot;: [{&quot;type&quot;: &quot;text&quot;, &quot;text&quot;: &quot;&lt;기존 _build_prompt / section_image_prompt 결과&gt;&quot;}],
+  &quot;response_format&quot;: {
+    &quot;type&quot;: &quot;image&quot;,
+    &quot;mime_type&quot;: &quot;image/jpeg&quot;,
+    &quot;aspect_ratio&quot;: &quot;16:9&quot;,
+    &quot;image_size&quot;: &quot;1K&quot;
+  }
+}
+</code></pre>
+<ul>
+<li><code>model</code>: 기본 <code>gemini-3.1-flash-image</code> (Nano Banana 2, 공식 go-to). <code>GEMINI_IMAGE_MODEL</code> env로 오버라이드 (AC1-4)</li>
+<li><code>image_size</code>: 기본 <code>1K</code>. <code>GEMINI_IMAGE_SIZE</code> env로 2K/4K 오버라이드 허용 (비용 증가 명시 — AC4-6)</li>
+<li><code>mime_type</code>: <code>image/jpeg</code> 고정 (PNG 대비 DB 용량 절감 — AC4-6)</li>
+<li><code>aspect_ratio</code>: <code>16:9</code> 고정 (기존 1280*720과 동일 비율 — 블로그 레이아웃 호환, 요구사항 §11 가정 2)</li>
+<li>프롬프트: <code>generate_image</code>의 <code>_build_prompt</code>(썸네일 콘셉트 포함) / <code>generate_section_images</code>의 <code>section_image_prompt</code><br />
+  결과를 <strong>그대로</strong> 사용 — 재작성·강화 없음 (AC1-3, 제약 6)</li>
+</ul>
+<h3>1.3 응답 파싱 (AC1-6)</h3>
+<pre><code class="language-json">{
+  &quot;steps&quot;: [
+    {
+      &quot;content&quot;: [
+        {&quot;type&quot;: &quot;text&quot;, &quot;text&quot;: &quot;...&quot;},
+        {&quot;type&quot;: &quot;image&quot;, &quot;mime_type&quot;: &quot;image/jpeg&quot;, &quot;data&quot;: &quot;&lt;base64 바이트&gt;&quot;}
+      ]
+    }
+  ]
+}
+</code></pre>
+<ul>
+<li><code>steps[].content[]</code>를 순회해 <code>type == "image"</code> 블록의 <code>data</code>(base64) + <code>mime_type</code> 추출</li>
+<li><strong>SDK convenience 필드 <code>output_image</code>는 raw REST 응답에 없음 — 미사용</strong> (요구사항 §2.2 실측)</li>
+<li><code>mime_type</code> 누락 시 <code>image/jpeg</code> 기본값 (요청 mime 기준 — 응답이 PNG여도 응답의 mime_type 우선)</li>
+<li>이미지 블록 없음 / 구조 불일치 → <code>ImageGenerationError("gemini image API bad response: ...")</code> (v26 파싱 정규화 패턴 동일)</li>
+<li>반환값: <code>data:{mime_type};base64,{data}</code> 문자열 (FR-4, AC4-1)</li>
+</ul>
+<h3>1.4 시간 예산 (NFR-1)</h3>
+<ul>
+<li>타임아웃: 기존 <code>IMAGE_TIMEOUT=55</code> 단일 값 그대로 사용 (나노바나나 1차 + 폴백 합산 최대 ~110s — 배치 예산 1200s 내)</li>
+<li><strong>실측: 로컬에 GEMINI_API_KEY가 없어 1회 실측 불가</strong> → QA 단계에서 첫 실통신 시 55s 내 완료 여부 확인 필요<br />
+  (thinking 모델 — 지연 초과 관측 시 대안 명시, §8)</li>
+</ul>
+<h2>2. <code>_run_http</code> 분기 설계 (FR-1·FR-2·FR-3)</h2>
+<pre><code>_run_http(image_prompt, timeout)
+  ├─ attempts += 1                                   (v26 위치 불변 — AC5-1)
+  ├─ GEMINI_API_KEY 설정?
+  │    ├─ YES → _nanobanana_generate()               ← 1차: 나노바나나
+  │    │        ├─ 성공 → data URI 반환
+  │    │        └─ 실패 → WARNING 로그 + Bailian(_primary_generate) 1회 재시도 (FR-3)
+  │    │             ├─ 성공 → URL 반환 (최종 실패 아님 — AC3-5)
+  │    │             └─ 실패 → 원인 포함 예외 재발생 (나노바나나 원인 병기 — AC3-4)
+  │    └─ NO  → _primary_generate()                  ← 기존 경로 100% 불변 (AC2-1)
+  ├─ 위 1차 실패 시 → _dashscope_fallback()          ← 기존 DashScope 폴백 재사용 (AC3-2)
+  │        (DASHSCOPE_API_KEY 없으면 failures+1 후 원본 예외 재발생 — v26 그대로)
+  └─ 성공 시 consecutive_failures = 0 (v26 위치 불변)
+</code></pre>
+<ul>
+<li><strong>키 판정은 호출 시점 <code>os.getenv("GEMINI_API_KEY")</code> 평가</strong> (DASHSCOPE_BASE_URL 패턴과 동일 — 테스트·런타임 반영)</li>
+<li>나노바나나 실패 시의 Bailian 재시도는 <code>_nanobanana_generate</code> 내부에서 수행 —<br />
+  기존 <code>_dashscope_fallback</code> 시그니처·동작은 무변경 (폴백 체인 = 나노바나나 → Bailian → DashScope, 각 1회)</li>
+<li>폴백 WARNING 로그 (AC3-4): 원본 실패 원인 + 사용 프로바이더 모델명 —<br />
+<code>logger.warning("image API nano banana failed (%s) — retry via Bailian %s", err, IMAGE_MODEL)</code></li>
+<li>stats (AC5-1/AC5-2): attempts는 <code>_run_http</code> 진입 시 1회 증가, failures·consecutive_failures는<br />
+<strong>최종 실패</strong> 시에만 <code>_dashscope_fallback</code> 경로에서 증가 (v26 코드 위치·조건 불변 — 나노바나나 단독<br />
+  실패 + Bailian 성공은 집계 안 됨, AC3-5)</li>
+</ul>
+<h2>3. 키 가드 확장 (FR-6 — image_gen 내부만)</h2>
+<pre><code class="language-python">def _has_image_api_key():
+    return bool(os.getenv(&quot;GEMINI_API_KEY&quot;) or llm_client.has_api_key())
+</code></pre>
+<ul>
+<li><code>generate_image</code>·<code>generate_section_images</code> 진입부 가드를 위 내부 함수로 교체 (AC6-1)</li>
+<li><strong><code>llm_client.has_api_key()</code>는 전역 불변</strong> (AC6-4 — 초안 LLM·content_batch 생략 게이트 영향 0)</li>
+<li>키 전체 미설정 시 메시지: <code>"이미지 키가 필요합니다 (BAILIAN_TOKEN_PLAN_API_KEY / DASHSCOPE_API_KEY / GEMINI_API_KEY)"</code><br />
+  — 기존 테스트의 <code>"이미지 키"</code> substring 검증 유지 (AC2-2, AC6-3)</li>
+<li>⚠️ <code>content_batch.run_content_batch</code>의 배치 생략 게이트는 <code>has_api_key()</code> 그대로 —<br />
+  GEMINI 키만 있는 환경에서는 배치가 생략되고, <code>generate_image</code> 직접 호출(서버리스/수동)만 동작<br />
+  (AC6-4 계약 — 배치 게이트 변경은 범위 외, report에 명시)</li>
+</ul>
+<h2>4. 저장 정합 — data URI (FR-4, AC4-1)</h2>
+<ul>
+<li>나노바나나 성공 반환: <code>data:{mime_type};base64,{data}</code> — <code>generate_image</code>의 <code>str</code> 반환 타입 불변</li>
+<li><code>content_batch._create_draft</code> → <code>db.update_draft_image(draft_id, url, now)</code> /<br />
+<code>db.update_draft_section_images(draft_id, json.dumps(urls), now)</code> — <strong>호출부·SQL 무변경</strong><br />
+  (TEXT 컬럼에 문자열 그대로 저장 — SQLite/Postgres 공통, NFR-4)</li>
+<li>용량: 1K 16:9 JPEG ≈ 150~400KB → base64 ≈ 200~530KB/장, 초안당 최대(대표1+섹션8) ≈ 2~5MB —<br />
+<code>drafts</code> TEXT 컬럼 수용, 다운로드 프록시 상한 20MB 내 (수용)</li>
+<li>Bailian/DashScope 성공 시 <strong>URL 저장 그대로</strong> (data URI 변환 금지 — AC4-5, 혼합 저장 허용)</li>
+</ul>
+<h2>5. 소비처 3종 처리 방침 (오케스트레이터 승인 사항)</h2>
+<h3>① <code>server.py</code> <code>/drafts/{id}/image-download</code> 프록시 — data URI 분기 <strong>추가</strong> (AC4-3)</h3>
+<ul>
+<li><code>_fetch_image_bytes(url)</code> 선두에 <code>url.startswith("data:")</code> 분기 추가:</li>
+<li>파싱: <code>data:{mime};base64,{b64}</code> → <code>base64.b64decode</code> → (바이트, mime)</li>
+<li>검증: MIME이 <code>image/</code> 계열인지, 디코드 실패 시 400, 크기 &gt; <code>IMAGE_DOWNLOAD_MAX_BYTES</code>(20MB) 시 502</li>
+<li>HTTPS 가드·리다이렉트·스트리밍 경로는 <strong>기존 그대로</strong> (URL 기반 이미지 회귀 0)</li>
+<li>처리하지 않을 경우의 영향: data URI 이미지의 다운로드 버튼이 400("HTTPS 이미지 URL이 아닙니다")으로<br />
+  실패 → 대표·섹션 다운로드 불능 → <strong>분기 추가로 해소</strong> (권장안 채택)</li>
+</ul>
+<h3>② <code>publish.py</code> 마크다운 내보내기 — data URI <strong>생략 + 경고 주석</strong> (AC4-4, 권장안 채택)</h3>
+<ul>
+<li><code>_image_lines(draft, marker, label)</code>에서 URL이 <code>data:</code>로 시작하면 이미지 라인을 <strong>내보내지 않고</strong><br />
+  대신 경고 주석 삽입:</li>
+<li>대표: <code>&lt;!-- 대표 이미지: data URI (에디터 임포트 미지원) — 블로그 에디터에서 직접 업로드하세요 --&gt;</code></li>
+<li>섹션: <code>&lt;!-- 섹션 이미지 N: data URI (에디터 임포트 미지원) — 블로그 에디터에서 직접 업로드하세요 --&gt;</code></li>
+<li>이유: 티스토리/애드센스/브랜드 에디터 임포트는 마크다운 <code>![...](data:...)</code>를 지원하지 않을 가능성이<br />
+  높아, 길이 수 KB~MB의 data URI가 본문에 그대로 삽입되는 것보다 <strong>생략+안내</strong>가 운영상 안전<br />
+  (사용자가 수동 업로드 — 요구사항 §6 권장안)</li>
+<li><strong>네이버 플레인 경로는 <code>_image_lines</code>를 호출하지 않음</strong> (실측: <code>_export_naver</code>에 이미지 임베드 없음) — 무영향</li>
+<li>URL 기반 이미지(기존 Bailian/DashScope)는 기존대로 <code>![...](url)</code> 임베드 (기존 테스트 불변)</li>
+</ul>
+<h3>③ 대시보드 <code>static/index.html</code> — data URI 렌더링 <strong>확인만</strong> (AC4-2)</h3>
+<ul>
+<li><code>showDraftImage</code>/<code>showSectionImages</code>: <code>&lt;img src="${esc(url)}"&gt;</code> — 브라우저 <code>&lt;img&gt;</code>는 data URI를<br />
+  기본 지원. <code>esc()</code>는 HTML 엔티티 이스케이프인데 base64 알파벳(<code>A-Za-z0-9+/=</code>)과 <code>data:image/jpeg;base64,</code><br />
+  접두어에는 HTML 특수문자(<code>&amp; &lt; &gt; " '</code>)가 없어 무해 → <strong>코드 변경 0</strong></li>
+<li>다운로드 버튼은 ①의 프록시 분기로 data URI도 동작</li>
+</ul>
+<h2>6. env · 워크플로우 · 문서 반영</h2>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.env.example</code></td>
+<td><code>GEMINI_API_KEY=</code> (선택 — 미설정 = 기존 동작), <code>GEMINI_IMAGE_MODEL=gemini-3.1-flash-image</code>, <code>GEMINI_IMAGE_SIZE=1K</code>, <code>GEMINI_BASE_URL=</code> (선택)</td>
+</tr>
+<tr>
+<td><code>daily-collect.yml</code></td>
+<td><code>GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}</code> (미등록 시 env 미설정 = 기존 체인 — 무해)</td>
+</tr>
+<tr>
+<td><code>02-trd.md</code></td>
+<td>이미지 생성 섹션에 나노바나나 1차·폴백 체인·data URI 저장·모니터링 반영</td>
+</tr>
+<tr>
+<td><code>CHANGELOG.md</code></td>
+<td>v27 항목</td>
+</tr>
+</tbody>
+</table>
+<h2>7. 테스트 설계 (TDD — tests/test_image_gen.py 신규 7건, 기존 8건 수정 금지)</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>테스트</th>
+<th>mock 구성</th>
+<th>검증</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T1</td>
+<td><code>test_nanobanana_success_returns_data_uri</code></td>
+<td><code>llm_client.post_json</code> → steps[image 블록] 응답</td>
+<td>반환값 <code>data:image/jpeg;base64,...</code> (AC4-1), 요청 URL에 <code>/v1beta/interactions</code>, 본문에 <code>response_format</code> 4필드 (AC1-2), 헤더에 <code>x-goog-api-key</code> (AC1-6 파싱)</td>
+</tr>
+<tr>
+<td>T2</td>
+<td><code>test_nanobanana_no_bailian_calls_and_prompt</code></td>
+<td>post_json 성공</td>
+<td>Bailian/DashScope 호출 0회 (AC1-1), 프롬프트에 <code>_SINGLE_SCENE_RULES</code> 포함 (AC1-3)</td>
+</tr>
+<tr>
+<td>T3</td>
+<td><code>test_no_gemini_key_uses_bailian_primary</code></td>
+<td>GEMINI 키 미설정, post_json → Bailian 응답</td>
+<td>나노바나나 0회, Bailian 1차 (AC2-1), 키 전체 미설정 시 기존 메시지 (AC2-2)</td>
+</tr>
+<tr>
+<td>T4</td>
+<td><code>test_nanobanana_fail_falls_back_to_bailian</code></td>
+<td>GEMINI 키 설정, post_json 1회차 raise → 2회차 Bailian 성공</td>
+<td>Bailian 정확히 1회 (AC3-1), URL 반환·집계 0 (AC3-5), WARNING 로그 (AC3-4)</td>
+</tr>
+<tr>
+<td>T5</td>
+<td><code>test_nanobanana_bailian_fail_dashscope_fallback</code></td>
+<td>GEMINI·Bailian·DashScope 키 설정, 전부 실패</td>
+<td>DashScope 1회 (AC3-2), <code>ImageGenerationError</code> + failures/consecutive 집계 (AC3-3, AC5-2)</td>
+</tr>
+<tr>
+<td>T6</td>
+<td><code>test_gemini_key_only_guard_and_model_override</code></td>
+<td>GEMINI 키만 설정, post_json 성공 + <code>GEMINI_IMAGE_MODEL</code> 설정</td>
+<td>가드 통과 (AC6-1), 요청 model 오버라이드 (AC1-4)</td>
+</tr>
+<tr>
+<td>T7</td>
+<td><code>test_data_uri_parse_and_fallback_log</code></td>
+<td>성공 응답 → data URI → <code>base64.b64decode</code> 복원 검증</td>
+<td><code>data:{mime};base64,{data}</code> 파싱 (AC4-1), T4와 함께 폴백 WARNING 로그 캡처 (AC3-4)</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>기존 8건: v26 폴백 T1~T3 포함 <strong>수정 금지</strong> — 전부 통과해야 함</li>
+<li><code>tests/test_content_batch.py</code> 11건: <strong>수정 금지</strong> (AC5-3/AC5-4)</li>
+<li>검증 게이트: <code>./.venv/Scripts/python.exe -m pytest -q</code> → 기존 388 + 신규 7 = <strong>395 passed / 10 skipped</strong></li>
+</ul>
+<h2>8. 리스크·미검증 항목</h2>
+<table>
+<thead>
+<tr>
+<th>리스크</th>
+<th>판정·대응</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>① <code>Authorization: Bearer</code>(빈 값) 병행 — 게이트웨이가 거부할 가능성</td>
+<td>빈 Bearer는 미인증으로 처리되는 것이 일반적 (ESPv2 계열). <strong>실통신 확인 필수</strong> — 거부 관측 시 <code>llm_client._browser_headers</code>에 빈 키 스킵 가드 1줄 추가 (후속 조치, 이번 범위의 최소 변경 유지)</td>
+</tr>
+<tr>
+<td>② 나노바나나 1K 16:9 55s 내 완료 미실측 (키 부재)</td>
+<td>실측 불가 — QA 첫 실통신 시 확인. 초과 시 <strong>thinking 최소화 옵션</strong>: 요청에 thinking 레벨 축소(<code>thinking_level: "minimal"</code>) 또는 <code>generateContent</code> 엔드포인트 대안 검토 (NFR-1, 구현 시점 결정 사항으로 유보)</td>
+</tr>
+<tr>
+<td>③ data URI DB 용량</td>
+<td>JPEG 1K 기본 + 초안당 ~2~5MB 수용 (스키마 무변경)</td>
+</tr>
+<tr>
+<td>④ 나노바나나 응답이 <code>mime_type</code> 미포함</td>
+<td><code>image/jpeg</code> 기본값 (요청 기준)</td>
+</tr>
+<tr>
+<td>⑤ GEMINI 키만 있는 환경에서 content_batch 생략</td>
+<td>AC6-4 계약 유지 — 배치 게이트 변경은 범위 외 (report에 명시)</td>
+</tr>
+<tr>
+<td>⑥ 모델 env를 호출 시점 평가 → 테스트 간 env 누수</td>
+<td>monkeypatch.setenv 기반 테스트 — 각 테스트가 독립 설정</td>
+</tr>
+</tbody>
+</table>
+<h2>9. 구현 순서 (승인 후)</h2>
+<ol>
+<li>TDD — 신규 7건 테스트 작성 → 실패 확인</li>
+<li><code>image_gen.py</code> 구현 (상수·파서·나노바나나 경로·가드·분기)</li>
+<li><code>server.py</code> data URI 분기 · <code>publish.py</code> 생략+주석</li>
+<li>문서 4종 (.env.example·workflow·02-trd.md·CHANGELOG)</li>
+<li>전체 pytest 통과 확인 (fable-prove-it)</li>
+<li><code>implementation-report.md/html</code> 작성 → 요약 답신</li>
+</ol>
+</main>
+</body>
+</html>

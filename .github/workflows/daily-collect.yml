@@ -31,6 +31,8 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           # v17: 콘텐츠 배치(초안·이미지 생성)용 — 미등록 시 배치는 조용히 생략
           BAILIAN_TOKEN_PLAN_API_KEY: ${{ secrets.BAILIAN_TOKEN_PLAN_API_KEY }}
+          # v27: 이미지 생성 1차 프로바이더 — Google Nano Banana (미등록 시 기존 체인)
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           # v23: 초안 LLM — OpenCode Go (미등록 시 Bailian으로 폴백)
           OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
           # v22.3(2.x): 별도 블로그(autoblog) 발행 — 운세 자동 발행 (미등록 시 발행 생략)

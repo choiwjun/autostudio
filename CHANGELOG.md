@@ -2,6 +2,59 @@
 
 이 프로젝트의 버전 이력. 버전 규칙: 기능 단위로 커밋 메시지에 표기 (비공식 SemVer).
 
+## v28 — 2026-08-13 (운세 발행 버튼 · POST /fortune/publish)
+
+### 추가
+- **운세 발행 버튼 + 엔드포인트** (`server.py`·`collect.py`·`static/index.html`) — 대시보드에서 수동으로 운세 생성·발행 트리거
+  - `POST /fortune/publish`: 55초 예산 내 생성→발행, 항목별 결과 `{created, published, failed, skipped, enabled, message, items[]}` 반환 (AC-1)
+  - 항목 단위 try/except — 실패 항목 `ok:false` + 사유, 응답 200 유지 (부분 성공 보존, AC-3)
+  - 401 → "토큰 불일치 — autoblog DASHBOARD_TOKEN 확인 필요" / 429 → "쿼터 소진" 힌트 (AC-4/AC-5, `BlogPublishError.status_code`)
+  - `BLOG_PUBLISH_ENABLED=0` → `enabled:false` + 안내, 발행 시도 0건 (AC-7/AC-9)
+  - daily_sns는 `not_target`("발행 대상 아님") 구분 표시 (AC-10)
+  - 기존 `_publish_all_fortune` 후보·상태 판정 로직을 헬퍼로 추출해 재사용 — 중복 구현 없음 (AC-8)
+- `publish_client.py`: `BlogPublishError.status_code` 속성 추가 (메시지 포맷 불변)
+- 대시보드: "운세 발행" 버튼 + 결과 패널 (요약 + 항목별 테이블, 401/429 힌트)
+
+### 테스트
+- 신규 7건: 무토큰 401·부분 결과·비활성·생성→발행·재시도·항목별 수집·예산 스킵
+- 전체 pytest **404 passed / 10 skipped** (기존 395 + 신규 9, 기존 테스트 수정 0)
+
+### 문서
+- `pipeline/fortune-publish-button/` — requirements·plan·tech-design·implementation-report·dev-qa-report (md+html)
+
+## v27 — 2026-08-13 (Google Nano Banana 이미지 생성 1차 프로바이더)
+
+### 추가
+- **나노바나나 1차 프로바이더** (`image_gen.py`, FR-1~FR-6) — `GEMINI_API_KEY` 설정 시
+  이미지 생성(대표·섹션·백필 전 경로)이 Google Gemini 이미지 모델로 전환
+  - 기본 모델 `gemini-3.1-flash-image`(Nano Banana 2), 16:9·1K·JPEG 요청 (AC1-2),
+    모델·크기·베이스 URL env 오버라이드(`GEMINI_IMAGE_MODEL`·`GEMINI_IMAGE_SIZE`·`GEMINI_BASE_URL`)
+  - raw REST Interactions API: `POST /v1beta/interactions` + `x-goog-api-key` 헤더,
+    응답 `steps[].content[]`의 `type=="image"` 블록 파싱 (SDK 미사용 — NFR-5)
+  - **data URI 저장 (FR-4)**: base64 응답을 `data:{mime};base64,{data}`로 저장 —
+    DB 스키마·content_batch·db 호출부 무변경, 대시보드 `<img>` 렌더링 호환 (AC4-1/4-2)
+  - 소비처 정합: `server.py` 다운로드 프록시 data URI 분기(AC4-3),
+    `publish.py` 마크다운 data URI 생략+수동 업로드 경고 주석(AC4-4, 네이버 플레인 무영향)
+  - 폴백 체인 (FR-3): 나노바나나 실패 → Bailian 1회 → DashScope 1회, 각 폴백 WARNING 로그
+  - 키 가드 확장 (FR-6): `GEMINI_API_KEY`만으로 이미지 생성 동작 — `llm_client.has_api_key()` 불변
+  - `GEMINI_API_KEY` 미설정 시 **기존 동작 100% 불변** (FR-2)
+- `llm_client.py`: `_browser_headers`가 api_key 빈 값 시 `Authorization` 헤더 생략
+  (Gemini `x-goog-api-key` 인증용 — 기존 호출자 무영향)
+
+### 환경변수
+- `GEMINI_API_KEY` (선택 — 미설정 = 기존 체인), `GEMINI_IMAGE_MODEL`, `GEMINI_IMAGE_SIZE`, `GEMINI_BASE_URL`
+- GH Actions `daily-collect.yml`에 `GEMINI_API_KEY` secret env 추가 (미등록 시 무해)
+
+### 테스트
+- 신규 7건 (T1~T7): 나노바나나 성공/data URI·폴백 0회·키 미설정 불변·Bailian 폴백·DashScope 폴백·가드·파싱
+- `conftest.py`: autouse 픽스처로 `GEMINI_API_KEY` 테스트 격리 (Windows 환경변수 상속 방지 — 기존 테스트 수정 없음)
+- 전체 pytest **404 passed / 10 skipped** (기존 395 + v28 신규 9)
+
+### 문서
+- `docs/planning/02-trd.md` 이미지 섹션 — 나노바나나 1차·data URI 저장·소비처 방침 반영
+- `.env.example` — GEMINI 4종 옵션 항목
+- `pipeline/image-gen-nanobanana/` — plan·tech-design·implementation-report (md+html)
+
 ## v26 — 2026-08-13 (이미지 프로바이더 폴백 · 쿼터 모니터링 알림)
 
 > VERIFICATION.md §6 미해결 항목 해소 — proposal-13-image-fallback (권장안 A+B 소형 패키지)
