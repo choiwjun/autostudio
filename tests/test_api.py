@@ -1016,8 +1016,12 @@ def test_fortune_generate_endpoint_returns_content(tmp_path, monkeypatch):
     daily = by.get(("daily_blog", today))
     assert daily is not None
     assert daily["title"].startswith(today)
-    assert daily["status"] == "generated"
+    # v29.2: status는 생성 패널 라벨로 변환 ("생성됨")
+    assert daily["status"] == "생성됨"
+    assert daily["has_content"] is True
     assert "본문" in daily["preview"]
+    # v29.2: 수동 게시용 전체 본문 포함
+    assert daily["body_full"] and "본문" in daily["body_full"]
 
 
 def test_fortune_generate_does_not_publish(tmp_path, monkeypatch):

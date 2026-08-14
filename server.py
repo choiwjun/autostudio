@@ -517,17 +517,39 @@ def create_app(cfg):
                 # 마크다운 헤더·구분선 제거 후 첫 문단만 미리보기
                 plain = body.replace("#", "").replace("*", "").replace("---", " ").strip()
                 preview = " ".join(plain.split())[:100]
+                # 생성 패널용 상태 라벨 — 발행 상태를 "수동 게시 대기" 맥락으로
+                # (publish_failed는 이전 발행 시도 실패 — 콘텐츠는 정상)
+                if not has_content:
+                    status_label = "미생성"
+                elif r["status"] == "qc_failed":
+                    status_label = "검수 실패"
+                elif r["status"] == "published":
+                    status_label = "발행됨"
+                elif r["status"] == "publish_failed":
+                    status_label = "발행 대기 (자동 발행 실패 이력)"
+                else:
+                    status_label = "생성됨"
                 items.append({
                     "ref": r["ref_date"], "content_type": ct,
-                    "status": r["status"],
+                    "status": status_label,
                     "has_content": has_content,
                     "title": title, "summary": summary, "preview": preview,
+                    # v29.2: 수동 게시용 전체 본문 (hashtags 포함)
+                    "body_full": (parsed.get("body", "")
+                                  if isinstance(parsed, dict) else ""),
+                    "sns_full": (parsed.get("text", "")
+                                 if isinstance(parsed, dict) else ""),
                 })
             return created, items
 
         created, items = run_db(_generate)
-        return {"created": created, "items": items,
-                "message": f"운세 생성 완료 — {created}건 생성"}
+        # 오늘 이미 생성된 콘텐츠가 있으면 안내 (0건이어도 정상)
+        if created > 0:
+            message = f"운세 생성 완료 — {created}건 새로 생성"
+        else:
+            message = ("이미 생성된 운세가 있습니다 — 아래에서 본문을 확인하고 "
+                       "복사해 게시하세요")
+        return {"created": created, "items": items, "message": message}
 
     @app.post("/fortune/publish", dependencies=[Depends(require_token)])
     def fortune_publish():

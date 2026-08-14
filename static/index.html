@@ -85,6 +85,13 @@
   .fortune-panel table td, .fortune-panel table th { padding: 6px 8px; text-align: left; font-size: 12.5px; }
   .fortune-panel table tr.fail td { color: var(--warning); }
   .fortune-panel .muted { color: var(--text-dim, #888); font-style: italic; }
+  .fortune-panel .btn-mini { font-size: 11px; padding: 2px 8px; margin-right: 4px; }
+  .fortune-panel .fortune-pre {
+    white-space: pre-wrap; word-break: break-word; font-size: 12.5px;
+    line-height: 1.6; max-height: 300px; overflow-y: auto;
+    background: rgba(0,0,0,.25); padding: 10px; border-radius: 6px;
+    color: var(--text); }
+  .fortune-panel tr.fortune-full.hidden { display: none; }
   .filters select, .filters input { height: 34px; padding: 0 10px; border: 1px solid var(--border);
     border-radius: 10px; background: rgba(15, 23, 42, .6); font-size: 13px; color: var(--text);
     font-family: inherit; transition: border-color .15s ease, box-shadow .15s ease; }
@@ -814,11 +821,9 @@ function renderFortuneGenResult(res) {
     itemsEl.innerHTML = '<p class="empty">생성된 콘텐츠가 없습니다 (LLM 키/콘텐츠 상태 확인)</p>';
     return;
   }
-  const statusLabel = { generated: '생성됨', published: '발행됨', publish_failed: '발행 실패', qc_failed: '검수 실패' };
-  itemsEl.innerHTML = '<table class="mini-table"><thead><tr><th>기준일</th><th>타입</th><th>상태</th><th>제목</th><th>내용</th></tr></thead><tbody>'
-    + res.items.map(it => {
-      const label = statusLabel[it.status] || it.status;
-      const cls = (it.status === 'qc_failed' || !it.has_content) ? ' class="fail"' : '';
+  itemsEl.innerHTML = '<table class="mini-table"><thead><tr><th>기준일</th><th>타입</th><th>상태</th><th>제목</th><th>내용</th><th></th></tr></thead><tbody>'
+    + res.items.map((it, i) => {
+      const cls = (it.status === '검수 실패' || !it.has_content) ? ' class="fail"' : '';
       let title;
       if (!it.has_content) {
         title = '<span class="muted">(내용 미생성 — LLM 키 확인 필요)</span>';
@@ -828,9 +833,40 @@ function renderFortuneGenResult(res) {
         title = esc(it.title || '(제목 없음)');
       }
       const body = it.summary || it.preview || '';
-      return `<tr${cls}><td>${esc(it.ref)}</td><td>${esc(it.content_type)}</td><td>${esc(label)}</td><td>${title}</td><td>${esc(body)}</td></tr>`;
+      // v29.2: 본문 전체 보기/복사 — 수동 게시용
+      const full = it.content_type === 'daily_sns'
+        ? (it.sns_full || '') : ((it.title || '') + '\n\n' + (it.body_full || ''));
+      const hasFull = it.has_content && full.trim();
+      const btn = hasFull
+        ? `<button class="btn btn-mini" onclick="toggleFortuneFull(${i})">본문 보기</button>
+           <button class="btn btn-mini" onclick="copyFortuneFull(${i})">복사</button>`
+        : '';
+      return `<tr${cls} data-i="${i}"><td>${esc(it.ref)}</td><td>${esc(it.content_type)}</td><td>${esc(it.status)}</td><td>${title}</td><td>${esc(body)}</td><td>${btn}</td></tr>
+        <tr class="fortune-full hidden" data-full="${i}"><td colspan="6"><pre class="fortune-pre">${esc(full)}</pre></td></tr>`;
     }).join('')
     + '</tbody></table>';
+  // 전역 접근용 — 클릭 시 전체 본문 표시/숨김
+  window._fortuneGenItems = res.items;
+}
+
+function toggleFortuneFull(i) {
+  document.querySelectorAll(`tr.fortune-full[data-full="${i}"]`).forEach(tr => {
+    tr.classList.toggle('hidden');
+  });
+}
+
+function copyFortuneFull(i) {
+  const it = window._fortuneGenItems[i];
+  const full = it.content_type === 'daily_sns'
+    ? (it.sns_full || '') : ((it.title || '') + '\n\n' + (it.body_full || ''));
+  if (!full.trim()) return;
+  const ta = document.createElement('textarea');
+  ta.value = full;
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); setStatus('본문이 복사되었습니다 — 블로그에 붙여넣기하세요'); }
+  catch (e) { /* ignore */ }
+  document.body.removeChild(ta);
 }
 
 // v28: 운세 수동 발행 (대시보드 "자동 발행" 버튼) — POST /fortune/publish
