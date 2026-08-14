@@ -83,6 +83,10 @@ def _patch_generators(monkeypatch):
     monkeypatch.setattr(fc, "generate_sns_summary",
                         lambda g, **kw: {"text": "오늘의 운세 요약",
                                          "hashtags": ["운세"]})
+    # v29.1: weekly/monthly도 모킹 — 실제 LLM 호출(유효 키)로 테스트가
+    # 네트워크에 의존하지 않도록 (조합 실행 격리)
+    monkeypatch.setattr(fc, "generate_extended_blog",
+                        lambda g, **kw: dict(_blog_content(g.get("reference", ""))))
 
 
 def test_fortune_step_publishes_on_success(monkeypatch, tmp_path):
@@ -98,8 +102,10 @@ def test_fortune_step_publishes_on_success(monkeypatch, tmp_path):
     monkeypatch.setattr(publish_client.requests, "post", fake_post)
     d = _open(tmp_path)
     n = collect.fortune_generate_step(d, _cfg(tmp_path), "2026-08-10")
-    assert n == 2  # SNS + 블로그 생성 (고정 콘텐츠는 별도 테스트)
-    assert posted["payload"]["slug"] == "fortune-2026-08-10"
+    # v29.1: 2026-08-10은 월요일 → weekly_blog도 모킹 생성·발행됨 (3 = SNS+블로그+주간)
+    assert n == 3
+    # 발행 순서상 weekly가 먼저 — 전체 발행 slug 집합에 daily 포함 확인
+    assert posted["payload"]["slug"] in ("fortune-2026-08-10", "fortune-week-2026-08-10")
     row = d.get_fortune_generation("2026-08-10", "daily_blog")
     assert row["status"] == "published"
     d.close()

@@ -2,6 +2,25 @@
 
 이 프로젝트의 버전 이력. 버전 규칙: 기능 단위로 커밋 메시지에 표기 (비공식 SemVer).
 
+## v29.1 — 2026-08-14 (운세 생성 실동작 — LLM 프로바이더 개선·검수 수정)
+
+### 수정
+- **운세 LLM 프로바이더 개선** (`engine/fortune_content._run_llm`)
+  - 기존: Bailian Token Plan 고정 — 무효 키면 운세 생성 전면 실패 (빈 콘텐츠로 저장)
+  - v29.1: `resolve_draft_provider()` 기반 — **OPENCODE_GO_API_KEY 우선**, 실패 시 Bailian 폴백 (draft_generator와 동일 체계)
+  - 덕분에 운세 생성(daily_blog/daily_sns/weekly/monthly)이 실제 LLM 호출로 동작
+- **기준일 검수 수정** (`check_reference_date`) — ISO(2026-08-14)만 찾던 것을 한국어 형식(2026년 8월 14일)도 허용. LLM이 자연스럽게 쓰는 한국어 날짜가 "기준일 미포함" 오탐으로 qc_failed 되는 문제 해결
+- **동물 띠 제목 중복 수정** — `ZODIAC_ANIMAL_PROFILES` 키가 이미 '돼지띠'인데 코드가 '띠'를 또 붙여 "돼지띠띠" 생성. 기존 DB 12건 마이그레이션 완료
+- **생성 결과 표시 개선** (`/fortune/generate` 응답 + 대시보드)
+  - daily_sns는 text를 제목으로, daily_blog는 title/summary 표시
+  - 빈 콘텐츠는 "내용 미생성 — LLM 키 확인 필요"로 구분
+  - 마크다운 헤더 제거 후 본문 첫 문단만 미리보기
+- **테스트 격리** — `_patch_generators`에 `generate_extended_blog` 모킹 추가 (조합 실행 시 실제 LLM 호출 방지)
+
+### 테스트
+- 전체 pytest **459 passed / 10 skipped**
+- 실동작 검증: OPENCODE_GO_API_KEY로 daily_blog(3,140자)·daily_sns(514자) 실제 생성 확인
+
 ## v29 — 2026-08-14 (운세 생성·발행 분리 — 수동 게시 지원)
 
 ### 변경

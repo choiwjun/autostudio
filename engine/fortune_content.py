@@ -94,29 +94,73 @@ _SNS_RULES = (
 
 
 def _run_llm(prompt, timeout=90):
-    """Token Plan LLM 호출 (draft_generator와 동일 패턴) — JSON 응답."""
-    if not llm_client.has_api_key():
-        raise RuntimeError("Token Plan API 키가 필요합니다 (BAILIAN_TOKEN_PLAN_API_KEY)")
-    base_url = llm_client.resolve_base_url(
-        "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1")
-    data = llm_client.post_json(
-        f"{base_url}/chat/completions",
-        {
-            "model": "deepseek-v4-flash-0731",
-            "messages": [
-                {"role": "system", "content": _SNS_SYSTEM},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.7,
-            "max_tokens": 3000,
-            "enable_thinking": False,
-        },
-        llm_client.resolve_api_key(), timeout, RuntimeError, "fortune API",
-    )
+    """운세 LLM 호출 — draft_generator와 동일 프로바이더 체계 (v29.1).
+
+    - OPENCODE_GO_API_KEY 설정: opencode-go (deepseek-v4-flash) 우선
+    - 미설정/실패: Bailian Token Plan (deepseek-v4-flash-0731) 폴백
+    - JSON 응답 파싱."""
+    provider, base_url, model = llm_client.resolve_draft_provider()
+    api_key = llm_client.resolve_draft_api_key()
+    if not api_key:
+        raise RuntimeError(
+            "운세 LLM 키가 필요합니다 "
+            "(OPENCODE_GO_API_KEY 또는 BAILIAN_TOKEN_PLAN_API_KEY)")
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": _SNS_SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.7,
+        "max_tokens": 3000,
+    }
+    if provider == "opencode-go":
+        # v23: deepseek-v4-flash는 reasoning 모델 — 추론 off 필수 (본문 절단 방지)
+        payload["thinking"] = {"type": "disabled"}
+    else:
+        payload["enable_thinking"] = False
+    try:
+        data = llm_client.post_json(
+            f"{base_url}/chat/completions", payload,
+            api_key, timeout, RuntimeError, "fortune API",
+        )
+    except RuntimeError as e:
+        # opencode-go 실패 → Bailian 폴백 (draft_generator _should_fallback 동일 기준)
+        if provider != "opencode-go" or not _should_fallback(str(e)):
+            raise
+        bailian_key = llm_client.resolve_api_key()
+        if not bailian_key:
+            raise
+        data = llm_client.post_json(
+            f"{llm_client.resolve_base_url(llm_client.DRAFT_BAILIAN_BASE_URL)}/chat/completions",
+            {
+                "model": "deepseek-v4-flash-0731",
+                "messages": [
+                    {"role": "system", "content": _SNS_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.7,
+                "max_tokens": 3000,
+                "enable_thinking": False,
+            },
+            bailian_key, timeout, RuntimeError, "fortune API",
+        )
     try:
         return data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as e:
         raise RuntimeError(f"fortune API bad response: {str(data)[:200]}") from e
+
+
+def _should_fallback(msg):
+    """opencode-go 실패 시 Bailian 폴백 기준 (draft_generator와 동일)."""
+    low = msg.lower()
+    return any(k in low for k in (
+        "429", "quota", "rate", "limit", "503", "502", "timeout",
+        "connection", "unauthorized", "invalid api", "401"))
+
+
+def _build_system(prompt):  # noqa: F401 — _SNS_SYSTEM과 함께 사용
+    return _SNS_SYSTEM
 
 
 def _parse_json_output(raw):
@@ -139,7 +183,20 @@ def check_expert_terms(text):
 
 
 def check_reference_date(text, ref_date):
-    return ref_date in (text or "")
+    """기준일 포함 검사 — ISO(2026-08-14) 또는 한국어(2026년 8월 14일) 형식 허용.
+    v29.1: LLM이 자연스럽게 한국어 날짜를 쓰므로 ISO만 찾으면 오탐."""
+    if ref_date in (text or ""):
+        return True
+    try:
+        y, m, d = ref_date.split("-")
+        for fmt in (f"{y}년 {int(m)}월 {int(d)}일",
+                    f"{y}년 {m}월 {d}일",
+                    f"{int(y)}년 {int(m)}월 {int(d)}일"):
+            if fmt in (text or ""):
+                return True
+    except (ValueError, AttributeError):
+        pass
+    return False
 
 
 def check_sns_length(text):
@@ -285,7 +342,8 @@ def build_fixed_blog_content(g, ref_date):
     title = {
         "day_pillar": f"{ref_date} {g['key']}일의 운세와 성향",
         "zodiac": f"{ref_date} {g['key']} 오늘의 운세",
-        "animal": f"{ref_date} {g['key']}띠 오늘의 운세",
+        # v29.1: g['key']가 이미 '돼지띠' 형태 — '띠' 중복 방지
+        "animal": f"{ref_date} {g['key']} 오늘의 운세",
     }[ctype]
     if ctype == "day_pillar":
         body = (f"## 오늘의 운세\n\n{g['keyword']} — {g['summary']}\n\n"

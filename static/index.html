@@ -84,6 +84,7 @@
   .fortune-panel .summary { margin-bottom: 8px; line-height: 1.7; }
   .fortune-panel table td, .fortune-panel table th { padding: 6px 8px; text-align: left; font-size: 12.5px; }
   .fortune-panel table tr.fail td { color: var(--warning); }
+  .fortune-panel .muted { color: var(--text-dim, #888); font-style: italic; }
   .filters select, .filters input { height: 34px; padding: 0 10px; border: 1px solid var(--border);
     border-radius: 10px; background: rgba(15, 23, 42, .6); font-size: 13px; color: var(--text);
     font-family: inherit; transition: border-color .15s ease, box-shadow .15s ease; }
@@ -814,13 +815,20 @@ function renderFortuneGenResult(res) {
     return;
   }
   const statusLabel = { generated: '생성됨', published: '발행됨', publish_failed: '발행 실패', qc_failed: '검수 실패' };
-  itemsEl.innerHTML = '<table class="mini-table"><thead><tr><th>기준일</th><th>타입</th><th>상태</th><th>제목</th><th>요약</th></tr></thead><tbody>'
+  itemsEl.innerHTML = '<table class="mini-table"><thead><tr><th>기준일</th><th>타입</th><th>상태</th><th>제목</th><th>내용</th></tr></thead><tbody>'
     + res.items.map(it => {
       const label = statusLabel[it.status] || it.status;
-      const cls = it.status === 'qc_failed' ? ' class="fail"' : '';
-      const title = it.title || '(제목 없음)';
-      const summary = it.summary || it.preview || '';
-      return `<tr${cls}><td>${esc(it.ref)}</td><td>${esc(it.content_type)}</td><td>${esc(label)}</td><td>${esc(title)}</td><td>${esc(summary)}</td></tr>`;
+      const cls = (it.status === 'qc_failed' || !it.has_content) ? ' class="fail"' : '';
+      let title;
+      if (!it.has_content) {
+        title = '<span class="muted">(내용 미생성 — LLM 키 확인 필요)</span>';
+      } else if (it.content_type === 'daily_sns') {
+        title = it.title ? esc(it.title) + '…' : '(SNS 본문)';
+      } else {
+        title = esc(it.title || '(제목 없음)');
+      }
+      const body = it.summary || it.preview || '';
+      return `<tr${cls}><td>${esc(it.ref)}</td><td>${esc(it.content_type)}</td><td>${esc(label)}</td><td>${title}</td><td>${esc(body)}</td></tr>`;
     }).join('')
     + '</tbody></table>';
 }

@@ -503,13 +503,25 @@ def create_app(cfg):
                     parsed = json_mod.loads(r["content"] or "{}")
                 except Exception:
                     pass
+                if not isinstance(parsed, dict):
+                    parsed = {}
+                has_content = bool(r["content"] and r["content"].strip())
+                # daily_sns는 {text, hashtags} 구조 — text를 제목으로 노출
+                if ct == "daily_sns":
+                    title = str(parsed.get("text", "") or "")[:60]
+                    summary = ""
+                else:
+                    title = str(parsed.get("title", "") or "")[:80]
+                    summary = str(parsed.get("summary", "") or "")[:120]
+                body = str(parsed.get("body", "") or "")
+                # 마크다운 헤더·구분선 제거 후 첫 문단만 미리보기
+                plain = body.replace("#", "").replace("*", "").replace("---", " ").strip()
+                preview = " ".join(plain.split())[:100]
                 items.append({
                     "ref": r["ref_date"], "content_type": ct,
                     "status": r["status"],
-                    "title": parsed.get("title", "") if isinstance(parsed, dict) else "",
-                    "summary": parsed.get("summary", "") if isinstance(parsed, dict) else "",
-                    "preview": (parsed.get("body", "") if isinstance(parsed, dict)
-                                else (r["content"] or ""))[:120],
+                    "has_content": has_content,
+                    "title": title, "summary": summary, "preview": preview,
                 })
             return created, items
 
