@@ -1,8 +1,8 @@
 # 14. 유튜브 쇼츠 파이프라인 (Phase S)
 
-> 상태: 기획 고도화 (2026-08-14 — 리서치 수치 근거 반영) · 관련: `11-fortune-channel.md`(수익화 로드맵 §9 — 쇼츠 이연 해소), `12-kdp-pipeline.md`(Phase K — KDP↔쇼츠 시너지 §9)
+> 상태: 기획 고도화 (2026-08-14 — 리서치 수치 근거 반영 · **오픈소스 조사 P1·P2 반영**) · 관련: `11-fortune-channel.md`(수익화 로드맵 §9 — 쇼츠 이연 해소), `12-kdp-pipeline.md`(Phase K — KDP↔쇼츠 시너지 §9)
 > 핵심 차별점: **네이버 인기키워드가 아니라 유튜브 인기 주제·채널·키워드 기반 발굴**
-> 리서치 근거: `pipeline/shorts-kdp-research/research-report.md` (R-1~R-7) · 리서치QA 승인 (조건부 — P1·P2·P4 반영)
+> 리서치 근거: `pipeline/shorts-kdp-research/research-report.md` (R-1~R-7) · `pipeline/shorts-kdp-research/opensource-report.md` §4 (P1·P2) · 리서치QA 승인 (조건부 — P1·P2·P4 반영)
 > 수치 규칙: 출처 인라인 표기, 단일 출처/C등급은 ⚠️ 표시, 14·12·11 문서 간 수치 불일치 금지 (일 3권·쿼터 1만·로열티 35/70%)
 
 ## 1. 목적
@@ -69,6 +69,10 @@ autostudio의 키워드 발굴·초안 자동화 파이프라인을 **유튜브 
 - 기존 네이버 '곧 뜰' 키워드를 유튜브 검색 쿼리로 변환 — 교차 검증용 (유튜브 검색 결과량·채널 수)
 - KDP 개선점 #4(키워드→책 주제 변환)와 동일한 '곧 뜰' 자산 공유 — 12-kdp §4 참조
 
+### 2.4 Google Trends (pytrends) — 보조·참고용만 (P1-4)
+- **pytrends 아카이브됨 (마지막 커밋 2024-08)** — Google Trends **비공식 API**로 언제든 깨질 수 있음 (오픈소스 조사 P1-4 실측: archived=True)
+- **운영 원칙**: pytrends는 **보조·참고용으로만** 사용 — **주 소스는 YouTube Data API v3 유지** (§2.1). 소재 발굴·판정에 pytrends 단독 의존 금지
+
 ## 3. 쇼츠 소재 발굴 로직
 
 ### 3.1 수집 (shorts_research.py — ~3h)
@@ -105,10 +109,11 @@ autostudio의 키워드 발굴·초안 자동화 파이프라인을 **유튜브 
 ### 3.3 쇼츠 스크립트 생성 (shorts_script.py — ~3h)
 - 기존 draft_pipeline 2패스 재활용 (플랫폼=shorts 포맷)
 - 쇼츠 특화: 30~45초 (한국어 80~120자), **후킹 3초** (VVSA 첫 1~2초 결정 근거), CTA(구독/시리즈)
-- 검수: 금지어·허위 주장·길이·후킹 존재
-- **음성/자막**: **edge-tts 채택 (OQ-4 결정)** — 오픈소스·무료, 운세 카드 쇼츠(자막+간단 음성)에 적합. 자막 텍스트만 산출(수동 녹음)도 지원
-  - ⚠️ **S-4 라이선스 주의**: edge-tts는 **비공식 API(Microsoft Edge 서버 활용)** — 상업 쇼츠 음성 사용 시 MS 약관 위반 소지 있음. **파일럿 전 검토 항목**: ① 상업 이용 가능성 확인 ② 대체재 검토 — **Piper**(오픈소스·로컬 추론, 한국어 모델 존재), **Kokoro**(오픈소스 TTS), 기타 오픈소스 TTS(Coqui 등) ③ 목소리 저작권·품질 비교 후 edge-tts 유지/교체 결정
-  - 파일럿 전 게이트: **TTS 라이선스·품질 검증 통과 후 edge-tts 확정** (실패 시 Piper/Kokoro 폴백)
+- 검수: 금지어·허위 주장·길이·후킹 존재 · 문법/맞춤법 — 영어 **LanguageTool**(HTTP API)·한국어 **py-hanspell** 병행 (오픈소스 조사 P2-3)
+- **자막 병행 (P2-4)**: **faster-whisper**(MIT·CTranslate2 가속)로 음성→자막 자동 생성 — edge-tts 음성·스크립트와 정합, 한국어 WER 8~13% 수준 (오픈소스 조사)
+- **음성/자막**: **edge-tts 채택 (OQ-4 결정)** — 라이선스: **LGPL-3.0(대부분 파일)+MIT(srt_composer)**, ⚠️ **비공식 API(MS 서버 활용) — 상업 쇼츠 사용 시 MS 약관 위반 소지** (오픈소스 조사 P1-1). 운세 카드 쇼츠(자막+간단 음성)에 적합. 자막 텍스트만 산출(수동 녹음)도 지원
+  - ⚠️ **S-4 라이선스 주의**: edge-tts는 **LGPL-3.0(대부분 파일)+MIT(srt_composer.py)** 이나 **비공식 API(Microsoft Edge 서버 활용)** — 상업 쇼츠 음성 사용 시 MS 약관 위반 소지 있음 (오픈소스 조사 P1-1 실측). **파일럿 전 검토 항목**: ① 상업 이용 가능성 확인 ② 대체재 검토 — **MeloTTS**(⭐7.6k·MIT·**한국어 공식 지원** — 경량 로컬 TTS, 1순위 후보), **piper1-gpl**(GPL-3.0 — Piper 계승 포크), ~~Piper~~(아카이브 2025-10·공식 한국어 모델 없음), ~~Kokoro~~(한국어 미지원 — 9개 언어 중 한국어 없음), 기타 오픈소스 TTS ③ 목소리 저작권·품질 비교 후 edge-tts 유지/교체 결정
+  - 파일럿 전 게이트: **TTS 라이선스·품질 검증 통과 후 edge-tts 확정** (실패 시 MeloTTS 우선 폴백 — piper1-gpl(GPL-3.0)은 상업 배포 시 파생 공개 검토 필요)
 
 ## 4. 데이터 모델
 
@@ -202,6 +207,7 @@ shorts_topics     id · label · score · evidence(JSON) · status · created_at
 - 검증된 주제 → 시리즈화 (KDP 시리즈 확장 공식 재활용, 12-kdp §7 참조)
 - 운세 엔진 자산 연계: "오늘의 운세 쇼츠" (별자리·띠별 30초 카드) — 11-fortune §9 한국어 운세 쇼츠와 연결
 - KDP 연계: 책 챕터 핵심 팁 1개 = 쇼츠 대본 → CTA "Full chapter in my book on Amazon" → 아마존 링크 (12-kdp §9)
+- KDP 쇼츠 시각화 (P2-5): **3d-book-image-css-generator**로 책 표지 3D 렌더 이미지 생성 — KDP 쇼츠 배경·CTA 썸네일·챕터 카드에 활용 (오픈소스 조사)
 
 ## 7. 리스크
 
@@ -215,14 +221,14 @@ shorts_topics     id · label · score · evidence(JSON) · status · created_at
 | 쇼츠 광고 수익 미미 | 광고=보조 인식 — KDP/운세 유입을 실질 수익원으로 (수익 모델 §1.2) |
 | 운세 콘텐츠 규제 | "오락·참고용" 프레이밍, 적중률 보장 표현 금지, 결정적 엔진 명시 (11-fortune §9 참조) |
 | 완주율 직접 측정 불가 | 스크립트 길이(30~45초)+후킹 품질로 간접 통제 — 채널 소유 시 Studio 데이터로 보정 |
-| edge-tts 상업 이용 라이선스 (비공식 API) | 파일럿 전 대체재 검토(Piper·Kokoro) — 실패 시 교체, 자막 텍스트만으로도 운영 가능 (S-4) |
+| edge-tts 라이선스 (LGPL-3.0 대부분 + MIT srt_composer, ⚠️ 비공식 API — MS 약관 위반 소지) | 파일럿 전 대체재 검토(**MeloTTS**·MIT·한국어 지원 1순위, piper1-gpl·GPL-3.0) — 실패 시 교체, 자막 텍스트만으로도 운영 가능 (S-4). ~~Piper~~(아카이브 2025-10)·~~Kokoro~~(한국어 미지원) 제외 |
 
 ## 8. 사용자 필요 조치
 
 1. **Google Cloud Console에서 YouTube Data API v3 활성화 + API 키 발급** → `.env.local`에 `YOUTUBE_API_KEY` 추가
 2. **채널 구분 결정**: 운세(한국어) / KDP(영어) 채널 분리 시 신규 채널 생성 (파일럿 전)
 3. (선택) 쇼츠 제작 도구 — Shotcut/CapCut 등 (자동화 아님)
-4. (파일럿 전) **TTS 검증**: edge-tts 한국어 음성 품질 청취 + **상업 이용 라이선스 확인** (비공식 API — 대체재 Piper/Kokoro 검토, S-4)
+4. (파일럿 전) **TTS 검증**: edge-tts 한국어 음성 품질 청취 + **상업 이용 라이선스 확인** (LGPL-3.0 대부분+MIT srt_composer, ⚠️ 비공식 API — 대체재 **MeloTTS**(MIT·한국어 지원) 우선 검토, ~~Piper~~ 아카이브·~~Kokoro~~ 한국어 미지원, S-4)
 
 ---
 

@@ -37,7 +37,7 @@ strong { font-weight:700; }
 </head>
 <body>
 <main>
-<div class="meta">📄 trd · 생성: 2026-08-14 18:22</div>
+<div class="meta">📄 trd · 생성: 2026-08-14 18:54</div>
 <h1>쇼츠 + KDP 파이프라인 — 기술 요구사항 (trd.md)</h1>
 <blockquote>
 <p>작성: 기획팀 · 프로젝트: autostudio · 작업 디렉토리: <code>pipeline/shorts-kdp-research/</code><br />
@@ -86,13 +86,13 @@ strong { font-weight:700; }
 </tr>
 <tr>
 <td>TTS</td>
-<td>edge-tts (오픈소스·무료) + Piper/Kokoro 대체 검토</td>
-<td>OQ-4 결정 — 자막 병행, ⚠️ 비공식 API — 파일럿 전 라이선스 검증 (S-4)</td>
+<td>edge-tts (<strong>LGPL-3.0 대부분 + MIT srt_composer</strong>) + <strong>MeloTTS</strong>(MIT·한국어 지원) 대체 검토</td>
+<td>OQ-4 결정 — 자막 병행, ⚠️ 비공식 API — 파일럿 전 라이선스 검증 (S-4). ~~Piper~~(아카이브 2025-10·한국어 모델 없음)·~~Kokoro~~(한국어 미지원) 제외, piper1-gpl(GPL-3.0) 계승 명시 (오픈소스 조사 P1-1·P1-3)</td>
 </tr>
 <tr>
 <td>EPUB</td>
-<td>ebooklib + calibre(ebook-polish --check) + epubcheck(Java 필요)</td>
-<td>K-3 — 의존성 명시 (개선점 #2), Java 미설치 시 ebook-polish 폴백 (K-1)</td>
+<td>ebooklib(<strong>AGPL-3.0</strong>) + calibre(ebook-polish --check) + epubcheck(Java 필요)</td>
+<td>K-3 — 의존성 명시 (개선점 #2), Java 미설치 시 ebook-polish 폴백 (K-1). ⚠️ AGPL-3.0: 내부 사용 OK, 외부 SaaS 서비스화 시 파생 공개 의무 — 대안 pypub(MIT) (오픈소스 조사 P1-2)</td>
 </tr>
 <tr>
 <td>표지</td>
@@ -281,7 +281,11 @@ strong { font-weight:700; }
 <tbody>
 <tr>
 <td>edge-tts</td>
-<td>오픈소스·무료 — ⚠️ <strong>비공식 API(상업 이용 약관 위반 소지)</strong> 한국어 품질·목소리 저작권·대체재(Piper/Kokoro) 파일럿 전 검증 (S-4)</td>
+<td><strong>LGPL-3.0(대부분 파일)+MIT(srt_composer)</strong> — ⚠️ <strong>비공식 API(상업 이용 약관 위반 소지)</strong> 한국어 품질·목소리 저작권·대체재(<strong>MeloTTS</strong>·MIT·한국어 공식 지원 — 1순위, piper1-gpl·GPL-3.0) 파일럿 전 검증 (S-4). ~~Piper~~ 아카이브 2025-10·공식 한국어 모델 없음, ~~Kokoro~~ 한국어 미지원 (9개 언어 중 한국어 없음) (오픈소스 조사 P1-1·P1-3)</td>
+</tr>
+<tr>
+<td>문법 검사 (P2-3)</td>
+<td>영어: <strong>LanguageTool</strong>(HTTP API) · 한국어: <strong>py-hanspell</strong> — K-2 QC·S-3 검수에서 언어별 병행</td>
 </tr>
 <tr>
 <td>네이버 '곧 뜰' 프리셋</td>
@@ -380,9 +384,9 @@ kdp_publish   id · book_id(FK) · publish_date · price · royalty_rate · expe
 </tr>
 <tr>
 <td>ADR-4</td>
-<td>edge-tts (OQ-4)</td>
-<td>유료 TTS·자막만</td>
-<td>무료·오픈소스, 운세 카드에 적합 — 자막 폴백 유지</td>
+<td>edge-tts (OQ-4) — 라이선스: LGPL-3.0 대부분+MIT srt_composer, ⚠️ 비공식 API</td>
+<td>유료 TTS·자막만·<strong>MeloTTS</strong>(MIT·한국어 지원)</td>
+<td>무료·오픈소스, 운세 카드에 적합 — 비공식 API 리스크 시 MeloTTS 대체, 자막 폴백 유지 (오픈소스 조사 P1-1·P1-3)</td>
 </tr>
 <tr>
 <td>ADR-5</td>
@@ -406,9 +410,12 @@ kdp_publish   id · book_id(FK) · publish_date · price · royalty_rate · expe
 <li><strong>AI 표기 QC</strong> — AI-generated 판정 로직 + 출간 체크리스트 (12-kdp QC #6)</li>
 <li><strong>엔진 데이터는 결정적</strong> — 운세 카드 쇼츠는 LLM 환상 콘텐츠 금지 (11-fortune §8-1 원칙)</li>
 <li><strong>수동 업로드 UX</strong> — 스크립트/EPUB/체크리스트 다운로드 중심, 자동 업로드 API 미구현</li>
+<li><strong>TTS 라이선스 상수</strong> — edge-tts=LGPL-3.0(대부분)+MIT(srt_composer)·비공식 API, MeloTTS=MIT·한국어 지원(대체 1순위), piper1-gpl=GPL-3.0 — 파이프라인 config에 라이선스·대체 후보 명시 (S-4 게이트, 오픈소스 조사 P1-1·P1-3)</li>
+<li><strong>ebooklib AGPL-3.0</strong> — 내부 파이프라인 OK, <strong>외부 SaaS 서비스화 시 파생 코드 공개 의무</strong> — 서비스화 시 pypub(MIT) 대체 검토 (P1-2·P3-4)</li>
+<li><strong>pytrends 참고용 한정</strong> — 아카이브(2024-08)·비공식 API — 주 소스 API v3 유지, pytrends 단독 의존 금지 (P1-4)</li>
 </ol>
 <hr />
-<p><em>작성: 기획팀 · 상태: 기획 문서 패키지 2/5 · 상위: plan.md · 근거: research-report.md R-3·R-5</em></p>
+<p><em>작성: 기획팀 · 상태: 기획 문서 패키지 2/5 (오픈소스 조사 P1·P2 반영) · 상위: plan.md · 근거: research-report.md R-3·R-5, opensource-report.md §4 (P1·P2)</em></p>
 </main>
 </body>
 </html>

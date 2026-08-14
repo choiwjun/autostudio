@@ -15,8 +15,8 @@
 | 서버리스 | Vercel (60초 한도) | 조립·검증은 배치 전용, 대시보드는 다운로드만 |
 | 외부 API | YouTube Data API v3 | 무료 티어 10,000 units/일 |
 | LLM | 기존 draft_pipeline (OpenCode Go 우선, Bailian 폴백) | 스크립트·챕터 생성 |
-| TTS | edge-tts (오픈소스·무료) + Piper/Kokoro 대체 검토 | OQ-4 결정 — 자막 병행, ⚠️ 비공식 API — 파일럿 전 라이선스 검증 (S-4) |
-| EPUB | ebooklib + calibre(ebook-polish --check) + epubcheck(Java 필요) | K-3 — 의존성 명시 (개선점 #2), Java 미설치 시 ebook-polish 폴백 (K-1) |
+| TTS | edge-tts (**LGPL-3.0 대부분 + MIT srt_composer**) + **MeloTTS**(MIT·한국어 지원) 대체 검토 | OQ-4 결정 — 자막 병행, ⚠️ 비공식 API — 파일럿 전 라이선스 검증 (S-4). ~~Piper~~(아카이브 2025-10·한국어 모델 없음)·~~Kokoro~~(한국어 미지원) 제외, piper1-gpl(GPL-3.0) 계승 명시 (오픈소스 조사 P1-1·P1-3) |
+| EPUB | ebooklib(**AGPL-3.0**) + calibre(ebook-polish --check) + epubcheck(Java 필요) | K-3 — 의존성 명시 (개선점 #2), Java 미설치 시 ebook-polish 폴백 (K-1). ⚠️ AGPL-3.0: 내부 사용 OK, 외부 SaaS 서비스화 시 파생 공개 의무 — 대안 pypub(MIT) (오픈소스 조사 P1-2) |
 | 표지 | Pillow + image_gen 확장 | 6×9 텍스트 오버레이 |
 
 ### 1.2 아키텍처 제약
@@ -76,7 +76,8 @@
 
 | 항목 | 요구사항 |
 |---|---|
-| edge-tts | 오픈소스·무료 — ⚠️ **비공식 API(상업 이용 약관 위반 소지)** 한국어 품질·목소리 저작권·대체재(Piper/Kokoro) 파일럿 전 검증 (S-4) |
+| edge-tts | **LGPL-3.0(대부분 파일)+MIT(srt_composer)** — ⚠️ **비공식 API(상업 이용 약관 위반 소지)** 한국어 품질·목소리 저작권·대체재(**MeloTTS**·MIT·한국어 공식 지원 — 1순위, piper1-gpl·GPL-3.0) 파일럿 전 검증 (S-4). ~~Piper~~ 아카이브 2025-10·공식 한국어 모델 없음, ~~Kokoro~~ 한국어 미지원 (9개 언어 중 한국어 없음) (오픈소스 조사 P1-1·P1-3) |
+| 문법 검사 (P2-3) | 영어: **LanguageTool**(HTTP API) · 한국어: **py-hanspell** — K-2 QC·S-3 검수에서 언어별 병행 |
 | 네이버 '곧 뜰' 프리셋 | K-1 입력 재사용 (기존 자산) |
 | 운세 엔진 | `engine/` Python 모듈 재사용 (60일주·별자리·띠) — 결정적 계산 |
 
@@ -130,7 +131,7 @@ kdp_publish   id · book_id(FK) · publish_date · price · royalty_rate · expe
 | ADR-1 | YouTube API v3 유일 정식 소스 | yt-dlp·스크래핑 | ToS 위반 리스크 (2020 RIAA DMCA 선례), 공식·무료·안정 |
 | ADR-2 | EPUB=ebooklib+calibre+epubcheck | pandoc DOCX·Kindle Create | 공식 지원 형식, 검증 자동화 (KDP 파일 형식) |
 | ADR-3 | 배치는 GH Actions (Vercel 밖) | Vercel cron | 60초 한도 — EPUB 조립·LLM 생성은 배치 전용 |
-| ADR-4 | edge-tts (OQ-4) | 유료 TTS·자막만 | 무료·오픈소스, 운세 카드에 적합 — 자막 폴백 유지 |
+| ADR-4 | edge-tts (OQ-4) — 라이선스: LGPL-3.0 대부분+MIT srt_composer, ⚠️ 비공식 API | 유료 TTS·자막만·**MeloTTS**(MIT·한국어 지원) | 무료·오픈소스, 운세 카드에 적합 — 비공식 API 리스크 시 MeloTTS 대체, 자막 폴백 유지 (오픈소스 조사 P1-1·P1-3) |
 | ADR-5 | 채널 분리 (OQ-5) | 단일 채널 | 알고리즘 주제 일관성 — 파일럿 최소 2채널(한국어/영어) |
 | ADR-6 | 일 3권 게이트 (OQ-3 관련) | 주 10권 | 보수적 상한, AI 콘텐츠 시대 실질 한도 (가디언·KDP 커뮤니티) |
 
@@ -142,7 +143,10 @@ kdp_publish   id · book_id(FK) · publish_date · price · royalty_rate · expe
 4. **AI 표기 QC** — AI-generated 판정 로직 + 출간 체크리스트 (12-kdp QC #6)
 5. **엔진 데이터는 결정적** — 운세 카드 쇼츠는 LLM 환상 콘텐츠 금지 (11-fortune §8-1 원칙)
 6. **수동 업로드 UX** — 스크립트/EPUB/체크리스트 다운로드 중심, 자동 업로드 API 미구현
+7. **TTS 라이선스 상수** — edge-tts=LGPL-3.0(대부분)+MIT(srt_composer)·비공식 API, MeloTTS=MIT·한국어 지원(대체 1순위), piper1-gpl=GPL-3.0 — 파이프라인 config에 라이선스·대체 후보 명시 (S-4 게이트, 오픈소스 조사 P1-1·P1-3)
+8. **ebooklib AGPL-3.0** — 내부 파이프라인 OK, **외부 SaaS 서비스화 시 파생 코드 공개 의무** — 서비스화 시 pypub(MIT) 대체 검토 (P1-2·P3-4)
+9. **pytrends 참고용 한정** — 아카이브(2024-08)·비공식 API — 주 소스 API v3 유지, pytrends 단독 의존 금지 (P1-4)
 
 ---
 
-*작성: 기획팀 · 상태: 기획 문서 패키지 2/5 · 상위: plan.md · 근거: research-report.md R-3·R-5*
+*작성: 기획팀 · 상태: 기획 문서 패키지 2/5 (오픈소스 조사 P1·P2 반영) · 상위: plan.md · 근거: research-report.md R-3·R-5, opensource-report.md §4 (P1·P2)*

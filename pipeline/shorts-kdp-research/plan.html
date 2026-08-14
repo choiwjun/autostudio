@@ -37,12 +37,12 @@ strong { font-weight:700; }
 </head>
 <body>
 <main>
-<div class="meta">📄 plan · 생성: 2026-08-14 18:22</div>
+<div class="meta">📄 plan · 생성: 2026-08-14 18:54</div>
 <h1>쇼츠 + KDP 파이프라인 — 제품 요구사항 (plan.md)</h1>
 <blockquote>
 <p>작성: 기획팀 · 프로젝트: autostudio · 작업 디렉토리: <code>pipeline/shorts-kdp-research/</code><br />
 작성일: 2026-08-14 · 모드: standard (요구사항~기획QA — 구현 제외 per 사용자 Q3(a))<br />
-입력: <code>requirements.md</code>(R-1~R-6) · <code>research-report.md</code>(R-1~R-7) · <code>research-qa-report.md</code>(✅ 승인 조건부) · <code>user-answers.md</code><br />
+입력: <code>requirements.md</code>(R-1~R-6) · <code>research-report.md</code>(R-1~R-7) · <code>research-qa-report.md</code>(✅ 승인 조건부) · <code>opensource-report.md</code> §4 (P1·P2 반영) · <code>user-answers.md</code><br />
 개정 대상 문서: <code>docs/planning/14-shorts-pipeline.md</code> · <code>docs/planning/12-kdp-pipeline.md</code> · <code>docs/planning/11-fortune-channel.md</code> §9 (모두 실제 개정 완료)</p>
 </blockquote>
 <h2>1. 제품 개요와 목표</h2>
@@ -318,8 +318,9 @@ strong { font-weight:700; }
 <p><strong>규칙/로직</strong>:<br />
 - draft_pipeline 2패스 재활용 (플랫폼=shorts 포맷)<br />
 - 스크립트 길이: 30~45초 (한국어 80~120자) — 리서치 근거: 20~40초 가장 흔함, 상위권 완주율 80~90%<br />
-- 검수: 금지어·허위 주장·길이·후킹 존재<br />
-- TTS: <strong>edge-tts 채택 (OQ-4)</strong> — 자막 텍스트 병행 지원(수동 녹음)<br />
+- 검수: 금지어·허위 주장·길이·후킹 존재 · 문법 — 영어 <strong>LanguageTool</strong>·한국어 <strong>py-hanspell</strong> 병행 (P2-3)<br />
+- <strong>자막 병행 (P2-4)</strong>: <strong>faster-whisper</strong>(MIT)로 음성→자막 자동 생성 — edge-tts 음성과 정합<br />
+- TTS: <strong>edge-tts 채택 (OQ-4)</strong> — 라이선스 <strong>LGPL-3.0(대부분)+MIT(srt_composer)·비공식 API</strong>, 대체 후보 <strong>MeloTTS</strong>(MIT·한국어 지원), 자막 텍스트 병행 지원(수동 녹음)<br />
 - <strong>기술 복잡도: 중</strong> (LLM 호출 + 검수 규칙 + TTS)</p>
 <p><strong>수용 기준</strong>:</p>
 <table>
@@ -339,7 +340,7 @@ strong { font-weight:700; }
 <tr>
 <td>AC-S2-2</td>
 <td><strong>Given</strong> 스크립트 ready + TTS 라이선스 검증 통과(파일럿 전 게이트) / <strong>When</strong> TTS 실행 / <strong>Then</strong> edge-tts 음성 파일 생성(성공 시), 실패 시 자막만 산출</td>
-<td>• TTS 실패: 자막 폴백, 대시보드 표시 • <strong>라이선스 미검증(비공식 API 우려): 대체재(Piper/Kokoro) 검토 후 교체 (S-4)</strong></td>
+<td>• TTS 실패: 자막 폴백, 대시보드 표시 • <strong>라이선스 미검증(비공식 API 우려): 대체재(MeloTTS·MIT·한국어 지원) 우선 검토 후 교체 (S-4)</strong> — ~~Piper~~(아카이브)·~~Kokoro~~(한국어 미지원) 제외</td>
 </tr>
 <tr>
 <td>AC-S2-3</td>
@@ -353,8 +354,8 @@ strong { font-weight:700; }
 <p><strong>규칙/로직</strong>:<br />
 - 키워드→주제 변환 (개선점 #4): 영어 현지화 + 아마존 검색 결과 스냅샷 검증 + 한국어 병행 옵션<br />
 - 챕터 6~12개, 일관성 보정 패스, 챕터당 하드 예산 300초<br />
-- QC 8항목 (개선점 #5): 표절 유사성·금지어·사실성·챕터 간 중복·길이(±20%)·AI 표기·마크다운 정합·메타데이터<br />
-- EPUB: ebooklib 조립 + calibre ebook-convert + epubcheck (GH Actions, 의존성 §2.1 — 개선점 #2)<br />
+- QC 8항목 (개선점 #5): 표절 유사성·금지어·사실성·챕터 간 중복(<strong>sentence-transformers</strong> 임베딩 ≥0.8, P2-1)·길이(±20% + <strong>textstat</strong> 가독성, P2-2)·AI 표기·마크다운 정합·메타데이터 · 문법은 영어 LanguageTool·한국어 py-hanspell 병행 (P2-3)<br />
+- EPUB: ebooklib(<strong>AGPL-3.0</strong> — 내부 OK, SaaS 서비스화 시 파생 공개 의무, 대안 pypub MIT) 조립 + calibre ebook-convert + epubcheck (GH Actions, 의존성 §2.1 — 개선점 #2)<br />
 - <strong>기술 복잡도: 높음</strong> (LLM 파이프라인 + EPUB 변환 + QC 규칙)</p>
 <p><strong>수용 기준</strong>:</p>
 <table>
@@ -601,8 +602,8 @@ strong { font-weight:700; }
 </tr>
 <tr>
 <td><strong>OQ-4</strong> TTS</td>
-<td><strong>edge-tts 채택</strong> (자막 병행)</td>
-<td>무료·오픈소스, 운세 카드 쇼츠 적합 — 한국어 품질·목소리 저작권은 파일럿 전 검증</td>
+<td><strong>edge-tts 채택</strong> (자막 병행) — 라이선스 LGPL-3.0(대부분)+MIT(srt_composer)·⚠️ 비공식 API</td>
+<td>오픈소스, 운세 카드 쇼츠 적합 — 비공식 API 리스크 시 <strong>MeloTTS</strong>(MIT·한국어 공식 지원) 대체 1순위, 한국어 품질·목소리 저작권은 파일럿 전 검증 (P1-1·P1-3)</td>
 </tr>
 <tr>
 <td><strong>OQ-5</strong> 채널 전략</td>

@@ -1,7 +1,7 @@
 # 12. KDP 자동 출간 파이프라인 (Phase K)
 
-> 상태: 설계 확정 + **개선점 8건 전부 반영** (2026-08-14) · 관련: `11-fortune-channel.md`(수익화 로드맵), `14-shorts-pipeline.md`(Phase S — KDP↔쇼츠 시너지)
-> 리서치 근거: `pipeline/shorts-kdp-research/research-report.md` (R-4~R-6) · 리서치QA 승인 (조건부 — P1·P2·P4 반영)
+> 상태: 설계 확정 + **개선점 8건 전부 반영 + 오픈소스 조사 P1·P2 반영** (2026-08-14) · 관련: `11-fortune-channel.md`(수익화 로드맵), `14-shorts-pipeline.md`(Phase S — KDP↔쇼츠 시너지)
+> 리서치 근거: `pipeline/shorts-kdp-research/research-report.md` (R-4~R-6) · `pipeline/shorts-kdp-research/opensource-report.md` §4 (P1·P2) · 리서치QA 승인 (조건부 — P1·P2·P4 반영)
 > 수치 규칙: 출처 인라인 표기, 단일 출처/C등급은 ⚠️ 표시, 14·12·11 문서 간 수치 불일치 금지 (일 3권·쿼터 1만·로열티 35/70%)
 
 ## 1. 목적
@@ -62,7 +62,7 @@ autostudio의 키워드 발굴·초안 파이프라인을 **아마존 KDP 전자
 
 **Python 의존성 (requirements-dev.txt 추가)**:
 ```
-ebooklib>=0.18        # EPUB 조립 (K-3)
+ebooklib>=0.18        # EPUB 조립 (K-3) — ⚠️ AGPL-3.0: 내부 파이프라인 OK, 외부 SaaS 서비스화 시 파생 코드 공개 의무 (대안: pypub MIT, P1-2)
 Pillow>=10.0          # 표지 6×9 텍스트 오버레이 (K-3)
 # epubcheck·calibre는 시스템/워크플로우 도구 (아래)
 ```
@@ -93,6 +93,8 @@ Pillow>=10.0          # 표지 6×9 텍스트 오버레이 (K-3)
 QC·대시보드·배치     calibre (검증·변환)    kdp_book.py
 image_gen (이미지)   Pillow (표지 처리)     ebook_builder.py
                     (선택) pandoc (DOCX)   출간 큐·성과 추적·48h 모니터링
+
+> ⚠️ **P1-2 (ebooklib AGPL-3.0)**: 내부 파이프라인 사용은 OK, **외부 SaaS 서비스화 시 파생 코드 공개 의무** — 서비스화 단계에서 **pypub(MIT)** 대체 검토 (P3-4).
 ```
 
 ## 3. 데이터 모델
@@ -138,11 +140,13 @@ kdp_publish   id · book_id(FK) · publish_date · price · royalty_rate · expe
 | 1 | 표절 유사성 | 타 도서·공개 콘텐츠 유사 문장 검출 (LLM 재작성·패러프레이즈 확인) | KDP 표절·중복 콘텐츠 금지 ([KDP Content Guidelines](https://kdp.amazon.com/help/topic/G200672390)) |
 | 2 | 금지어 | 광고성 과장·의료/투자 확정 표현·Amazon 정책 위반어 | KDP 콘텐츠 가이드라인 |
 | 3 | 사실성 | 수치·주장 출처 검증 (추정은 "추정" 명시) | 허위 정보 금지 |
-| 4 | 챕터 간 중복 | 의미 중복 문단 검출 (embedding 유사도 ≥ 0.8 재작성) | 독자 경험·품질 |
-| 5 | 길이 | 챕터별 목표 ±20% (워크북 800~1,200단어/챕터), 책 6~12챕터 | 구조화 비소설 표준 |
+| 4 | 챕터 간 중복 | 의미 중복 문단 검출 — **sentence-transformers**(paraphrase-multilingual-MiniLM) 임베딩 유사도 ≥ 0.8 → 재작성 (오픈소스 조사 P2-1) | 독자 경험·품질 |
+| 5 | 길이 | 챕터별 목표 ±20% (워크북 800~1,200단어/챕터), 책 6~12챕터 + **textstat**(Flesch-Kincaid) 가독성 점수 병행 (오픈소스 조사 P2-2) | 구조화 비소설 표준 |
 | 6 | **AI 표기** | **AI-generated vs AI-assisted 구분 판정 + 출간 시 공개 문구** (아래 상세) — ⚠️ **AI 생성 표지(이미지)도 AI 표기 정책 대상** (KDP: "이미지·표지 포함", K-3) | KDP 의무 ([KDP Content Guidelines](https://kdp.amazon.com/help/topic/G200672390)) |
 | 7 | 마크다운 정합 | 코드블록·링크·테이블 파싱 오류 0, EPUB 변환 경고 0 | K-3 게이트 |
 | 8 | 메타데이터 | 제목·부제·설명·키워드(7개)·카테고리 2개·저자(펜네임) 검수 | KDP 검색 노출 |
+
+**문법/맞춤법 병행 (P2-3)**: 영어 챕터는 **LanguageTool**(HTTP API), 한국어는 **py-hanspell** — 언어별 도구 병행 (14-shorts §3.3과 동일 규칙, 오픈소스 조사 P2-3)
 
 **AI 표기 상세 (QC #6)**:
 - **AI-generated** = "AI 도구가 실제 콘텐츠 생성 (이후 대폭 수정해도)" — 파이프라인 초안 LLM 생성물은 **AI-generated에 해당** → 출간 시 KDP에 **의무 공개** ([KDP Content Guidelines](https://kdp.amazon.com/help/topic/G200672390), [Authors Guild](https://authorsguild.org/news/amazons-new-disclosure-policy-for-ai-generated-book-content-/))
@@ -242,6 +246,8 @@ KDP 책 챕터 (영어권 워크북/가이드)
 6. 시리즈 전략: 검증된 주제 → 시리즈화
 
 **채널 구분 (OQ-5 결정과 정합)**: KDP 쇼츠는 **영어권 채널 전용** — 한국어 운세 쇼츠 채널과 분리 (14-shorts §5 채널 전략). 쇼츠 CTA 링크는 아마존 책 상세페이지(딥링크)로.
+
+**쇼츠용 책 이미지 (P2-5)**: **3d-book-image-css-generator**로 책 표지 3D 이미지 생성 — KDP 쇼츠 배경·CTA 썸네일·챕터 카드에 활용 (14-shorts §6 시너지, 오픈소스 조사)
 
 ## 10. KDP 개선점 8건 → 반영 위치 매핑표 (NFR-4 추적성)
 

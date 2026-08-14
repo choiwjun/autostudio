@@ -2,7 +2,7 @@
 
 > 작성: 기획팀 · 프로젝트: autostudio · 작업 디렉토리: `pipeline/shorts-kdp-research/`
 > 작성일: 2026-08-14 · 모드: standard (요구사항~기획QA — 구현 제외 per 사용자 Q3(a))
-> 입력: `requirements.md`(R-1~R-6) · `research-report.md`(R-1~R-7) · `research-qa-report.md`(✅ 승인 조건부) · `user-answers.md`
+> 입력: `requirements.md`(R-1~R-6) · `research-report.md`(R-1~R-7) · `research-qa-report.md`(✅ 승인 조건부) · `opensource-report.md` §4 (P1·P2 반영) · `user-answers.md`
 > 개정 대상 문서: `docs/planning/14-shorts-pipeline.md` · `docs/planning/12-kdp-pipeline.md` · `docs/planning/11-fortune-channel.md` §9 (모두 실제 개정 완료)
 
 ## 1. 제품 개요와 목표
@@ -110,8 +110,9 @@
 **규칙/로직**:
 - draft_pipeline 2패스 재활용 (플랫폼=shorts 포맷)
 - 스크립트 길이: 30~45초 (한국어 80~120자) — 리서치 근거: 20~40초 가장 흔함, 상위권 완주율 80~90%
-- 검수: 금지어·허위 주장·길이·후킹 존재
-- TTS: **edge-tts 채택 (OQ-4)** — 자막 텍스트 병행 지원(수동 녹음)
+- 검수: 금지어·허위 주장·길이·후킹 존재 · 문법 — 영어 **LanguageTool**·한국어 **py-hanspell** 병행 (P2-3)
+- **자막 병행 (P2-4)**: **faster-whisper**(MIT)로 음성→자막 자동 생성 — edge-tts 음성과 정합
+- TTS: **edge-tts 채택 (OQ-4)** — 라이선스 **LGPL-3.0(대부분)+MIT(srt_composer)·비공식 API**, 대체 후보 **MeloTTS**(MIT·한국어 지원), 자막 텍스트 병행 지원(수동 녹음)
 - **기술 복잡도: 중** (LLM 호출 + 검수 규칙 + TTS)
 
 **수용 기준**:
@@ -119,7 +120,7 @@
 | AC | Given / When / Then | Edge Case |
 |---|---|---|
 | AC-S2-1 | **Given** 주제 후보 1건 / **When** 스크립트 생성 / **Then** ① 후킹 문장(첫 3초) 포함 ② 30~45초 분량 ③ CTA 포함 ④ 해시태그 3~5개 산출 | • 길이 초과: 재생성 지시 • 금지어 검출: 재생성 |
-| AC-S2-2 | **Given** 스크립트 ready + TTS 라이선스 검증 통과(파일럿 전 게이트) / **When** TTS 실행 / **Then** edge-tts 음성 파일 생성(성공 시), 실패 시 자막만 산출 | • TTS 실패: 자막 폴백, 대시보드 표시 • **라이선스 미검증(비공식 API 우려): 대체재(Piper/Kokoro) 검토 후 교체 (S-4)** |
+| AC-S2-2 | **Given** 스크립트 ready + TTS 라이선스 검증 통과(파일럿 전 게이트) / **When** TTS 실행 / **Then** edge-tts 음성 파일 생성(성공 시), 실패 시 자막만 산출 | • TTS 실패: 자막 폴백, 대시보드 표시 • **라이선스 미검증(비공식 API 우려): 대체재(MeloTTS·MIT·한국어 지원) 우선 검토 후 교체 (S-4)** — ~~Piper~~(아카이브)·~~Kokoro~~(한국어 미지원) 제외 |
 | AC-S2-3 | **Given** 스크립트 완성 / **When** 대시보드 조회 / **Then** 스크립트·해시태그·참고영상·음성파일 다운로드 제공 | • 미검수 상태: draft 표시 |
 
 ### F-3 KDP 주제 선정·책 생성 (Must — R-2)
@@ -129,8 +130,8 @@
 **규칙/로직**:
 - 키워드→주제 변환 (개선점 #4): 영어 현지화 + 아마존 검색 결과 스냅샷 검증 + 한국어 병행 옵션
 - 챕터 6~12개, 일관성 보정 패스, 챕터당 하드 예산 300초
-- QC 8항목 (개선점 #5): 표절 유사성·금지어·사실성·챕터 간 중복·길이(±20%)·AI 표기·마크다운 정합·메타데이터
-- EPUB: ebooklib 조립 + calibre ebook-convert + epubcheck (GH Actions, 의존성 §2.1 — 개선점 #2)
+- QC 8항목 (개선점 #5): 표절 유사성·금지어·사실성·챕터 간 중복(**sentence-transformers** 임베딩 ≥0.8, P2-1)·길이(±20% + **textstat** 가독성, P2-2)·AI 표기·마크다운 정합·메타데이터 · 문법은 영어 LanguageTool·한국어 py-hanspell 병행 (P2-3)
+- EPUB: ebooklib(**AGPL-3.0** — 내부 OK, SaaS 서비스화 시 파생 공개 의무, 대안 pypub MIT) 조립 + calibre ebook-convert + epubcheck (GH Actions, 의존성 §2.1 — 개선점 #2)
 - **기술 복잡도: 높음** (LLM 파이프라인 + EPUB 변환 + QC 규칙)
 
 **수용 기준**:
@@ -247,7 +248,7 @@
 | **OQ-1** 수집 빈도 | **매일 1회** | 쿼터 예산 100 units/일 = 1% — 매일 수집해도 여유 (리서치 R-3 시뮬레이션) |
 | **OQ-2** 주제 비중 **(R-5·Should — 파일럿 게이트)** | **운세 4 + KDP 3 + 일반 3** (10개 소재 → 5개 쇼츠) | 수익 경로별 균형, 파일럿 선정 기준(수요·자동화 궁합·수익 경로·리듬·차별화) 충족 — Should 우선순위로 파일럿 실행 단계에서 확정 |
 | **OQ-3** KDP 파일럿 **(R-5·Should — 파일럿 게이트)** | **"52주 절약 챌린지" 유지 + 아마존 경쟁도 스냅샷 검증 추가** | 시장 수요·수익 모델·자동화 궁합·시리즈 확장 검증 ✅ (개선점 #4·#6 반영) — Should 우선순위로 파일럿 실행 단계에서 확정 |
-| **OQ-4** TTS | **edge-tts 채택** (자막 병행) | 무료·오픈소스, 운세 카드 쇼츠 적합 — 한국어 품질·목소리 저작권은 파일럿 전 검증 |
+| **OQ-4** TTS | **edge-tts 채택** (자막 병행) — 라이선스 LGPL-3.0(대부분)+MIT(srt_composer)·⚠️ 비공식 API | 오픈소스, 운세 카드 쇼츠 적합 — 비공식 API 리스크 시 **MeloTTS**(MIT·한국어 공식 지원) 대체 1순위, 한국어 품질·목소리 저작권은 파일럿 전 검증 (P1-1·P1-3) |
 | **OQ-5** 채널 전략 | **분리 권장** (파일럿: 최소 2채널 한국어/영어) | 알고리즘 주제 일관성 — 파일럿 성과 후 세분화 |
 
 ## 7. 리스크 & 가정

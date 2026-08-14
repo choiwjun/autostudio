@@ -2,6 +2,20 @@
 
 이 프로젝트의 버전 이력. 버전 규칙: 기능 단위로 커밋 메시지에 표기 (비공식 SemVer).
 
+## v29.9 — 2026-08-14 (오픈소스 조사 반영 — 라이선스 정정·TTS 대체재)
+
+### 조사
+- **오픈소스 도구 조사** (55개 실측) — `pipeline/shorts-kdp-research/opensource-report.md` (+html)
+  - GitHub API로 별·라이선스·활발도 실측, 기획 모듈(S-x/K-x) 매핑
+
+### 기획 문서 반영 (P1 4건 + P2 5건)
+- **P1-1**: edge-tts 라이선스 정정 — LGPL-3.0+MIT, 비공식 API 리스크 명시
+- **P1-2**: ebooklib AGPL-3.0 — 내부 사용 OK, SaaS 시 파생 공개 의무, 대안 pypub(MIT)
+- **P1-3**: TTS 대체재 — MeloTTS(MIT·한국어) 1순위 추가, Piper·Kokoro 한국어 미지원 정정
+- **P1-4**: pytrends 아카이브 — 보조·참고용만, 주 소스 API v3
+- **P2**: QC #4 sentence-transformers · QC #5 textstat · 문법 LanguageTool+py-hanspell · 자막 faster-whisper · 3D 책 이미지
+- 대상: 14-shorts-pipeline.md·12-kdp-pipeline.md (md+html) · trd.md·plan.md 갱신
+
 ## v29.8 — 2026-08-14 (쇼츠·KDP 기획 문서 2차 개선 — 제3자 검토 7건 반영)
 
 ### 개선

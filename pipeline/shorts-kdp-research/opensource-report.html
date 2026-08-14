@@ -1,0 +1,1641 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>opensource-report</title>
+<style>
+:root { --accent:#2B5FDB; --bg:#ffffff; --fg:#1a1a2e; --muted:#666; --border:#e2e8f0; --code-bg:#f6f8fa; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#0f1117; --fg:#e6e6e6; --muted:#9ca3af; --border:#2a2f3a; --code-bg:#161b26; }
+}
+* { box-sizing: border-box; }
+body { font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; background:var(--bg);
+       color:var(--fg); line-height:1.7; margin:0; padding:2rem 1rem; }
+main { max-width: 860px; margin: 0 auto; }
+h1 { font-size:1.9rem; border-bottom:3px solid var(--accent); padding-bottom:.4rem; }
+h2 { font-size:1.4rem; margin-top:2.2rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.15rem; margin-top:1.6rem; }
+h4 { font-size:1rem; margin-top:1.2rem; color:var(--accent); }
+a { color:var(--accent); }
+code { background:var(--code-bg); padding:.15em .4em; border-radius:4px; font-size:.9em;
+       font-family:'JetBrains Mono','D2Coding',Consolas,monospace; }
+pre { background:var(--code-bg); padding:1rem; border-radius:8px; overflow-x:auto; border:1px solid var(--border); }
+pre code { background:none; padding:0; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.93rem; }
+th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); font-weight:600; }
+tr:nth-child(even) td { background:rgba(127,127,127,.05); }
+blockquote { border-left:4px solid var(--accent); margin:1rem 0; padding:.5rem 1rem;
+             background:rgba(43,95,219,.06); border-radius:0 6px 6px 0; }
+blockquote p { margin:.3rem 0; }
+hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
+li { margin:.25rem 0; }
+strong { font-weight:700; }
+.meta { color:var(--muted); font-size:.85rem; margin-bottom:1.5rem; }
+</style>
+</head>
+<body>
+<main>
+<div class="meta">📄 opensource-report · 생성: 2026-08-14 18:41</div>
+<h1>쇼츠 + KDP 파이프라인 오픈소스 도구 조사 보고서</h1>
+<blockquote>
+<p><strong>작성</strong>: 리서치팀 · <strong>프로젝트</strong>: autostudio · <strong>작업 디렉토리</strong>: <code>pipeline/shorts-kdp-research/</code><br />
+<strong>작성일</strong>: 2026-08-14 · <strong>대상</strong>: <code>docs/planning/14-shorts-pipeline.md</code> · <code>docs/planning/12-kdp-pipeline.md</code><br />
+<strong>상위 문서</strong>: <code>plan.md</code> · <code>trd.md</code> (기획/기술 요구사항)<br />
+<strong>조사 지시</strong>: 쇼츠·KDP 파이프라인에 유용한 오픈소스 도구 발굴 — 유용성·기능개선 관점 (8개 주제)<br />
+<strong>방법론</strong>: GitHub API 실측(별·활발도·라이선스) + 1차 출처(GitHub 저장소) 우선 + Firecrawl 보조 검증 (2026-08-14)</p>
+</blockquote>
+<hr />
+<h2>1. 요약 (TL;DR)</h2>
+<table>
+<thead>
+<tr>
+<th>조사 주제</th>
+<th>핵심 발견</th>
+<th>기존 기획 대비 시사점</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1. 쇼츠 자동화</td>
+<td>yt-dlp·moviepy·ffmpeg는 안정적. <strong>Remotion은 "완전 오픈소스 아님"</strong> (회사 규모별 라이선스, ⚠️ 오해 소지), <strong>AI-Youtube-Shorts-Generator(⭐4.6k)</strong> 가 Opus Clip류 대안으로 주목</td>
+<td>S-3 편집 자동화는 moviepy 기반 보조 수준 유지 권장, Remotion은 "회사 라이선스 필요" 명시 필요</td>
+</tr>
+<tr>
+<td>2. 트렌드 발굴</td>
+<td><strong>pytrends ⚠️ 아카이브됨(2024-08 마지막 커밋)</strong> — Google Trends 비공식 API, 깨질 수 있음. API v3 <code>mostPopular</code> + 공식 클라이언트가 최선</td>
+<td>S-1의 API v3 우선 원칙 <strong>재확인</strong> — pytrends는 보조·참고용으로만</td>
+</tr>
+<tr>
+<td>3. TTS</td>
+<td><strong>edge-tts 실제 라이선스 = LGPL-3.0</strong> (대부분 파일) + MIT(srt_composer.py) — 비공식 API 리스크는 유지. <strong>Kokoro 한국어 미지원</strong> (9개 코드: 미영·영영·스페인·프랑스·힌디·이탈리아·일본·브라질포르투갈·중국어), <strong>Piper 아카이브됨</strong> → piper1-gpl(GPL-3.0) 계승, <strong>MeloTTS(⭐7.6k, MIT) = 한국어 공식 지원 + 완전 오픈(MIT)인 경량 로컬 TTS</strong> (edge-tts는 비공식 API·LGPL이라 대조적)</td>
+<td>⚠️ <strong>S-4 TTS 게이트 재검토 필요</strong>: 파일럿 전 Kokoro/Piper "한국어 미지원" 확인 → <strong>MeloTTS를 대체 후보로 추가</strong> 권장</td>
+</tr>
+<tr>
+<td>4. 자막/캡션</td>
+<td>Whisper 한국어 WER 8~13% (Tier 2). faster-whisper·whisperX·auto-subtitle·<strong>VideoLingo(⭐18k)</strong> 유효</td>
+<td>S-3 자막 병행 강화 — whisper 기반 자막 생성은 "쇼츠 자막"과 "KDP 검증" 모두에 유효</td>
+</tr>
+<tr>
+<td>5. KDP 전자책</td>
+<td><strong>⚠️ ebooklib 라이선스 = AGPL-3.0</strong> — 기획이 "오픈소스·무료"로만 인지, <strong>상업 배포 시 소스 공개 의무</strong> (내부 사용 시 문제 없음). pypub(MIT)·pandoc(GPL-2.0)·calibre(GPL-3.0)</td>
+<td><strong>K-3 의존성 검토</strong>: ebooklib AGPL은 "내부 도구로만 사용"이면 무해, SaaS 배포 시 주의. pypub(MIT) 대안 후보</td>
+</tr>
+<tr>
+<td>6. 표지/디자인</td>
+<td>Pillow(HPND·BSD류)·ImageMagick 유효. 3D-book-image-css-generator(⭐658, MIT) = 쇼츠용 3D 책 이미지</td>
+<td>K-3 표지 + S-5 쇼츠용 3D 책 이미지에 활용 가능</td>
+</tr>
+<tr>
+<td>7. 책 홍보/메타</td>
+<td>아마존 공개 API 여전히 없음(스크래퍼는 ToS 리스크). <strong>OpenLibrary API·Google Books API·isbnlib(LGPL-3.0) = 무료 메타데이터 대안</strong></td>
+<td>K-1 스냅샷 + K-4 모니터링 보강: ISBN/메타데이터는 무료 API로 대체 가능</td>
+</tr>
+<tr>
+<td>8. 파이프라인 보강</td>
+<td>textstat(MIT)·sentence-transformers(Apache-2.0)·<strong>LanguageTool(⭐14.8k, LGPL-2.1, ⚠️ 한국어 미지원)</strong>·py-hanspell(MIT, 네이버 비공식 API)</td>
+<td>K-2 QC 8항목 보강: 챕터 중복(임베딩)·가독성(textstat)·문법(한국어는 py-hanspell만)</td>
+</tr>
+</tbody>
+</table>
+<h3>⚠️ 기획 문서 수정 필요 사항 (가장 중요한 발견 4건)</h3>
+<ol>
+<li><strong>edge-tts 라이선스 정정</strong>: <code>trd.md</code>·<code>14-shorts.md</code>에 "오픈소스·무료"만 적혀 있으나 <strong>실제 라이선스는 LGPL-3.0</strong>(대부분 파일) — 상업 이용 시 <strong>LGPL 준수(동적 링크·고지) 필요</strong>, 비공식 API(MS 서버 활용) 리스크는 그대로</li>
+<li><strong>ebooklib AGPL-3.0</strong>: <code>12-kdp.md</code>·<code>trd.md</code>의 "오픈소스·무료" 표기 → <strong>AGPL-3.0 = 상업 배포 시 파생 코드 공개 의무</strong>. 내부 파이프라인으로만 쓰면 무해, 외부 서비스화 시 주의. 대안: <strong>pypub(MIT, 간단 EPUB 생성)</strong></li>
+<li><strong>Kokoro·Piper 한국어 미지원</strong>: <code>14-shorts.md</code> §3.3 "Piper(한국어 모델 존재)·Kokoro" 표기는 <strong>현 시점 부정확</strong> — Piper 아카이브(2025-10), Kokoro 8개 언어 중 한국어 없음. <strong>MeloTTS(MIT, 한국어 지원)</strong> 를 대체 후보로 추가</li>
+<li><strong>pytrends 아카이브</strong>: Google Trends 비공식 API — "보조"로만 사용, 주 소스는 API v3 유지</li>
+</ol>
+<hr />
+<h2>2. 요약표 (전체 도구)</h2>
+<h3>2.1 쇼츠 자동화 (주제 1)</h3>
+<table>
+<thead>
+<tr>
+<th>도구</th>
+<th>GitHub 별</th>
+<th>라이선스</th>
+<th>활발도(마지막 커밋)</th>
+<th>한국어</th>
+<th>기존 기획 대체/보강</th>
+<th>적용 모듈</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>yt-dlp</strong></td>
+<td>⭐184,395</td>
+<td>Unlicense</td>
+<td>2026-08 (매우 활발)</td>
+<td>✅</td>
+<td>보강 (S-1 보조·제한적)</td>
+<td>S-1</td>
+</tr>
+<tr>
+<td><strong>youtube-transcript-api</strong></td>
+<td>⭐8,039</td>
+<td>MIT</td>
+<td>2026-05</td>
+<td>✅</td>
+<td>보강 (자막 수집)</td>
+<td>S-1·S-3</td>
+</tr>
+<tr>
+<td><strong>moviepy</strong></td>
+<td>⭐14,848</td>
+<td>MIT</td>
+<td>2026-08</td>
+<td>—</td>
+<td>보강 (편집 자동화 참고)</td>
+<td>S-3</td>
+</tr>
+<tr>
+<td><strong>FFmpeg</strong></td>
+<td>⭐63,295</td>
+<td>LGPL/GPL</td>
+<td>2026-08</td>
+<td>—</td>
+<td>보강 (핵심 미디어 처리)</td>
+<td>S-3</td>
+</tr>
+<tr>
+<td><strong>Remotion</strong></td>
+<td>⭐56,297</td>
+<td>⚠️ 회사 라이선스(2-tier)</td>
+<td>2026-08</td>
+<td>—</td>
+<td>⚠️ 완전 오픈 아님 — 회사 규모별 유료</td>
+<td>S-3 (검토만)</td>
+</tr>
+<tr>
+<td><strong>Shotcut</strong></td>
+<td>⭐14,918</td>
+<td>GPL-3.0</td>
+<td>2026-08</td>
+<td>✅</td>
+<td>보강 (수동 편집 GUI)</td>
+<td>S-3 (사용자 도구)</td>
+</tr>
+<tr>
+<td><strong>AI-Youtube-Shorts-Generator</strong></td>
+<td>⭐4,591</td>
+<td>⚠️ 라이선스 없음</td>
+<td>2026-07</td>
+<td>—</td>
+<td>⚠️ 참고 (Opus Clip 대안)</td>
+<td>S-3 (벤치마크)</td>
+</tr>
+<tr>
+<td><strong>autocut</strong></td>
+<td>⭐7,784</td>
+<td>Apache-2.0</td>
+<td>2024-10</td>
+<td>✅</td>
+<td>보강 (텍스트 기반 컷)</td>
+<td>S-3 (참고)</td>
+</tr>
+</tbody>
+</table>
+<h3>2.2 트렌드/주제 발굴 (주제 2)</h3>
+<table>
+<thead>
+<tr>
+<th>도구</th>
+<th>GitHub 별</th>
+<th>라이선스</th>
+<th>활발도</th>
+<th>한국어</th>
+<th>대체/보강</th>
+<th>적용 모듈</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>google-api-python-client</strong></td>
+<td>⭐8,900</td>
+<td>Apache-2.0</td>
+<td>2026-07</td>
+<td>—</td>
+<td>보강 (공식 클라이언트)</td>
+<td>S-1</td>
+</tr>
+<tr>
+<td><strong>pytrends</strong></td>
+<td>⭐3,731</td>
+<td>Apache-2.0</td>
+<td>⚠️ <strong>2024-08 (아카이브)</strong></td>
+<td>✅</td>
+<td>⚠️ 보조만 (비공식 API)</td>
+<td>S-1 (보조)</td>
+</tr>
+<tr>
+<td><strong>Trending-YouTube-Scraper</strong></td>
+<td>⭐369</td>
+<td>BSD-2-Clause</td>
+<td>2020-05</td>
+<td>—</td>
+<td>❌ 구식 — 미사용 권장</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Invidious API</strong></td>
+<td>⭐22,630</td>
+<td>AGPL-3.0</td>
+<td>2026-08</td>
+<td>—</td>
+<td>참고 (대체 프론트엔드)</td>
+<td>S-1 (참고)</td>
+</tr>
+</tbody>
+</table>
+<h3>2.3 TTS/음성 (주제 3)</h3>
+<table>
+<thead>
+<tr>
+<th>도구</th>
+<th>GitHub 별</th>
+<th>라이선스</th>
+<th>활발도</th>
+<th>한국어</th>
+<th>대체/보강</th>
+<th>적용 모듈</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>edge-tts</strong></td>
+<td>⭐11,725</td>
+<td>⚠️ <strong>LGPL-3.0</strong>(대부분)</td>
+<td>2026-03</td>
+<td>✅ (ko-KR 10+ 목소리)</td>
+<td>⚠️ 현행 채택 — LGPL 준수 필요</td>
+<td>S-3</td>
+</tr>
+<tr>
+<td><strong>MeloTTS</strong></td>
+<td>⭐7,579</td>
+<td>MIT</td>
+<td>2024-12</td>
+<td>✅ <strong>한국어 지원</strong></td>
+<td>🆕 <strong>대체 후보 추가 권장</strong></td>
+<td>S-3</td>
+</tr>
+<tr>
+<td><strong>Piper</strong></td>
+<td>⭐11,278</td>
+<td>MIT</td>
+<td>⚠️ <strong>2025-10 아카이브</strong></td>
+<td>⚠️ 커뮤니티 모델만</td>
+<td>⚠️ 기획 표기 부정확 — piper1-gpl 계승</td>
+<td>S-3</td>
+</tr>
+<tr>
+<td><strong>piper1-gpl</strong></td>
+<td>⭐5,121</td>
+<td>GPL-3.0</td>
+<td>2026-08</td>
+<td>⚠️ 커뮤니티 모델</td>
+<td>🆕 후속 확인</td>
+<td>S-3</td>
+</tr>
+<tr>
+<td><strong>Kokoro</strong></td>
+<td>⭐8,414</td>
+<td>Apache-2.0</td>
+<td>2025-08</td>
+<td>❌ <strong>한국어 미지원</strong> (8개 언어)</td>
+<td>⚠️ 기획 표기 부정확</td>
+<td>S-3</td>
+</tr>
+<tr>
+<td><strong>Coqui TTS</strong></td>
+<td>⭐45,896</td>
+<td>MPL-2.0</td>
+<td>2024-08 (사실상 중단)</td>
+<td>✅ (XTTS)</td>
+<td>⚠️ 회사 해체 — idiap fork로 계승</td>
+<td>S-3</td>
+</tr>
+<tr>
+<td><strong>gTTS</strong></td>
+<td>⭐2,626</td>
+<td>MIT</td>
+<td>2026-04</td>
+<td>✅</td>
+<td>보강 (edge-tts와 동일 비공식 성격)</td>
+<td>S-3</td>
+</tr>
+<tr>
+<td><strong>OpenVoice</strong></td>
+<td>⭐37,144</td>
+<td>MIT</td>
+<td>2025-04</td>
+<td>⚠️</td>
+<td>참고 (음성 복제 — 필요 시)</td>
+<td>S-3</td>
+</tr>
+<tr>
+<td><strong>bark</strong></td>
+<td>⭐39,238</td>
+<td>MIT</td>
+<td>2024-08</td>
+<td>❌</td>
+<td>참고 (생성형 오디오)</td>
+<td>S-3</td>
+</tr>
+<tr>
+<td><strong>F5-TTS</strong></td>
+<td>⭐15,119</td>
+<td>MIT(코드)/CC-BY-NC(모델)</td>
+<td>2026-07</td>
+<td>❌ 공식 미지원</td>
+<td>참고 (제로샷 음성 복제)</td>
+<td>S-3</td>
+</tr>
+<tr>
+<td><strong>Fish-Speech</strong></td>
+<td>⭐32,186</td>
+<td>⚠️ 비상업(연구용)</td>
+<td>2026-08</td>
+<td>✅</td>
+<td>❌ 상업 사용 제한</td>
+<td>S-3</td>
+</tr>
+<tr>
+<td><strong>ChatTTS</strong></td>
+<td>⭐39,772</td>
+<td>AGPL-3.0</td>
+<td>2026-04</td>
+<td>❌ (중·영)</td>
+<td>❌</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h3>2.4 자막/캡션 (주제 4)</h3>
+<table>
+<thead>
+<tr>
+<th>도구</th>
+<th>GitHub 별</th>
+<th>라이선스</th>
+<th>활발도</th>
+<th>한국어</th>
+<th>대체/보강</th>
+<th>적용 모듈</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>openai-whisper</strong></td>
+<td>⭐107,250</td>
+<td>MIT</td>
+<td>2026-07</td>
+<td>✅ WER 8~13%</td>
+<td>보강 (자막 생성)</td>
+<td>S-3·K-2</td>
+</tr>
+<tr>
+<td><strong>faster-whisper</strong></td>
+<td>⭐24,900</td>
+<td>MIT</td>
+<td>2025-11</td>
+<td>✅</td>
+<td>보강 (CTranslate2 가속)</td>
+<td>S-3</td>
+</tr>
+<tr>
+<td><strong>whisperX</strong></td>
+<td>⭐23,569</td>
+<td>BSD-2-Clause</td>
+<td>2026-07</td>
+<td>✅</td>
+<td>보강 (단어 타임스탬프·화자분리)</td>
+<td>S-3</td>
+</tr>
+<tr>
+<td><strong>auto-subtitle</strong></td>
+<td>⭐2,275</td>
+<td>MIT</td>
+<td>2024-07</td>
+<td>—</td>
+<td>보강 (자막 오버레이)</td>
+<td>S-3</td>
+</tr>
+<tr>
+<td><strong>VideoLingo</strong></td>
+<td>⭐18,149</td>
+<td>Apache-2.0</td>
+<td>2026-07</td>
+<td>✅</td>
+<td>보강 (자막 절단·번역·더빙)</td>
+<td>S-3</td>
+</tr>
+<tr>
+<td><strong>VideoCaptioner</strong></td>
+<td>⭐15,628</td>
+<td>GPL-3.0</td>
+<td>2026-07</td>
+<td>✅</td>
+<td>보강 (LLM 자막)</td>
+<td>S-3</td>
+</tr>
+<tr>
+<td><strong>pysubs2</strong></td>
+<td>⭐436</td>
+<td>MIT</td>
+<td>2026-07</td>
+<td>—</td>
+<td>보강 (SRT/VTT 파싱)</td>
+<td>S-3·K-3</td>
+</tr>
+</tbody>
+</table>
+<h3>2.5 KDP 전자책 생성 (주제 5)</h3>
+<table>
+<thead>
+<tr>
+<th>도구</th>
+<th>GitHub 별</th>
+<th>라이선스</th>
+<th>활발도</th>
+<th>한국어</th>
+<th>대체/보강</th>
+<th>적용 모듈</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>ebooklib</strong></td>
+<td>⭐1,801</td>
+<td>⚠️ <strong>AGPL-3.0</strong></td>
+<td>2026-07</td>
+<td>—</td>
+<td>⚠️ 현행 채택 — AGPL 주의</td>
+<td>K-3</td>
+</tr>
+<tr>
+<td><strong>pypub</strong></td>
+<td>⭐285</td>
+<td>MIT</td>
+<td>2023-07</td>
+<td>—</td>
+<td>🆕 대안 (간단 EPUB, MIT)</td>
+<td>K-3</td>
+</tr>
+<tr>
+<td><strong>pandoc</strong></td>
+<td>⭐45,863</td>
+<td>GPL-2.0</td>
+<td>2026-08</td>
+<td>—</td>
+<td>보강 (MD→EPUB/DOCX)</td>
+<td>K-3</td>
+</tr>
+<tr>
+<td><strong>calibre</strong></td>
+<td>⭐25,634</td>
+<td>GPL-3.0</td>
+<td>2026-08</td>
+<td>✅</td>
+<td>현행 채택 (ebook-convert)</td>
+<td>K-3</td>
+</tr>
+<tr>
+<td><strong>epubcheck</strong></td>
+<td>⭐1,946</td>
+<td>BSD-3-Clause</td>
+<td>2026-03 (v5.3.0)</td>
+<td>—</td>
+<td>현행 채택</td>
+<td>K-3</td>
+</tr>
+<tr>
+<td><strong>Sigil</strong></td>
+<td>⭐6,925</td>
+<td>GPL-3.0</td>
+<td>2026-08</td>
+<td>—</td>
+<td>참고 (GUI 에디터)</td>
+<td>K-3</td>
+</tr>
+<tr>
+<td><strong>auto-ebook-generator</strong></td>
+<td>⭐6</td>
+<td>⚠️ 라이선스 없음</td>
+<td>2026-08</td>
+<td>—</td>
+<td>⚠️ 기획 참고 — 라이선스 없어 채택 곤란</td>
+<td>K-2</td>
+</tr>
+<tr>
+<td><strong>storycraftr</strong></td>
+<td>⭐156</td>
+<td>MIT</td>
+<td>2026-03</td>
+<td>—</td>
+<td>참고 (AI 책 CLI)</td>
+<td>K-2</td>
+</tr>
+<tr>
+<td><strong>mdBook</strong></td>
+<td>⭐22,071</td>
+<td>MPL-2.0</td>
+<td>2026-08</td>
+<td>—</td>
+<td>참고 (웹 책 — EPUB 아님)</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h3>2.6 표지/디자인 (주제 6)</h3>
+<table>
+<thead>
+<tr>
+<th>도구</th>
+<th>GitHub 별</th>
+<th>라이선스</th>
+<th>활발도</th>
+<th>한국어</th>
+<th>대체/보강</th>
+<th>적용 모듈</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Pillow</strong></td>
+<td>⭐13,752</td>
+<td>HPND(BSD류)</td>
+<td>2026-08</td>
+<td>—</td>
+<td>현행 채택 유지</td>
+<td>K-3</td>
+</tr>
+<tr>
+<td><strong>ImageMagick</strong></td>
+<td>⭐17,163</td>
+<td>ImageMagick 라이선스</td>
+<td>2026-08</td>
+<td>—</td>
+<td>보강 (CLI 이미지 처리)</td>
+<td>K-3</td>
+</tr>
+<tr>
+<td><strong>3d-book-image-css-generator</strong></td>
+<td>⭐658</td>
+<td>MIT</td>
+<td>2023-04</td>
+<td>—</td>
+<td>🆕 쇼츠용 3D 책 이미지</td>
+<td>S-5·K-3</td>
+</tr>
+</tbody>
+</table>
+<h3>2.7 책 홍보/메타데이터 (주제 7)</h3>
+<table>
+<thead>
+<tr>
+<th>도구</th>
+<th>GitHub 별</th>
+<th>라이선스</th>
+<th>활발도</th>
+<th>한국어</th>
+<th>대체/보강</th>
+<th>적용 모듈</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>OpenLibrary API</strong></td>
+<td>⭐6,603 (openlibrary)</td>
+<td>AGPL-3.0(서버)</td>
+<td>2026-08</td>
+<td>✅</td>
+<td>🆕 무료 메타데이터 API</td>
+<td>K-1·K-4</td>
+</tr>
+<tr>
+<td><strong>Google Books API</strong></td>
+<td>— (구글 서비스)</td>
+<td>무료 API</td>
+<td>상시</td>
+<td>✅</td>
+<td>🆕 무료 메타데이터 API</td>
+<td>K-1·K-4</td>
+</tr>
+<tr>
+<td><strong>isbnlib</strong></td>
+<td>⭐279</td>
+<td>LGPL-3.0</td>
+<td>2024-08</td>
+<td>—</td>
+<td>🆕 ISBN 검증·변환</td>
+<td>K-1·K-4</td>
+</tr>
+<tr>
+<td><strong>amazon-scraper-python</strong></td>
+<td>⭐878</td>
+<td>MIT</td>
+<td>2020-10</td>
+<td>—</td>
+<td>⚠️ 구식 — 아마존 ToS 리스크</td>
+<td>K-1 (참고만)</td>
+</tr>
+<tr>
+<td><strong>tiktok-scraper</strong></td>
+<td>⭐5,166</td>
+<td>없음</td>
+<td>2023-05</td>
+<td>—</td>
+<td>⚠️ ToS 리스크</td>
+<td>S-1 (참고만)</td>
+</tr>
+</tbody>
+</table>
+<h3>2.8 파이프라인 보강 (주제 8)</h3>
+<table>
+<thead>
+<tr>
+<th>도구</th>
+<th>GitHub 별</th>
+<th>라이선스</th>
+<th>활발도</th>
+<th>한국어</th>
+<th>대체/보강</th>
+<th>적용 모듈</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>textstat</strong></td>
+<td>⭐1,377</td>
+<td>MIT</td>
+<td>2026-02</td>
+<td>—</td>
+<td>🆕 가독성 지표 (QC 보강)</td>
+<td>K-2</td>
+</tr>
+<tr>
+<td><strong>sentence-transformers</strong></td>
+<td>⭐19,002</td>
+<td>Apache-2.0</td>
+<td>2026-08</td>
+<td>✅</td>
+<td>🆕 챕터 중복 검출 (임베딩)</td>
+<td>K-2</td>
+</tr>
+<tr>
+<td><strong>LanguageTool</strong></td>
+<td>⭐14,796</td>
+<td>LGPL-2.1</td>
+<td>2026-08</td>
+<td>❌ 한국어 미지원</td>
+<td>🆕 영어 문법 검사</td>
+<td>K-2</td>
+</tr>
+<tr>
+<td><strong>language-tool-python</strong></td>
+<td>⭐529</td>
+<td>GPL-3.0</td>
+<td>2026-08</td>
+<td>❌</td>
+<td>🆕 LT 파이썬 래퍼</td>
+<td>K-2</td>
+</tr>
+<tr>
+<td><strong>py-hanspell</strong></td>
+<td>⭐360</td>
+<td>MIT</td>
+<td>2024-04</td>
+<td>✅</td>
+<td>🆕 한국어 맞춤법 (네이버 비공식 API)</td>
+<td>K-2·S-3</td>
+</tr>
+<tr>
+<td><strong>PySceneDetect</strong></td>
+<td>⭐5,098</td>
+<td>BSD-3-Clause</td>
+<td>2026-08</td>
+<td>—</td>
+<td>🆕 장면 전환 감지 (쇼츠 컷)</td>
+<td>S-3</td>
+</tr>
+<tr>
+<td><strong>Prefect</strong></td>
+<td>⭐23,619</td>
+<td>Apache-2.0</td>
+<td>2026-08</td>
+<td>—</td>
+<td>🆕 배치 오케스트레이션</td>
+<td>S-4·K-4</td>
+</tr>
+<tr>
+<td><strong>n8n</strong></td>
+<td>⭐200,593</td>
+<td>⚠️ Sustainable Use(fair-code)</td>
+<td>2026-08</td>
+<td>—</td>
+<td>⚠️ OSI 아님 — 무료 사용은 가능</td>
+<td>S-4 (참고)</td>
+</tr>
+<tr>
+<td><strong>Dify</strong></td>
+<td>⭐152,430</td>
+<td>⚠️ Dify 라이선스(fair-code)</td>
+<td>2026-08</td>
+<td>✅</td>
+<td>⚠️ 참고</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Apache Airflow</strong></td>
+<td>⭐46,477</td>
+<td>Apache-2.0</td>
+<td>2026-08</td>
+<td>—</td>
+<td>참고 (과함)</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Huginn</strong></td>
+<td>⭐49,789</td>
+<td>MIT</td>
+<td>2026-08</td>
+<td>—</td>
+<td>참고 (에이전트 자동화)</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>3. 도구별 상세 (8개 주제)</h2>
+<h3>주제 1. 유튜브 쇼츠 자동화</h3>
+<h4>1.1 yt-dlp (⭐184,395 · Unlicense · 활발)</h4>
+<ul>
+<li><strong>기능</strong>: 유튜브·4,000+ 사이트 오디오/비디오 다운로더. 자막·메타데이터·재생목록 지원</li>
+<li><strong>라이선스</strong>: Unlicense (퍼블릭 도메인) — 상업 사용 무제한</li>
+<li><strong>활발도</strong>: ⭐184k, 2026-08 커밋, 포크 15.9k — <strong>가장 활발한 다운로더</strong></li>
+<li><strong>한국어</strong>: 해당 없음 (다운로더)</li>
+<li><strong>기존 기획 대비</strong>: <code>14-shorts.md</code> §2.2는 yt-dlp를 "ToS 위반 리스크"로 제한적 사용만 명시 — <strong>유지 타당</strong> (2020 RIAA DMCA 선례). 단, 파일럿에서 <strong>참고 영상 다운로드(소재 분석용)</strong> 용도로는 제한적 사용 가능</li>
+<li><strong>적용 모듈</strong>: S-1 (보조·제한적), S-3 (참고 영상 확보 시)</li>
+</ul>
+<h4>1.2 youtube-transcript-api (⭐8,039 · MIT · 2026-05)</h4>
+<ul>
+<li><strong>기능</strong>: 유튜브 자막/트랜스크립트를 API로 가져옴 (자동 생성 자막 포함). 비공식 API지만 널리 사용</li>
+<li><strong>라이선스</strong>: MIT — 상업 사용 가능</li>
+<li><strong>활발도</strong>: 2026-05 커밋, 이슈 30건 — <strong>활발</strong></li>
+<li><strong>기존 기획 대비</strong>: <code>14-shorts.md</code> §2.1은 <code>captions.list</code>(API v3, 50 units) "미사용 권장" — <strong>이 도구로 자막 수집 시 쿼터 절약 + 자막 기반 소재 발굴 가능</strong> (검색 대신 자막 키워드 집계)</li>
+<li><strong>적용 모듈</strong>: S-1 (자막 수집), S-3 (스크립트 참고)</li>
+</ul>
+<h4>1.3 moviepy (⭐14,848 · MIT · 2026-08)</h4>
+<ul>
+<li><strong>기능</strong>: Python 비디오 편집 — 클립 자르기·합치기·텍스트 오버레이·오디오 믹싱</li>
+<li><strong>라이선스</strong>: MIT — 상업 사용 가능</li>
+<li><strong>활발도</strong>: 2026-08 커밋 — 활발 (moviepy2로 이전 중, 기존 1.x 유지보수)</li>
+<li><strong>기존 기획 대비</strong>: 기획은 "영상 편집(Shotcut/CapCut)은 사용자 수동" — <strong>moviepy를 활용한 자동 편집은 정책 리스크 없이 가능</strong> (업로드만 수동). 예: 자막 오버레이 영상 자동 생성 → 사용자가 Shotcut으로 최종 편집</li>
+<li><strong>적용 모듈</strong>: S-3 (자동 편집 보조), S-5 (3D 책 이미지 영상화)</li>
+</ul>
+<h4>1.4 FFmpeg (⭐63,295 · LGPL/GPL 이중 · 2026-08)</h4>
+<ul>
+<li><strong>기능</strong>: 미디어 처리 표준 — 트랜스코딩·컷·자막 합성·오디오 추출</li>
+<li><strong>라이선스</strong>: LGPL(대부분 빌드) / GPL(일부 빌드) — 상업 사용 가능 (LGPL 준수 시)</li>
+<li><strong>활발도</strong>: 2026-08 커밋 — <strong>표준 유지</strong></li>
+<li><strong>적용 모듈</strong>: S-3 (moviepy 백엔드), K-3 (표지 리사이즈 등)</li>
+</ul>
+<h4>1.5 Remotion (⭐56,297 · ⚠️ 회사 라이선스 · 2026-08)</h4>
+<ul>
+<li><strong>기능</strong>: React로 비디오를 코드로 제작 — 프로그래매틱 모션 그래픽·애니메이션</li>
+<li><strong>라이선스</strong>: ⚠️ <strong>완전 오픈소스 아님</strong> — 개인/소규모 회사는 무료, <strong>일정 규모 이상 회사는 유료 라이선스 필요</strong> (2-tier)</li>
+<li><strong>활발도</strong>: 2026-08 커밋 — 활발</li>
+<li><strong>기존 기획 대비</strong>: ⚠️ <strong>기획 문서에서 "오픈소스"로 오인하지 않도록 주의</strong> — 쇼츠 자동화에 Remotion 채택 시 라이선스 비용 검토 필요. <strong>파일럿 단계에서는 불필요</strong> (간단 카드형 쇼츠는 moviepy/자막으로 충분)</li>
+<li><strong>적용 모듈</strong>: S-3 (검토만 — 고급 애니메이션 필요 시)</li>
+</ul>
+<h4>1.6 Shotcut (⭐14,918 · GPL-3.0 · 2026-08)</h4>
+<ul>
+<li><strong>기능</strong>: 크로스플랫폼 GUI 영상 편집기 (Qt)</li>
+<li><strong>라이선스</strong>: GPL-3.0 — 상업 사용 가능 (배포 시 GPL 준수)</li>
+<li><strong>활발도</strong>: 2026-08 커밋 — 활발</li>
+<li><strong>기존 기획 대비</strong>: 기획의 "사용자 수동 편집 도구"로 <strong>현행 유지</strong> — CLI 자동화는 제한적 (프로젝트 파일 XML 기반)</li>
+<li><strong>적용 모듈</strong>: S-3 (사용자 도구)</li>
+</ul>
+<h4>1.7 AI-Youtube-Shorts-Generator (⭐4,591 · ⚠️ 라이선스 없음 · 2026-07)</h4>
+<ul>
+<li><strong>기능</strong>: 롱폼 영상 → 9:16 쇼츠 자동 변환 (LLM 하이라이트 검출 + Whisper 자막 + 자동 세로 크롭). Opus Clip/Vidyo.ai 대안</li>
+<li><strong>라이선스</strong>: ⚠️ <strong>라이선스 파일 없음</strong> — 상업 사용 법적 불명확</li>
+<li><strong>활발도</strong>: 2026-07 커밋 — 활발</li>
+<li><strong>기존 기획 대비</strong>: 기획은 "스크립트 생성까지 자동화, 편집 수동" — 이 도구는 <strong>편집까지 자동화</strong>하는 참고 사례. 단, 라이선스 불명확으로 <strong>직접 채택보다 아키텍처 참고</strong> 권장</li>
+<li><strong>적용 모듈</strong>: S-3 (벤치마크·아키텍처 참고)</li>
+</ul>
+<h4>1.8 autocut (⭐7,784 · Apache-2.0 · 2024-10)</h4>
+<ul>
+<li><strong>기능</strong>: 텍스트 편집기처럼 영상 자르기 — 자막 기반 컷·제거 (중국어 중심, 한국어 자막 지원)</li>
+<li><strong>라이선스</strong>: Apache-2.0 — 상업 사용 가능</li>
+<li><strong>활발도</strong>: 2024-10 — 개발 소강</li>
+<li><strong>적용 모듈</strong>: S-3 (참고 — 자막 기반 컷 자동화)</li>
+</ul>
+<hr />
+<h3>주제 2. 유튜브 트렌드/인기 주제 발굴</h3>
+<h4>2.1 google-api-python-client (⭐8,900 · Apache-2.0 · 2026-07)</h4>
+<ul>
+<li><strong>기능</strong>: Google 공식 API 클라이언트 (YouTube Data API v3 포함)</li>
+<li><strong>라이선스</strong>: Apache-2.0 — 상업 사용 가능</li>
+<li><strong>활발도</strong>: 2026-07 커밋 — 활발</li>
+<li><strong>기존 기획 대비</strong>: <code>trd.md</code> §4.1 YouTube API 연동 시 <strong>공식 클라이언트 사용 권장</strong> (자체 HTTP 구현 대신) — 쿼터·에러·백오프 처리 표준화</li>
+<li><strong>적용 모듈</strong>: S-1 (핵심)</li>
+</ul>
+<h4>2.2 pytrends (⭐3,731 · Apache-2.0 · ⚠️ 2024-08 아카이브)</h4>
+<ul>
+<li><strong>기능</strong>: Google Trends 비공식 API (키워드 트렌드·인기 검색어)</li>
+<li><strong>라이선스</strong>: Apache-2.0</li>
+<li><strong>활발도</strong>: ⚠️ <strong>2024-08 마지막 커밋, 아카이브됨</strong> — Google HTML 구조 변경 시 깨질 수 있음</li>
+<li><strong>한국어</strong>: 지원 (지역 필터)</li>
+<li><strong>기존 기획 대비</strong>: 기획은 "네이버 '곧 뜰' + 유튜브 API"만 사용 — <strong>pytrends 추가는 선택적</strong>. 아카이브 상태라 <strong>주 소스로 부적합</strong>, 보조·교차 검증용으로만</li>
+<li><strong>적용 모듈</strong>: S-1 (보조·참고)</li>
+</ul>
+<h4>2.3 Invidious (⭐22,630 · AGPL-3.0 · 2026-08)</h4>
+<ul>
+<li><strong>기능</strong>: 유튜브 대체 프론트엔드 + 공개 API (트렌딩·검색·영상 메타)</li>
+<li><strong>라이선스</strong>: AGPL-3.0 — 서비스 배포 시 소스 공개</li>
+<li><strong>활발도</strong>: 2026-08 — 활발</li>
+<li><strong>기존 기획 대비</strong>: API v3 쿼터 절약 대안이지만 <strong>ToS 리스크·AGPL 조건</strong> — 기획의 "API v3 우선" 원칙 유지, 참고만</li>
+<li><strong>적용 모듈</strong>: S-1 (참고)</li>
+</ul>
+<hr />
+<h3>주제 3. TTS/음성 (⚠️ 기획 S-4 게이트 재검토 필요)</h3>
+<h4>3.1 edge-tts (⭐11,725 · ⚠️ LGPL-3.0 · 2026-03)</h4>
+<ul>
+<li><strong>기능</strong>: Microsoft Edge 온라인 TTS 서비스 비공식 API — <strong>한국어 10+ 목소리</strong> (ko-KR-SunHiNeural, InJoonNeural, HyunsuNeural 등)</li>
+<li><strong>라이선스</strong>: ⚠️ <strong>실측 결과 — 대부분 파일 LGPL-3.0, srt_composer.py만 MIT</strong> (기존 기획의 "오픈소스·무료" 표기는 부정확). 비공식 API(MS 서버 활용) 특성은 그대로 — <strong>상업 쇼츠 음성 사용 시 MS 약관 위반 소지 유지</strong></li>
+<li><strong>활발도</strong>: 2026-03 커밋, 이슈 3건 — 유지보수 소강</li>
+<li><strong>기존 기획 대비</strong>: ⚠️ <strong><code>trd.md</code>·<code>14-shorts.md</code> 라이선스 표기 수정 필요</strong> — "LGPL-3.0 (srt_composer는 MIT)" 명시. 파일럿 전 게이트에서 <strong>LGPL 준수(고지·동적 링크) + 상업성 재검토</strong> 필요</li>
+<li><strong>적용 모듈</strong>: S-3 (현행), S-4 (게이트 재검토)</li>
+</ul>
+<h4>3.2 MeloTTS (⭐7,579 · MIT · 2024-12) — 🆕 대체 후보 추가 권장</h4>
+<ul>
+<li><strong>기능</strong>: 다국어 TTS — <strong>영어·스페인어·프랑스어·중국어·일본어·한국어 지원</strong> (MyShell.ai)</li>
+<li><strong>라이선스</strong>: <strong>MIT</strong> — 상업 사용 무제한</li>
+<li><strong>활발도</strong>: 2024-12 마지막 커밋 — 소강 (하지만 라이선스·한국어 지원으로 가치)</li>
+<li><strong>한국어</strong>: ✅ <strong>공식 지원</strong> (음성 샘플 제공)</li>
+<li><strong>기존 기획 대비</strong>: 🆕 <strong><code>14-shorts.md</code> §3.3의 대체재 검토 목록에 MeloTTS 추가 강력 권장</strong> — Kokoro/Piper가 한국어 미지원/아카이브인 상황에서 <strong>한국어 지원 + MIT 라이선스</strong>를 갖춘 유일한 경량 오픈 TTS. CPU 실시간 추론 가능</li>
+<li><strong>적용 모듈</strong>: S-3 (대체 후보), S-4 (게이트)</li>
+</ul>
+<h4>3.3 Piper (⭐11,278 · MIT · ⚠️ 2025-10 아카이브) / piper1-gpl (⭐5,121 · GPL-3.0 · 2026-08)</h4>
+<ul>
+<li><strong>기능</strong>: 로컬 신경망 TTS (경량, 오프라인)</li>
+<li><strong>라이선스</strong>: Piper = MIT (아카이브), piper1-gpl = <strong>GPL-3.0</strong> (계승)</li>
+<li><strong>활발도</strong>: ⚠️ <strong>Piper는 2025-10 아카이브</strong> — 공식 유지보수 중단, <strong>piper1-gpl로 계승</strong> (별도 그룹)</li>
+<li><strong>한국어</strong>: ⚠️ <strong>공식 모델 없음</strong> — 커뮤니티 모델(neurlang/piper-onnx-kss-korean 등)만 존재, 품질·지원 보장 없음</li>
+<li><strong>기존 기획 대비</strong>: ⚠️ <strong><code>14-shorts.md</code> §3.3 "Piper(한국어 모델 존재)" 표기 부정확</strong> — 공식 한국어 모델은 없고 커뮤니티 모델만. 계승자인 piper1-gpl은 GPL-3.0이라 상업 파이프라인 내장 시 주의</li>
+<li><strong>적용 모듈</strong>: S-3 (대체 후보 — 커뮤니티 모델 검증 시)</li>
+</ul>
+<h4>3.4 Kokoro (⭐8,414 · Apache-2.0 · 2025-08)</h4>
+<ul>
+<li><strong>기능</strong>: 경량(82M) 고품질 TTS — Apache-2.0 라이선스 가중치</li>
+<li><strong>라이선스</strong>: Apache-2.0 — 상업 사용 가능</li>
+<li><strong>활발도</strong>: 2025-08 마지막 커밋 — 개발 소강</li>
+<li><strong>한국어</strong>: ❌ <strong>미지원</strong> — 공식 9개 코드 (미영·영영·스페인·프랑스·힌디·이탈리아·일본·브라질포르투갈·중국어) — <strong>한국어 없음</strong> (실측 확인)</li>
+<li><strong>기존 기획 대비</strong>: ⚠️ <strong><code>14-shorts.md</code> §3.3 "Kokoro(오픈소스 TTS)" 표기 부정확</strong> — 한국어 쇼츠에는 <strong>부적합</strong> (영어 KDP 쇼츠에는 유효)</li>
+<li><strong>적용 모듈</strong>: S-3 (영어 KDP 쇼츠용 대체 후보), S-4 (게이트)</li>
+</ul>
+<h4>3.5 Coqui TTS (⭐45,896 · MPL-2.0 · 2024-08)</h4>
+<ul>
+<li><strong>기능</strong>: 딥러닝 TTS 툴킷 — XTTS 다국어 음성 복제 포함</li>
+<li><strong>라이선스</strong>: MPL-2.0 (파일 수준 카피레프트) — 상업 사용 가능 (수정 파일 공개 조건)</li>
+<li><strong>활발도</strong>: ⚠️ 2024-08 마지막 커밋 — <strong>Coqui 회사 해체</strong> (2024), 커뮤니티 fork(idiap/coqui-ai-TTS, ⭐2.3k)로 계승</li>
+<li><strong>한국어</strong>: ✅ XTTS v2 한국어 지원</li>
+<li><strong>적용 모듈</strong>: S-3 (참고 — 음성 복제 필요 시)</li>
+</ul>
+<h4>3.6 gTTS (⭐2,626 · MIT · 2026-04)</h4>
+<ul>
+<li><strong>기능</strong>: Google Translate TTS 비공식 API</li>
+<li><strong>라이선스</strong>: MIT</li>
+<li><strong>한국어</strong>: ✅</li>
+<li><strong>기존 기획 대비</strong>: edge-tts와 동일하게 <strong>비공식 API 특성</strong> — 대체 후보로는 MeloTTS가 우선</li>
+<li><strong>적용 모듈</strong>: S-3 (참고)</li>
+</ul>
+<h4>3.7 기타 TTS (참고)</h4>
+<table>
+<thead>
+<tr>
+<th>도구</th>
+<th>별</th>
+<th>라이선스</th>
+<th>한국어</th>
+<th>비고</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OpenVoice</td>
+<td>⭐37,144</td>
+<td>MIT</td>
+<td>⚠️</td>
+<td>음성 복제 (MyShell)</td>
+</tr>
+<tr>
+<td>bark</td>
+<td>⭐39,238</td>
+<td>MIT</td>
+<td>❌</td>
+<td>생성형 오디오 — 한국어 미지원</td>
+</tr>
+<tr>
+<td>F5-TTS</td>
+<td>⭐15,119</td>
+<td>MIT(코드)/CC-BY-NC(모델)</td>
+<td>❌</td>
+<td>제로샷 복제 — <strong>모델 비상업</strong></td>
+</tr>
+<tr>
+<td>Fish-Speech</td>
+<td>⭐32,186</td>
+<td>⚠️ 비상업</td>
+<td>✅</td>
+<td>S2 모델 연구용 — <strong>상업 제한</strong></td>
+</tr>
+<tr>
+<td>ChatTTS</td>
+<td>⭐39,772</td>
+<td>AGPL-3.0</td>
+<td>❌</td>
+<td>중·영 — 한국어 미지원</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3>주제 4. 자막/캡션 자동화</h3>
+<h4>4.1 openai-whisper (⭐107,250 · MIT · 2026-07)</h4>
+<ul>
+<li><strong>기능</strong>: 음성 인식(STT) — 99개 언어, 한국어 WER 8~13% (Tier 2 수준)</li>
+<li><strong>라이선스</strong>: MIT — 상업 사용 가능</li>
+<li><strong>활발도</strong>: ⭐107k, 2026-07 커밋 — 매우 활발</li>
+<li><strong>한국어</strong>: ✅ (WER 8~13%, 일본어·중국어와 유사 Tier 2)</li>
+<li><strong>기존 기획 대비</strong>: 기획은 자막을 "스크립트에서 생성"만 — <strong>Whisper로 쇼츠 자막 자동 생성</strong> 추가 시 TTS 음성과 정합 가능. 또한 <strong>K-2 QC(챕터 내용 검증)</strong> 에도 활용 가능</li>
+<li><strong>적용 모듈</strong>: S-3 (자막 생성), K-2 (참고)</li>
+</ul>
+<h4>4.2 faster-whisper (⭐24,900 · MIT · 2025-11)</h4>
+<ul>
+<li><strong>기능</strong>: CTranslate2 기반 Whisper 가속 — GPU/CPU 모두 4배+ 빠름, 메모리 절약</li>
+<li><strong>라이선스</strong>: MIT</li>
+<li><strong>한국어</strong>: ✅ (Whisper 모델 재사용)</li>
+<li><strong>적용 모듈</strong>: S-3 (자막 생성 — 배치/서버리스에 적합)</li>
+</ul>
+<h4>4.3 whisperX (⭐23,569 · BSD-2-Clause · 2026-07)</h4>
+<ul>
+<li><strong>기능</strong>: Whisper + 단어 타임스탬프 + 화자 분리(디아라이제이션)</li>
+<li><strong>라이선스</strong>: BSD-2-Clause</li>
+<li><strong>한국어</strong>: ✅</li>
+<li><strong>적용 모듈</strong>: S-3 (단어 단위 자막 스타일링)</li>
+</ul>
+<h4>4.4 auto-subtitle (⭐2,275 · MIT · 2024-07)</h4>
+<ul>
+<li><strong>기능</strong>: 영상에 자막 자동 생성·오버레이 (Whisper + ffmpeg)</li>
+<li><strong>라이선스</strong>: MIT</li>
+<li><strong>적용 모듈</strong>: S-3 (자막 오버레이)</li>
+</ul>
+<h4>4.5 VideoLingo (⭐18,149 · Apache-2.0 · 2026-07)</h4>
+<ul>
+<li><strong>기능</strong>: 자막 절단·번역·정렬·더빙까지 원스톱 (넷플릭스급)</li>
+<li><strong>라이선스</strong>: Apache-2.0</li>
+<li><strong>한국어</strong>: ✅ (번역 대상 지원)</li>
+<li><strong>적용 모듈</strong>: S-3 (자막 번역 — 한국어↔영어 시너지)</li>
+</ul>
+<h4>4.6 VideoCaptioner (⭐15,628 · GPL-3.0 · 2026-07)</h4>
+<ul>
+<li><strong>기능</strong>: LLM 기반 자막 생성·교정·번역 (중국 개발, 다국어)</li>
+<li><strong>라이선스</strong>: GPL-3.0 — 상업 사용 시 파생 배포 조건</li>
+<li><strong>적용 모듈</strong>: S-3 (참고)</li>
+</ul>
+<h4>4.7 pysubs2 (⭐436 · MIT · 2026-07)</h4>
+<ul>
+<li><strong>기능</strong>: SRT/VTT/ASS 자막 파싱·생성·변환</li>
+<li><strong>라이선스</strong>: MIT</li>
+<li><strong>적용 모듈</strong>: S-3 (자막 파일 처리), K-3 (자막형 전자책 검증)</li>
+</ul>
+<hr />
+<h3>주제 5. KDP 전자책 생성 (⚠️ 라이선스 재검토 필요)</h3>
+<h4>5.1 ebooklib (⭐1,801 · ⚠️ AGPL-3.0 · 2026-07)</h4>
+<ul>
+<li><strong>기능</strong>: EPUB2/EPUB3 생성·조작 파이썬 라이브러리</li>
+<li><strong>라이선스</strong>: ⚠️ <strong>AGPL-3.0</strong> — <strong>상업 배포(특히 SaaS) 시 파생 코드 전체 공개 의무</strong></li>
+<li><strong>활발도</strong>: 2026-07 커밋 — 유지보수 중</li>
+<li><strong>기존 기획 대비</strong>: ⚠️ <strong><code>12-kdp.md</code> §2.1·<code>trd.md</code> §1.1의 "오픈소스·무료" 표기 보완 필요</strong> — 내부 파이프라인(개인 사용)으로만 쓰면 AGPL 조건 무해, <strong>Vercel 서버리스에 올려 서비스화하면 AGPL 이슈 발생 가능</strong>. <code>ebook_builder.py</code>가 <strong>자체 실행 스크립트로만 동작</strong>하면 문제 없음 — 단, 라이선스 인지·문서 명시 권장</li>
+<li><strong>대안</strong>: <strong>pypub</strong>(⭐285, MIT) — 간단한 EPUB 생성에 충분. pandoc(GPL-2.0)도 MD→EPUB 지원</li>
+<li><strong>적용 모듈</strong>: K-3 (현행), 대안 검토 시 K-3</li>
+</ul>
+<h4>5.2 pypub (⭐285 · MIT · 2023-07) — 🆕 대안 후보</h4>
+<ul>
+<li><strong>기능</strong>: 파이썬으로 EPUB 생성 (간단·가벼움)</li>
+<li><strong>라이선스</strong>: MIT — 상업 사용 무제한</li>
+<li><strong>활발도</strong>: 2023-07 — 개발 소강 (하지만 MIT + 단순성으로 충분)</li>
+<li><strong>적용 모듈</strong>: K-3 (ebooklib AGPL 우려 시 대체)</li>
+</ul>
+<h4>5.3 pandoc (⭐45,863 · GPL-2.0 · 2026-08)</h4>
+<ul>
+<li><strong>기능</strong>: 범용 마크업 변환기 — MD→EPUB/DOCX/PDF 등</li>
+<li><strong>라이선스</strong>: GPL-2.0 — CLI 도구로 호출 시 파생 아님 (임베딩 시 주의)</li>
+<li><strong>적용 모듈</strong>: K-3 (보강 — DOCX 변환), 12-kdp §2.1 "(선택) pandoc (DOCX)" 현행 유지</li>
+</ul>
+<h4>5.4 calibre (⭐25,634 · GPL-3.0 · 2026-08)</h4>
+<ul>
+<li><strong>기능</strong>: 전자책 관리·변환 (ebook-convert, ebook-polish, ebook-meta)</li>
+<li><strong>라이선스</strong>: GPL-3.0 — CLI 호출은 파생 아님</li>
+<li><strong>적용 모듈</strong>: K-3 (현행 — ebook-convert·ebook-polish --check)</li>
+</ul>
+<h4>5.5 epubcheck (⭐1,946 · BSD-3-Clause · 2026-03)</h4>
+<ul>
+<li><strong>기능</strong>: W3C EPUB 적합성 검사기 (v5.3.0, 2025-09)</li>
+<li><strong>라이선스</strong>: BSD-3-Clause — 상업 사용 무제한</li>
+<li><strong>적용 모듈</strong>: K-3 (현행 — Java 필요, 12-kdp §2.1)</li>
+</ul>
+<h4>5.6 auto-ebook-generator (⭐6 · ⚠️ 라이선스 없음 · 2026-08)</h4>
+<ul>
+<li><strong>기능</strong>: AI 책 생성기 — 아웃라인→드래프트→EPUB/PDF/DOCX</li>
+<li><strong>라이선스</strong>: ⚠️ <strong>라이선스 파일 없음</strong> — 상업 채택 부적합</li>
+<li><strong>기존 기획 대비</strong>: ⚠️ <strong><code>12-kdp.md</code> §2 "구조 참고: auto-ebook-generator"는 "구조 참고"로만 유지</strong> — 코드 직접 사용은 라이선스 불명확으로 곤란. <strong>아키텍처(아웃라인→챕터→조립)는 기획과 동일</strong> — 기획의 자체 구현 방향이 타당</li>
+<li><strong>적용 모듈</strong>: K-2 (구조 참고만)</li>
+</ul>
+<h4>5.7 storycraftr (⭐156 · MIT · 2026-03)</h4>
+<ul>
+<li><strong>기능</strong>: AI 책 작성 CLI (아웃라인·챕터·워드빌딩)</li>
+<li><strong>라이선스</strong>: MIT</li>
+<li><strong>적용 모듈</strong>: K-2 (참고 — 자체 파이프라인 대체 불필요)</li>
+</ul>
+<hr />
+<h3>주제 6. KDP 표지/디자인</h3>
+<h4>6.1 Pillow (⭐13,752 · HPND(BSD류) · 2026-08)</h4>
+<ul>
+<li><strong>기능</strong>: 파이썬 이미지 처리 — 6×9 표지 텍스트 오버레이 (기획 현행)</li>
+<li><strong>라이선스</strong>: HPND (BSD 계열) — 상업 사용 무제한</li>
+<li><strong>적용 모듈</strong>: K-3 (현행 유지)</li>
+</ul>
+<h4>6.2 ImageMagick (⭐17,163 · ImageMagick 라이선스 · 2026-08)</h4>
+<ul>
+<li><strong>기능</strong>: CLI 이미지 처리 — 리사이즈·합성·필터</li>
+<li><strong>라이선스</strong>: ImageMagick 라이선스 (허용적)</li>
+<li><strong>적용 모듈</strong>: K-3 (보강 — 서버리스 제약 시 CLI 폴백)</li>
+</ul>
+<h4>6.3 3d-book-image-css-generator (⭐658 · MIT · 2023-04) — 🆕 추가 후보</h4>
+<ul>
+<li><strong>기능</strong>: 책 표지 이미지에서 3D 책 이미지 생성 (HTML/CSS) — 쇼츠·소셜용</li>
+<li><strong>라이선스</strong>: MIT</li>
+<li><strong>기존 기획 대비</strong>: 🆕 <strong>KDP↔쇼츠 시너지(12-kdp §9)에 활용</strong> — 책 챕터 쇼츠에서 3D 책 표지로 시각적 매력 ↑</li>
+<li><strong>적용 모듈</strong>: S-5 (신규 — 쇼츠용 3D 책 이미지), K-3 (보강)</li>
+</ul>
+<hr />
+<h3>주제 7. 책 홍보/메타데이터</h3>
+<h4>7.1 OpenLibrary API (⭐6,603 · AGPL-3.0(서버) · 2026-08)</h4>
+<ul>
+<li><strong>기능</strong>: 무료 도서 메타데이터 API (ISBN·제목·저자·표지) — 인터넷 아카이브</li>
+<li><strong>라이선스</strong>: 서버 AGPL-3.0, <strong>API 사용은 무료</strong> (API 클라이언트는 파생 아님)</li>
+<li><strong>한국어</strong>: ✅ (한국 서적 메타 일부)</li>
+<li><strong>적용 모듈</strong>: K-1 (주제 검증), K-4 (48h 모니터링 — 표지·메타 확인)</li>
+</ul>
+<h4>7.2 Google Books API (무료 · 상시)</h4>
+<ul>
+<li><strong>기능</strong>: 도서 메타데이터·검색 API (ISBN 조회)</li>
+<li><strong>라이선스</strong>: 무료 API (사용량 제한)</li>
+<li><strong>한국어</strong>: ✅</li>
+<li><strong>적용 모듈</strong>: K-1 (주제 검증 — 아마존 스냅샷 대안), K-4 (모니터링)</li>
+</ul>
+<h4>7.3 isbnlib (⭐279 · LGPL-3.0 · 2024-08)</h4>
+<ul>
+<li><strong>기능</strong>: ISBN 검증·정규화·변환·메타데이터 조회 (여러 소스: OpenLibrary·Google Books 등)</li>
+<li><strong>라이선스</strong>: LGPL-3.0 — 동적 링크 시 상업 사용 가능</li>
+<li><strong>적용 모듈</strong>: K-1 (ISBN 처리), K-4 (출간 후 ISBN 확인)</li>
+</ul>
+<h4>7.4 아마존 스크래퍼류 (amazon-scraper-python ⭐878 · MIT · 2020-10 / tiktok-scraper ⭐5,166)</h4>
+<ul>
+<li><strong>기능</strong>: 아마존/틱톡 제품·콘텐츠 스크래핑</li>
+<li><strong>라이선스</strong>: MIT (amazon-scraper-python), 라이선스 없음 (tiktok-scraper)</li>
+<li>⚠️ <strong>리스크</strong>: 아마존·틱톡 ToS 위반 가능 — 기획의 "스냅샷 방식 유지(제한적)" 원칙 유지, 스크래퍼 직접 채택 비권장</li>
+<li><strong>적용 모듈</strong>: K-1 (참고만)</li>
+</ul>
+<h4>7.5 BookTok 분석 (공개 데이터)</h4>
+<ul>
+<li><strong>기능</strong>: 오픈소스 BookTok 분석 도구는 사실상 미성숙 (검색 결과 대부분 저품질·중단)</li>
+<li><strong>기존 기획 대비</strong>: <strong>BookTok 트렌드는 수동 리서치(12-kdp §9)로 유지</strong> — 별도 오픈소스 발굴 불필요</li>
+<li><strong>적용 모듈</strong>: S-5 (수동)</li>
+</ul>
+<hr />
+<h3>주제 8. 파이프라인 보강 (autostudio 패턴 적용)</h3>
+<h4>8.1 textstat (⭐1,377 · MIT · 2026-02) — 🆕 QC 보강</h4>
+<ul>
+<li><strong>기능</strong>: 가독성 지표 (Flesch-Kincaid 등) — 영어 텍스트 품질</li>
+<li><strong>라이선스</strong>: MIT</li>
+<li><strong>기존 기획 대비</strong>: 🆕 <strong>K-2 QC 8항목 보강</strong> — 챕터 길이(±20%)에 <strong>가독성 스코어</strong> 추가 (영어 워크북 대상)</li>
+<li><strong>적용 모듈</strong>: K-2 (QC #5 길이 보강)</li>
+</ul>
+<h4>8.2 sentence-transformers (⭐19,002 · Apache-2.0 · 2026-08) — 🆕 QC 보강</h4>
+<ul>
+<li><strong>기능</strong>: 문장 임베딩 — 의미 유사도 (paraphrase-multilingual-MiniLM = 50+ 언어)</li>
+<li><strong>라이선스</strong>: Apache-2.0</li>
+<li><strong>한국어</strong>: ✅ (다국어 모델)</li>
+<li><strong>기존 기획 대비</strong>: 🆕 <strong>K-2 QC #4(챕터 간 중복)의 embedding 유사도 구현에 직접 활용</strong> — 기획이 "embedding 유사도 ≥ 0.8"을 명시했으나 구체 도구 미지정 → <strong>sentence-transformers 채택 권장</strong></li>
+<li><strong>적용 모듈</strong>: K-2 (QC #4)</li>
+</ul>
+<h4>8.3 LanguageTool (⭐14,796 · LGPL-2.1 · 2026-08) — 🆕 영어 QC</h4>
+<ul>
+<li><strong>기능</strong>: 25+ 언어 문법·스타일 검사 (Java 서버 + 파이썬 래퍼)</li>
+<li><strong>라이선스</strong>: LGPL-2.1 — 상업 사용 가능 (동적 링크)</li>
+<li><strong>한국어</strong>: ❌ <strong>미지원</strong> (실측 확인 — 지원 언어 목록에 없음)</li>
+<li><strong>적용 모듈</strong>: K-2 (영어 챕터 문법 검사), S-3 (영어 스크립트 검수)</li>
+</ul>
+<h4>8.4 language-tool-python (⭐529 · GPL-3.0 · 2026-08)</h4>
+<ul>
+<li><strong>기능</strong>: LanguageTool 파이썬 래퍼 (jxmorris12)</li>
+<li><strong>라이선스</strong>: ⚠️ GPL-3.0 — 파이썬 코드 임베딩 시 GPL 조건</li>
+<li><strong>적용 모듈</strong>: K-2 (참고 — GPL 주의, HTTP API 호출 방식이면 무해)</li>
+</ul>
+<h4>8.5 py-hanspell (⭐360 · MIT · 2024-04) — 🆕 한국어 QC</h4>
+<ul>
+<li><strong>기능</strong>: 파이썬 한글 맞춤법 검사 (네이버 맞춤법 검사기 비공식 API)</li>
+<li><strong>라이선스</strong>: MIT</li>
+<li><strong>한국어</strong>: ✅ (한국어 전용)</li>
+<li>⚠️ <strong>주의</strong>: 네이버 비공식 API — 부하 주의·변경 시 깨질 수 있음</li>
+<li><strong>적용 모듈</strong>: K-2 (한국어 책 QC), S-3 (한국어 스크립트 검수)</li>
+</ul>
+<h4>8.6 PySceneDetect (⭐5,098 · BSD-3-Clause · 2026-08) — 🆕 쇼츠 편집</h4>
+<ul>
+<li><strong>기능</strong>: 영상 장면 전환 감지 — 쇼츠 컷 포인트 자동화</li>
+<li><strong>라이선스</strong>: BSD-3-Clause</li>
+<li><strong>적용 모듈</strong>: S-3 (편집 보조 — 자동 컷 포인트)</li>
+</ul>
+<h4>8.7 워크플로우 오케스트레이션</h4>
+<table>
+<thead>
+<tr>
+<th>도구</th>
+<th>별</th>
+<th>라이선스</th>
+<th>비고</th>
+<th>적용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Prefect</strong></td>
+<td>⭐23,619</td>
+<td>Apache-2.0</td>
+<td>파이썬 배치 오케스트레이션 — GH Actions보다 유연</td>
+<td>S-4·K-4 (선택)</td>
+</tr>
+<tr>
+<td><strong>Apache Airflow</strong></td>
+<td>⭐46,477</td>
+<td>Apache-2.0</td>
+<td>과함 — 오버엔지니어링</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>n8n</strong></td>
+<td>⭐200,593</td>
+<td>⚠️ Sustainable Use</td>
+<td>OSI 아님 — 무료 사용 가능, 상업 SaaS 시 제한</td>
+<td>S-4 (참고)</td>
+</tr>
+<tr>
+<td><strong>Dify</strong></td>
+<td>⭐152,430</td>
+<td>⚠️ Dify 라이선스</td>
+<td>AI 워크플로우 — fair-code</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>Huginn</strong></td>
+<td>⭐49,789</td>
+<td>MIT</td>
+<td>에이전트 자동화 — 모니터링</td>
+<td>S-4 (참고)</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>기존 기획 대비</strong>: 기획은 GH Actions 배치 + Vercel 서버리스(60초) 구조 — <strong>Prefect는 추가 의존성 없이 유지보수 단순화</strong>에만 유효. 파이프라인 규모(매일 1회)에선 <strong>기존 GH Actions 유지가 최선</strong> (Prefect는 참고만)</p>
+</blockquote>
+<hr />
+<h2>4. 기존 기획 대비 개선 제안 (우선순위별)</h2>
+<h3>🥇 P1 — 기획 문서 수정 필요 (오류·부정확 정정)</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>제안</th>
+<th>대상 문서</th>
+<th>근거 (실측)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1-1</td>
+<td><strong>edge-tts 라이선스 표기 수정</strong>: "오픈소스·무료" → <strong>"LGPL-3.0(대부분)+MIT(srt), 비공식 API — 상업 쇼츠 사용 시 MS 약관 위반 소지"</strong></td>
+<td>14-shorts §3.3·§8, trd.md §1.1·§4.3</td>
+<td>GitHub LICENSE 실측: LGPL-3.0 + srt_composer MIT</td>
+</tr>
+<tr>
+<td>P1-2</td>
+<td><strong>ebooklib 라이선스 표기 보완</strong>: "오픈소스·무료" → <strong>"AGPL-3.0 — 내부 파이프라인 사용 OK, 외부 SaaS 서비스화 시 파생 공개 의무"</strong></td>
+<td>12-kdp §2.1, trd.md §1.1</td>
+<td>GitHub 실측: AGPL-3.0</td>
+</tr>
+<tr>
+<td>P1-3</td>
+<td><strong>TTS 대체재 목록 갱신</strong>: Piper(아카이브·공식 한국어 모델 없음)·Kokoro(한국어 미지원) → <strong>MeloTTS(MIT·한국어 지원) 추가, piper1-gpl(GPL-3.0) 명시</strong></td>
+<td>14-shorts §3.3·§7, trd.md §4.3</td>
+<td>GitHub 실측 + Kokoro README 언어 목록</td>
+</tr>
+<tr>
+<td>P1-4</td>
+<td><strong>pytrends 상태 명시</strong>: 아카이브(2024-08) → "보조·참고용으로만, 주 소스는 API v3"</td>
+<td>14-shorts §2 (선택)</td>
+<td>GitHub 실측: archived=True</td>
+</tr>
+</tbody>
+</table>
+<h3>🥈 P2 — 기능 보강 (기존 모듈 확장)</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>제안</th>
+<th>적용 모듈</th>
+<th>도구</th>
+<th>근거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P2-1</td>
+<td><strong>QC #4 챕터 중복 검출 구현체 확정</strong>: sentence-transformers(paraphrase-multilingual-MiniLM) 사용</td>
+<td>K-2 (QC #4)</td>
+<td>sentence-transformers</td>
+<td>기획이 "embedding ≥ 0.8"만 명시 — 구체 도구 미지정</td>
+</tr>
+<tr>
+<td>P2-2</td>
+<td><strong>QC #5 길이 + 가독성</strong>: textstat(Flesch-Kincaid) 추가</td>
+<td>K-2 (QC #5)</td>
+<td>textstat</td>
+<td>영어 워크북 품질 게이트 강화</td>
+</tr>
+<tr>
+<td>P2-3</td>
+<td><strong>영어 챕터 문법 검사</strong>: LanguageTool(HTTP API) 추가 — 한국어는 py-hanspell</td>
+<td>K-2 (QC), S-3</td>
+<td>LanguageTool·py-hanspell</td>
+<td>한국어는 LanguageTool 미지원 → 병행</td>
+</tr>
+<tr>
+<td>P2-4</td>
+<td><strong>쇼츠 자막 자동 생성</strong>: faster-whisper로 음성→자막 (edge-tts 음성과 정합)</td>
+<td>S-3</td>
+<td>faster-whisper</td>
+<td>한국어 WER 8~13% — 자막 병행 강화</td>
+</tr>
+<tr>
+<td>P2-5</td>
+<td><strong>3D 책 이미지</strong>: 3d-book-image-css-generator로 쇼츠용 표지 이미지</td>
+<td>S-5 (신규)</td>
+<td>3d-book-image-css-generator</td>
+<td>KDP↔쇼츠 시너지 시각화</td>
+</tr>
+</tbody>
+</table>
+<h3>🥉 P3 — 참고·선택 (파일럿 후 검토)</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>제안</th>
+<th>적용</th>
+<th>도구</th>
+<th>비고</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P3-1</td>
+<td>youtube-transcript-api로 자막 기반 소재 발굴 (쿼터 절약)</td>
+<td>S-1</td>
+<td>youtube-transcript-api</td>
+<td>captions.list(50 units) 대신 비공식 API — ToS 검토 필요</td>
+</tr>
+<tr>
+<td>P3-2</td>
+<td>google-api-python-client 공식 클라이언트 채택</td>
+<td>S-1</td>
+<td>google-api-python-client</td>
+<td>쿼터·에러 처리 표준화</td>
+</tr>
+<tr>
+<td>P3-3</td>
+<td>Remotion 검토 (고급 애니메이션 쇼츠) — 단, 회사 라이선스 비용 확인</td>
+<td>S-3</td>
+<td>Remotion</td>
+<td>파일럿 이후</td>
+</tr>
+<tr>
+<td>P3-4</td>
+<td>ebooklib → pypub 대체 검토 (AGPL 회피)</td>
+<td>K-3</td>
+<td>pypub</td>
+<td>간단 EPUB 생성에 충분</td>
+</tr>
+<tr>
+<td>P3-5</td>
+<td>Prefect 도입 검토 (배치 단순화)</td>
+<td>S-4·K-4</td>
+<td>Prefect</td>
+<td>현행 GH Actions 유지가 우선</td>
+</tr>
+<tr>
+<td>P3-6</td>
+<td>Invidious API 참고 (쿼터 절약) — AGPL·ToS 주의</td>
+<td>S-1</td>
+<td>Invidious</td>
+<td>참고만</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>5. 라이선스 종합 리스크 매트릭스</h2>
+<table>
+<thead>
+<tr>
+<th>도구</th>
+<th>라이선스</th>
+<th>상업 사용</th>
+<th>배포 시 의무</th>
+<th>비고</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>yt-dlp</td>
+<td>Unlicense</td>
+<td>✅ 무제한</td>
+<td>없음</td>
+<td>—</td>
+</tr>
+<tr>
+<td>youtube-transcript-api</td>
+<td>MIT</td>
+<td>✅</td>
+<td>없음</td>
+<td>비공식 API — ToS 주의</td>
+</tr>
+<tr>
+<td>moviepy</td>
+<td>MIT</td>
+<td>✅</td>
+<td>없음</td>
+<td>—</td>
+</tr>
+<tr>
+<td>FFmpeg</td>
+<td>LGPL/GPL</td>
+<td>✅</td>
+<td>LGPL 준수 (빌드별 상이)</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Remotion</td>
+<td>회사 라이선스</td>
+<td>⚠️ 조건부 (규모별 유료)</td>
+<td>회사 규모 확인</td>
+<td>완전 오픈 아님</td>
+</tr>
+<tr>
+<td>pytrends</td>
+<td>Apache-2.0</td>
+<td>✅</td>
+<td>없음</td>
+<td>아카이브 — 비공식 API</td>
+</tr>
+<tr>
+<td><strong>edge-tts</strong></td>
+<td><strong>LGPL-3.0</strong></td>
+<td>⚠️ LGPL 준수 + 비공식 API</td>
+<td>고지·동적 링크</td>
+<td><strong>기획 표기 수정 필요</strong></td>
+</tr>
+<tr>
+<td>MeloTTS</td>
+<td>MIT</td>
+<td>✅ 무제한</td>
+<td>없음</td>
+<td><strong>한국어 지원 대체 후보</strong></td>
+</tr>
+<tr>
+<td>Piper</td>
+<td>MIT</td>
+<td>✅</td>
+<td>없음</td>
+<td>아카이브 — 한국어 공식 모델 없음</td>
+</tr>
+<tr>
+<td>Kokoro</td>
+<td>Apache-2.0</td>
+<td>✅</td>
+<td>없음</td>
+<td>한국어 미지원</td>
+</tr>
+<tr>
+<td>Coqui TTS</td>
+<td>MPL-2.0</td>
+<td>✅</td>
+<td>수정 파일 공개</td>
+<td>회사 해체 — fork 계승</td>
+</tr>
+<tr>
+<td>whisper</td>
+<td>MIT</td>
+<td>✅</td>
+<td>없음</td>
+<td>—</td>
+</tr>
+<tr>
+<td>faster-whisper</td>
+<td>MIT</td>
+<td>✅</td>
+<td>없음</td>
+<td>—</td>
+</tr>
+<tr>
+<td>whisperX</td>
+<td>BSD-2-Clause</td>
+<td>✅</td>
+<td>없음</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>ebooklib</strong></td>
+<td><strong>AGPL-3.0</strong></td>
+<td>⚠️ 내부 OK / SaaS 배포 시 파생 공개</td>
+<td>서비스 시 소스 공개</td>
+<td><strong>기획 표기 보완 필요</strong></td>
+</tr>
+<tr>
+<td>pypub</td>
+<td>MIT</td>
+<td>✅</td>
+<td>없음</td>
+<td>대안</td>
+</tr>
+<tr>
+<td>pandoc</td>
+<td>GPL-2.0</td>
+<td>✅ (CLI 호출)</td>
+<td>임베딩 시 주의</td>
+<td>—</td>
+</tr>
+<tr>
+<td>calibre</td>
+<td>GPL-3.0</td>
+<td>✅ (CLI 호출)</td>
+<td>임베딩 시 주의</td>
+<td>—</td>
+</tr>
+<tr>
+<td>epubcheck</td>
+<td>BSD-3-Clause</td>
+<td>✅</td>
+<td>없음</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Pillow</td>
+<td>HPND(BSD류)</td>
+<td>✅</td>
+<td>없음</td>
+<td>—</td>
+</tr>
+<tr>
+<td>OpenLibrary API</td>
+<td>API 무료</td>
+<td>✅</td>
+<td>없음</td>
+<td>서버 AGPL은 API 사용과 무관</td>
+</tr>
+<tr>
+<td>Google Books API</td>
+<td>무료 API</td>
+<td>✅</td>
+<td>사용량 제한</td>
+<td>—</td>
+</tr>
+<tr>
+<td>isbnlib</td>
+<td>LGPL-3.0</td>
+<td>✅</td>
+<td>동적 링크</td>
+<td>—</td>
+</tr>
+<tr>
+<td>LanguageTool</td>
+<td>LGPL-2.1</td>
+<td>✅</td>
+<td>동적 링크</td>
+<td><strong>한국어 미지원</strong></td>
+</tr>
+<tr>
+<td>py-hanspell</td>
+<td>MIT</td>
+<td>✅</td>
+<td>없음</td>
+<td>네이버 비공식 API</td>
+</tr>
+<tr>
+<td>sentence-transformers</td>
+<td>Apache-2.0</td>
+<td>✅</td>
+<td>없음</td>
+<td>—</td>
+</tr>
+<tr>
+<td>textstat</td>
+<td>MIT</td>
+<td>✅</td>
+<td>없음</td>
+<td>—</td>
+</tr>
+<tr>
+<td>PySceneDetect</td>
+<td>BSD-3-Clause</td>
+<td>✅</td>
+<td>없음</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Prefect</td>
+<td>Apache-2.0</td>
+<td>✅</td>
+<td>없음</td>
+<td>—</td>
+</tr>
+<tr>
+<td>n8n</td>
+<td>Sustainable Use</td>
+<td>⚠️ 내부 OK / 상업 SaaS 제한</td>
+<td>OSI 아님</td>
+<td>fair-code</td>
+</tr>
+<tr>
+<td>Dify</td>
+<td>Dify 라이선스</td>
+<td>⚠️ 참고</td>
+<td>OSI 아님</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>6. 방법론·한계</h2>
+<h3>6.1 방법</h3>
+<ul>
+<li><strong>GitHub API 실측</strong> (2026-08-14): 58개 저장소의 별·포크·라이선스(SPDX)·마지막 커밋·아카이브 여부</li>
+<li><strong>1차 출처 우선</strong>: GitHub 저장소 LICENSE 파일·README 직접 확인 (edge-tts LGPL, ebooklib AGPL, Kokoro 언어 목록, pytrends 아카이브, Piper 아카이브 등)</li>
+<li><strong>Firecrawl 보조 검증</strong>: 웹 검색·페이지 스크레이프 (한국어 지원 여부, 커뮤니티 모델 존재 등)</li>
+<li><strong>HuggingFace API</strong>: Kokoro-82M 모델 카드, 파이퍼 커뮤니티 모델 확인</li>
+</ul>
+<h3>6.2 한계</h3>
+<ul>
+<li>별 수·커밋 시점은 2026-08-14 시점 스냅샷 — 이후 변동 가능</li>
+<li>"한국어 지원"은 공식 문서·모델 카드 기준 — 커뮤니티 파생 모델 품질은 별도 검증 필요</li>
+<li>라이선스 해석은 일반 원칙 수준 — 법률 검토 대체 불가 (특히 edge-tts 비공식 API 상업성, ebooklib AGPL SaaS 배포)</li>
+<li>아마존·틱톡 스크래핑의 ToS 리스크는 기획 원칙(스냅샷 방식·제한적 사용) 유지</li>
+</ul>
+<hr />
+<h2>7. 출처 목록 (실측 기준)</h2>
+<h3>GitHub API 실측 (별·라이선스·커밋)</h3>
+<ul>
+<li>yt-dlp/yt-dlp · jdepoix/youtube-transcript-api · Zulko/moviepy · FFmpeg/FFmpeg · remotion-dev/remotion · mltframework/shotcut</li>
+<li>GeneralMills/pytrends · googleapis/google-api-python-client · iv-org/invidious · mitchelljy/Trending-YouTube-Scraper</li>
+<li>rany2/edge-tts · rhasspy/piper · OHF-Voice/piper1-gpl · hexgrad/kokoro · coqui-ai/TTS · pndurette/gTTS · myshell-ai/MeloTTS · myshell-ai/OpenVoice · suno-ai/bark · SWivid/F5-TTS · fishaudio/fish-speech · 2noise/ChatTTS</li>
+<li>openai/whisper · SYSTRAN/faster-whisper · m-bain/whisperX · m1guelpf/auto-subtitle · Huanshere/VideoLingo · WEIFENG2333/VideoCaptioner · tkarabela/pysubs2 · Breakthrough/PySceneDetect</li>
+<li>aerkalov/ebooklib · wcember/pypub · jgm/pandoc · kovidgoyal/calibre · w3c/epubcheck · Sigil-Ebook/Sigil · Montgomery66/auto-ebook-generator · raestrada/storycraftr</li>
+<li>python-pillow/Pillow · ImageMagick/ImageMagick · scastiel/3d-book-image-css-generator</li>
+<li>internetarchive/openlibrary · xlcnd/isbnlib · tducret/amazon-scraper-python · drawrowfly/tiktok-scraper</li>
+<li>textstat/textstat · UKPLab/sentence-transformers · languagetool-org/languagetool · jxmorris12/language_tool_python · ssut/py-hanspell · prefecthq/prefect · n8n-io/n8n · langgenius/dify · apache/airflow · huginn/huginn</li>
+</ul>
+<h3>라이선스·한국어 지원 실측 (LICENSE 파일·README)</h3>
+<ul>
+<li><a href="https://github.com/rany2/edge-tts/blob/master/LICENSE">edge-tts LICENSE (LGPL-3.0 + MIT)</a></li>
+<li><a href="https://github.com/aerkalov/ebooklib">ebooklib (AGPL-3.0)</a></li>
+<li><a href="https://github.com/hexgrad/kokoro">Kokoro README — 언어 목록</a> (한국어 없음 실측)</li>
+<li><a href="https://github.com/myshell-ai/MeloTTS">MeloTTS README — 한국어 음성 샘플</a></li>
+<li><a href="https://github.com/rhasspy/piper">Piper 아카이브 공지</a> · <a href="https://github.com/OHF-Voice/piper1-gpl">piper1-gpl</a></li>
+<li><a href="https://github.com/GeneralMills/pytrends">pytrends 아카이브</a></li>
+<li><a href="https://json2video.com/ai-voices/azure/languages/korean/">Azure 한국어 TTS 목소리 (ko-KR 10종)</a></li>
+<li><a href="https://huggingface.co/neurlang/piper-onnx-kss-korean">Piper 커뮤니티 한국어 모델 (neurlang)</a></li>
+<li><a href="https://vexascribe.com/how-accurate-is-whisper">Whisper 한국어 WER (8~13%)</a></li>
+<li><a href="https://dev.languagetool.org/languages">LanguageTool 지원 언어 (한국어 없음)</a></li>
+<li><a href="https://github.com/n8n-io/n8n/blob/master/LICENSE.md">n8n Sustainable Use License</a></li>
+<li><a href="https://openlibrary.org/developers/api">OpenLibrary API</a> · <a href="https://developers.google.com/books">Google Books API</a></li>
+<li><a href="https://github.com/w3c/epubcheck/releases">epubcheck v5.3.0 릴리스</a></li>
+</ul>
+<hr />
+<p><em>작성: 리서치팀 · 상태: 오픈소스 도구 조사 완료 (2026-08-14) · 상위: plan.md·trd.md · 대상: docs/planning/14-shorts-pipeline.md · 12-kdp-pipeline.md</em></p>
+</main>
+</body>
+</html>
