@@ -526,6 +526,36 @@ def create_app(cfg):
                 batch = latest[ct]
                 if not isinstance(batch, list):
                     batch = [batch]
+                # v29.6: 띠별 12개를 하나의 합본으로 — 각 띠 제목+본문을 순서대로 병합
+                if ct == "animal_blog" and len(batch) > 1:
+                    parts = []
+                    refs = []
+                    for r in sorted(batch, key=lambda x: (x["ref_date"], x["id"])):
+                        p = {}
+                        try:
+                            p = json_mod.loads(r["content"] or "{}")
+                        except Exception:
+                            pass
+                        if not isinstance(p, dict) or not (r["content"] or "").strip():
+                            continue
+                        refs.append(r["ref_date"])
+                        title = str(p.get("title", "") or "띠 운세")
+                        body = str(p.get("body", "") or "")
+                        parts.append(f"## {title}\n\n{body}")
+                    if parts:
+                        combined_body = "\n\n---\n\n".join(parts)
+                        items.append({
+                            "ref": today, "content_type": "animal_blog",
+                            "target": "띠별 종합 (12)",
+                            "status": "생성됨",
+                            "has_content": True,
+                            "title": f"{today} 띠별 운세 종합",
+                            "summary": "12개 띠(쥐띠~돼지띠) 운세를 하나로 합친 종합본",
+                            "preview": " ".join(combined_body.replace("#", " ").replace("*", " ").split())[:100],
+                            "body_full": combined_body,
+                            "sns_full": "",
+                        })
+                    continue
                 for r in sorted(batch, key=lambda x: (x["ref_date"], x["id"])):
                     parsed = {}
                     try:
