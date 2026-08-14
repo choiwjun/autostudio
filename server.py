@@ -467,7 +467,55 @@ def create_app(cfg):
             cfg, trigger="manual",
             budget_seconds=cfg.get("manual_budget_seconds", 45))
 
-    # ---------- v28: 운세 수동 발행 (대시보드 "운세 발행" 버튼) ----------
+    # ---------- v29: 운세 생성·발행 분리 (대시보드 "운세 생성" / "자동 발행" 버튼) ----------
+    # v28은 "운세 발행" 한 버튼이 생성+발행을 함께 수행 — BLOG_PUBLISH_ENABLED
+    # 미설정 환경(사용자가 수동 게시하려는 경우)에선 "발행 비활성"만 노출되어
+    # 운세 생성 자체를 못 쓰는 문제. v29에서 생성(/fortune/generate)과
+    # 발행(/fortune/publish)을 분리한다.
+
+    @app.post("/fortune/generate", dependencies=[Depends(require_token)])
+    def fortune_generate():
+        """v29: 운세 콘텐츠만 생성 (LLM 1회 시도, 발행 안 함) — 사용자가
+        콘텐츠를 보고 수동으로 게시하기 위한 버튼. 생성 결과(항목+본문 미리보기)
+        를 반환한다. 기존 fortune_generate_step(publish=False) 재사용 (AC-8)."""
+        import collect
+        import json as json_mod
+        today = config_mod.today_kst().isoformat()
+
+        def _generate(d):
+            created = collect.fortune_generate_step(
+                d, cfg, today, publish=False)
+            # 발행 후보(content_type)별 최신 1건씩 요약 — 오늘자 daily + 고정(01~60)
+            # 고정 콘텐츠(day_pillar 60·zodiac 12·animal 12)는 ref=오늘이 아니라
+            # 번호(01~60)라 list_fortune_generations(limit=200)로 전건 조회
+            rows = d.list_fortune_generations(limit=200)
+            latest = {}
+            for r in rows:
+                prev = latest.get(r["content_type"])
+                # 최신순 정렬 보장 안 됨 — (ref, id) 비교로 최신 1건 유지
+                if prev is None or (r["ref_date"], r["id"]) > (prev["ref_date"], prev["id"]):
+                    latest[r["content_type"]] = r
+            items = []
+            for ct in sorted(latest):
+                r = latest[ct]
+                parsed = {}
+                try:
+                    parsed = json_mod.loads(r["content"] or "{}")
+                except Exception:
+                    pass
+                items.append({
+                    "ref": r["ref_date"], "content_type": ct,
+                    "status": r["status"],
+                    "title": parsed.get("title", "") if isinstance(parsed, dict) else "",
+                    "summary": parsed.get("summary", "") if isinstance(parsed, dict) else "",
+                    "preview": (parsed.get("body", "") if isinstance(parsed, dict)
+                                else (r["content"] or ""))[:120],
+                })
+            return created, items
+
+        created, items = run_db(_generate)
+        return {"created": created, "items": items,
+                "message": f"운세 생성 완료 — {created}건 생성"}
 
     @app.post("/fortune/publish", dependencies=[Depends(require_token)])
     def fortune_publish():

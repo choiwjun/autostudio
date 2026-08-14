@@ -972,3 +972,77 @@ def test_fortune_publish_endpoint_retries_previous_failures(tmp_path, monkeypatc
     d2 = _open_fortune_db(tmp_path)
     assert d2.get_fortune_generation(today, "daily_blog")["status"] == "published"
     d2.close()
+
+
+# ---------- v29: 운세 생성 전용 엔드포인트 (POST /fortune/generate) ----------
+
+def test_fortune_generate_endpoint_requires_token(tmp_path, monkeypatch):
+    # v29: 생성 전용도 require_token 적용 — production 무토큰 401
+    import llm_client
+    monkeypatch.setattr(llm_client, "has_api_key", lambda: False)
+    prod = TestClient(make_fortune_app(tmp_path, env="production"))
+    assert prod.post("/fortune/generate").status_code == 401
+    body = prod.post("/fortune/generate", headers=AUTH).json()
+    assert body["created"] == 0
+
+
+def test_fortune_generate_endpoint_returns_content(tmp_path, monkeypatch):
+    # v29: 생성 전용 — 발행 없이 콘텐츠만 생성·반환 (title/summary/preview)
+    import config as config_mod
+    import collect
+    import llm_client
+    import json as json_mod
+    monkeypatch.setattr(llm_client, "has_api_key", lambda: True)
+    today = config_mod.today_kst().isoformat()
+    d = _open_fortune_db(tmp_path)
+    _seed_fortune(d, today, "daily_blog")
+    d.close()
+    # fortune_generate_step은 publish=False로 호출 — 발행 시도 없음 보장
+    calls = []
+
+    def fake_generate(d2, cfg, today2, *, publish):
+        calls.append(publish)
+        # 이미 시드된 daily_blog는 멱등 스킵 — created 0 유지
+        return 0
+
+    monkeypatch.setattr(collect, "fortune_generate_step", fake_generate)
+    client = TestClient(make_fortune_app(tmp_path))
+    r = client.post("/fortune/generate")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["created"] == 0
+    assert calls == [False]  # publish=False로 호출됨
+    by = {(it["content_type"], it["ref"]): it for it in body["items"]}
+    daily = by.get(("daily_blog", today))
+    assert daily is not None
+    assert daily["title"].startswith(today)
+    assert daily["status"] == "generated"
+    assert "본문" in daily["preview"]
+
+
+def test_fortune_generate_does_not_publish(tmp_path, monkeypatch):
+    # v29 핵심: 생성 버튼은 발행을 하지 않는다 — publish_client.post 미호출
+    import config as config_mod
+    import collect
+    import llm_client
+    import publish_client
+    monkeypatch.setattr(llm_client, "has_api_key", lambda: True)
+    today = config_mod.today_kst().isoformat()
+    d = _open_fortune_db(tmp_path)
+    _seed_fortune(d, today, "daily_blog")
+    d.close()
+    posted = []
+
+    def fake_post(url, json, headers, timeout):
+        posted.append(url)
+        return _FortuneResp(200, {})
+
+    monkeypatch.setattr(publish_client.requests, "post", fake_post)
+    monkeypatch.setattr(collect, "fortune_generate_step",
+                        lambda d2, cfg2, t2, *, publish: 0)
+    client = TestClient(make_fortune_app(tmp_path))
+    client.post("/fortune/generate")
+    assert posted == []  # 발행 호출 0회 — 생성 전용 보장
+    d2 = _open_fortune_db(tmp_path)
+    assert d2.get_fortune_generation(today, "daily_blog")["status"] == "generated"
+    d2.close()

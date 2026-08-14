@@ -284,7 +284,8 @@
       </div>
       <div class="top-actions">
         <button class="btn btn-primary" id="collectBtn" onclick="collect()">지금 수집 실행</button>
-        <button class="btn" id="fortuneBtn" onclick="publishFortune()">운세 발행</button>
+        <button class="btn" id="fortuneGenBtn" onclick="generateFortune()">운세 생성</button>
+        <button class="btn" id="fortuneBtn" onclick="publishFortune()">자동 발행</button>
       </div>
     </div>
   </header>
@@ -316,8 +317,14 @@
 
     <span id="status"></span>
 
+    <section class="card fortune-panel hidden" id="fortuneGenPanel" aria-label="운세 생성 결과">
+      <h2>운세 생성 결과 <span class="sub">(수동 게시용 — 생성된 콘텐츠 확인)</span></h2>
+      <div class="summary" id="fortuneGenSummary"></div>
+      <div id="fortuneGenItems"></div>
+    </section>
+
     <section class="card fortune-panel hidden" id="fortunePanel" aria-label="운세 발행 결과">
-      <h2>운세 발행 결과</h2>
+      <h2>운세 자동 발행 결과</h2>
       <div class="summary" id="fortuneSummary"></div>
       <div id="fortuneItems"></div>
     </section>
@@ -766,7 +773,59 @@ async function collect() {
   load();
 }
 
-// v28: 운세 수동 발행 (대시보드 "운세 발행" 버튼) — POST /fortune/publish
+// v29: 운세 생성 (대시보드 "운세 생성" 버튼) — POST /fortune/generate
+// 발행 없이 콘텐츠만 생성해 화면에 표시 — 사용자가 수동으로 게시하기 위한 용도
+let fortuneGenBusy = false;
+
+async function generateFortune() {
+  if (fortuneGenBusy) return;
+  fortuneGenBusy = true;
+  const btn = document.getElementById('fortuneGenBtn');
+  btn.disabled = true;
+  btn.textContent = '생성 중...';
+  setStatus('운세 콘텐츠 생성 중... (최대 60초)');
+  const panel = document.getElementById('fortuneGenPanel');
+  panel.classList.remove('hidden');
+  document.getElementById('fortuneGenSummary').textContent = '생성 중...';
+  document.getElementById('fortuneGenItems').innerHTML = '';
+  try {
+    const res = await api('/fortune/generate', { method: 'POST', headers: authHeaders() });
+    renderFortuneGenResult(res);
+  } catch (e) {
+    if (String(e.message) !== '401') {
+      setStatus('운세 생성 요청이 실패했습니다 (시간 초과 가능) — 다시 시도하세요', true);
+    }
+    document.getElementById('fortuneGenSummary').textContent = '요청 실패 — 서버 로그를 확인하세요';
+  } finally {
+    fortuneGenBusy = false;
+    btn.disabled = false;
+    btn.textContent = '운세 생성';
+  }
+}
+
+function renderFortuneGenResult(res) {
+  const summaryEl = document.getElementById('fortuneGenSummary');
+  const itemsEl = document.getElementById('fortuneGenItems');
+  const msg = res.message || `운세 생성 완료 — ${res.created || 0}건 생성`;
+  setStatus(msg);
+  summaryEl.textContent = msg;
+  if (!res.items || !res.items.length) {
+    itemsEl.innerHTML = '<p class="empty">생성된 콘텐츠가 없습니다 (LLM 키/콘텐츠 상태 확인)</p>';
+    return;
+  }
+  const statusLabel = { generated: '생성됨', published: '발행됨', publish_failed: '발행 실패', qc_failed: '검수 실패' };
+  itemsEl.innerHTML = '<table class="mini-table"><thead><tr><th>기준일</th><th>타입</th><th>상태</th><th>제목</th><th>요약</th></tr></thead><tbody>'
+    + res.items.map(it => {
+      const label = statusLabel[it.status] || it.status;
+      const cls = it.status === 'qc_failed' ? ' class="fail"' : '';
+      const title = it.title || '(제목 없음)';
+      const summary = it.summary || it.preview || '';
+      return `<tr${cls}><td>${esc(it.ref)}</td><td>${esc(it.content_type)}</td><td>${esc(label)}</td><td>${esc(title)}</td><td>${esc(summary)}</td></tr>`;
+    }).join('')
+    + '</tbody></table>';
+}
+
+// v28: 운세 수동 발행 (대시보드 "자동 발행" 버튼) — POST /fortune/publish
 let fortuneBusy = false;
 
 async function publishFortune() {
@@ -775,7 +834,7 @@ async function publishFortune() {
   const btn = document.getElementById('fortuneBtn');
   btn.disabled = true;
   btn.textContent = '발행 중...';
-  setStatus('운세 발행 실행 중... (최대 60초)');
+  setStatus('운세 자동 발행 실행 중... (최대 60초)');
   const panel = document.getElementById('fortunePanel');
   panel.classList.remove('hidden');
   document.getElementById('fortuneSummary').textContent = '발행 중...';
