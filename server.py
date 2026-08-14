@@ -1,3 +1,4 @@
+import base64
 import hmac
 import json
 import logging
@@ -25,12 +26,23 @@ IMAGE_DOWNLOAD_MAX_REDIRECTS = 3
 # 모듈 레벨 상수로 테스트가 결정적으로 패치 가능 (time.monotonic 전역
 # 패치는 TestClient/httpx 내부 타임아웃 계산도 오염시켜 금지).
 ADPOST_IMPORT_BUDGET_SECONDS = 50
+# v28: 운세 수동 발행 총 예산 — Vercel 60초 서버리스 한도 대비 5초 마진.
+# LLM 생성(1회 시도) + 발행 순회를 합산하며, 초과 시 남은 항목은
+# skipped("시간 예산")로 반환 (OQ-1 — 멱등 재클릭으로 이어서 처리).
+FORTUNE_PUBLISH_BUDGET_SECONDS = 55
 
 
 def _fetch_image_bytes(url):
-    """반환: (바이트, content_type). HTTPS만, 리다이렉트도 HTTPS 한정, 크기 상한
-    스트리밍 검사, 비이미지 응답 거부 — 위반은 명확한 HTTP 오류로 변환."""
-    if not url or not url.startswith("https://"):
+    """반환: (바이트, content_type).
+    v27: data URI(나노바나나 base64 저장, AC4-3) — base64 디코드 + image/ MIME
+    검사 + 크기 상한. 위반은 명확한 HTTP 오류로 변환.
+    HTTPS URL — 기존 경로 그대로 (리다이렉트도 HTTPS 한정, 크기 상한 스트리밍
+    검사, 비이미지 응답 거부)."""
+    if not url:
+        raise HTTPException(status_code=400, detail="HTTPS 이미지 URL이 아닙니다")
+    if url.startswith("data:"):
+        return _decode_data_uri(url)
+    if not url.startswith("https://"):
         raise HTTPException(status_code=400, detail="HTTPS 이미지 URL이 아닙니다")
     current = url
     for _ in range(IMAGE_DOWNLOAD_MAX_REDIRECTS + 1):
@@ -64,6 +76,26 @@ def _fetch_image_bytes(url):
                 chunks.append(chunk)
         return b"".join(chunks), content_type
     raise HTTPException(status_code=502, detail="리다이렉트 횟수 초과")
+
+
+def _decode_data_uri(url):
+    """v27 (AC4-3): data URI 이미지 디코드 — data:{mime};base64,{b64}.
+    image/ MIME 강제, 크기 상한(IMAGE_DOWNLOAD_MAX_BYTES) 적용."""
+    try:
+        header, sep, b64 = url.partition(",")
+        if not sep or not b64:
+            raise ValueError("missing payload")
+        mime = header[5:].partition(";")[0] or "image/jpeg"
+        if not mime.startswith("image/"):
+            raise ValueError("non-image mime")
+        content = base64.b64decode(b64, validate=True)  # 오염 데이터 URI 400 처리
+    except (ValueError, TypeError) as e:
+        raise HTTPException(
+            status_code=400, detail="잘못된 data URI 이미지입니다") from e
+    if len(content) > IMAGE_DOWNLOAD_MAX_BYTES:
+        raise HTTPException(
+            status_code=502, detail="이미지가 크기 상한을 초과했습니다")
+    return content, mime
 
 
 class SeedIn(BaseModel):
@@ -434,6 +466,63 @@ def create_app(cfg):
         return collect.run_collection(
             cfg, trigger="manual",
             budget_seconds=cfg.get("manual_budget_seconds", 45))
+
+    # ---------- v28: 운세 수동 발행 (대시보드 "운세 발행" 버튼) ----------
+
+    @app.post("/fortune/publish", dependencies=[Depends(require_token)])
+    def fortune_publish():
+        # v28 (FR-1~FR-5): 수동 운세 발행 — ① 미생성 콘텐츠 생성(LLM 1회 시도)
+        # ② 미발행 콘텐츠 전부 발행 시도 ③ 항목별 결과 JSON 반환.
+        # - 발행 로직은 collect 헬퍼 재사용 (FR-3 — requests.post 직호출·후보
+        #   하드코딩·slug 규칙 재구현 없음, AC-8)
+        # - BlogPublishError.status_code 기반 401/429 힌트 (AC-4/AC-5, OQ-2)
+        # - Vercel 60초 예산: FORTUNE_PUBLISH_BUDGET_SECONDS, 초과 항목
+        #   skipped("시간 예산") (OQ-1)
+        import collect
+        import time as time_mod
+        today = config_mod.today_kst().isoformat()
+        started = time_mod.monotonic()
+        enabled = bool(cfg.get("blog_publish_enabled") and cfg.get("blog_api_url"))
+
+        def _generate_and_publish(d):
+            try:
+                created = collect.fortune_generate_step(
+                    d, cfg, today, publish=False)
+            except Exception as e:
+                # 생성 실패여도 발행 단계는 진행 (OQ-1 — 부분 수행)
+                logger.warning("fortune generate step failed: %s", e)
+                created = 0
+            if not enabled:
+                return created, []  # FR-4 — 발행 시도 0건
+            remaining = max(0, FORTUNE_PUBLISH_BUDGET_SECONDS
+                            - int(time_mod.monotonic() - started))
+            items = collect.publish_all_fortune_items(
+                d, cfg, today, budget_seconds=remaining)
+            # AC-10: daily_sns는 발행 후보가 아님 — 오늘자 행이 있으면 구분 표시
+            if d.get_fortune_generation(today, "daily_sns"):
+                items.append({
+                    "ref": today, "content_type": "daily_sns", "ok": False,
+                    "status": "not_target",
+                    "reason": "발행 대상 아님 — SNS 요약은 발행 후보가 아님 (*_blog만)",
+                })
+            return created, items
+
+        created, items = run_db(_generate_and_publish)
+        published = sum(1 for it in items if it["ok"])
+        failed = sum(1 for it in items if it["status"] == "failed")
+        skipped = sum(1 for it in items
+                      if it["status"] in ("skipped", "not_target"))
+        if not enabled:
+            message = "발행 비활성 — BLOG_PUBLISH_ENABLED=1 및 BLOG_API_URL 설정 필요"
+        else:
+            message = (f"발행 완료 — 성공 {published}건 / 실패 {failed}건 / "
+                       f"스킵 {skipped}건 (생성 {created}건)")
+            if any(it["reason"] == collect.FORTUNE_SKIP_REASON_BUDGET
+                   for it in items):
+                message += " — 시간 예산 초과, 남은 항목은 재클릭으로 이어서 발행됩니다"
+        return {"created": created, "published": published, "failed": failed,
+                "skipped": skipped, "enabled": enabled, "message": message,
+                "items": items}
 
     @app.get("/status", dependencies=[Depends(require_token)])
     def status():

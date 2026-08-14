@@ -20,7 +20,13 @@ REQUEST_TIMEOUT = 20
 
 
 class BlogPublishError(Exception):
-    """autoblog 발행 API 호출 실패 (재시도 후에도) — 게시 유실 방지용 구분."""
+    """autoblog 발행 API 호출 실패 (재시도 후에도) — 게시 유실 방지용 구분.
+    v28: status_code — HTTP 실패 상태를 구조적으로 전달 (401/429 힌트 판별용,
+    OQ-2). 네트워크 오류 등 상태 없음이면 None. 메시지 포맷은 기존과 불변."""
+
+    def __init__(self, message, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def blog_slug(keyword, *, fortune_ref_date=None):
@@ -49,11 +55,13 @@ def _post(cfg, payload, retries=MAX_RETRIES):
                 return resp.json()
             if resp.status_code in (429, 500, 502, 503, 504):
                 last_err = BlogPublishError(
-                    f"HTTP {resp.status_code}: {resp.text[:120]}")
+                    f"HTTP {resp.status_code}: {resp.text[:120]}",
+                    status_code=resp.status_code)
             else:
                 # 400(검증)·401(토큰)은 재시도 무의미 — 즉시 실패
                 raise BlogPublishError(
-                    f"HTTP {resp.status_code}: {resp.text[:120]}")
+                    f"HTTP {resp.status_code}: {resp.text[:120]}",
+                    status_code=resp.status_code)
         except requests.RequestException as e:
             last_err = BlogPublishError(f"network error: {e}")
         if attempt < retries:

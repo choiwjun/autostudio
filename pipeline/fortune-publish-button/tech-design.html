@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tech-design</title>
+<style>
+:root { --accent:#2B5FDB; --bg:#ffffff; --fg:#1a1a2e; --muted:#666; --border:#e2e8f0; --code-bg:#f6f8fa; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#0f1117; --fg:#e6e6e6; --muted:#9ca3af; --border:#2a2f3a; --code-bg:#161b26; }
+}
+* { box-sizing: border-box; }
+body { font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; background:var(--bg);
+       color:var(--fg); line-height:1.7; margin:0; padding:2rem 1rem; }
+main { max-width: 860px; margin: 0 auto; }
+h1 { font-size:1.9rem; border-bottom:3px solid var(--accent); padding-bottom:.4rem; }
+h2 { font-size:1.4rem; margin-top:2.2rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.15rem; margin-top:1.6rem; }
+h4 { font-size:1rem; margin-top:1.2rem; color:var(--accent); }
+a { color:var(--accent); }
+code { background:var(--code-bg); padding:.15em .4em; border-radius:4px; font-size:.9em;
+       font-family:'JetBrains Mono','D2Coding',Consolas,monospace; }
+pre { background:var(--code-bg); padding:1rem; border-radius:8px; overflow-x:auto; border:1px solid var(--border); }
+pre code { background:none; padding:0; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.93rem; }
+th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); font-weight:600; }
+tr:nth-child(even) td { background:rgba(127,127,127,.05); }
+blockquote { border-left:4px solid var(--accent); margin:1rem 0; padding:.5rem 1rem;
+             background:rgba(43,95,219,.06); border-radius:0 6px 6px 0; }
+blockquote p { margin:.3rem 0; }
+hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
+li { margin:.25rem 0; }
+strong { font-weight:700; }
+.meta { color:var(--muted); font-size:.85rem; margin-bottom:1.5rem; }
+</style>
+</head>
+<body>
+<main>
+<div class="meta">📄 tech-design · 생성: 2026-08-13 23:17</div>
+<h1>운세 발행 버튼 (POST /fortune/publish) — 간이 기술 설계 (tech-design.md)</h1>
+<blockquote>
+<p>작성: 개발팀 · 모드: small · 상위: <code>requirements.md</code> FR-1~FR-5 + 오케스트레이터 승인 (OQ-1 예산 확정, OQ-2 status_code 권장)<br />
+실측 기준: v27 소스 (server.py·collect.py·publish_client.py·static/index.html·db.py) — 2026-08-13<br />
+승인 게이트: <strong>본 문서 승인 전 구현 금지</strong></p>
+</blockquote>
+<h2>1. 아키텍처 개요 (변경 전/후)</h2>
+<pre><code>변경 전 (v27):
+  fortune_generate_step(d, cfg, today) ── 생성(LLM 1회/타입) ──▶ _publish_all_fortune(d, cfg, today)
+      └─ 후보 순회 · 발행 · DB 상태 갱신 · collection_log 기록  (반환값 없음 — 실패 사유 미노출)
+
+변경 후 (v28):
+  [대시보드 버튼] ── POST /fortune/publish (require_token) ──▶ server.fortune_publish()
+      ├─ (a) collect.fortune_generate_step(d, cfg, today, publish=False)   ← 생성만 (LLM 1회 시도)
+      ├─ (b) collect.publish_all_fortune_items(d, cfg, today, budget_seconds=잔여)  ← 항목별 결과 수집
+      └─ (c) 응답 {created, published, failed, skipped, enabled, message, items[]}
+
+  collect.py 신규 헬퍼 (FR-3 — 중복 구현 금지):
+      _fortune_publish_candidates(today)      → 후보 목록 (기존 순회 목록과 동일)
+      _fortune_publish_item_result(...)       → 항목 1건 처리 (기존 상태 갱신·로그 동일) + 결과 레코드
+      publish_all_fortune_items(d, cfg, today, budget_seconds=None) → 항목별 결과 리스트 반환
+  _publish_all_fortune(d, cfg, today)          → publish_all_fortune_items 호출로 위임 (동작 불변)
+</code></pre>
+<h2>2. collect.py 리팩터링 설계 (FR-3 — 동작 불변 필수)</h2>
+<h3>2.1 후보 목록 헬퍼 — <code>_fortune_publish_candidates(today)</code></h3>
+<p>기존 <code>_publish_all_fortune</code>의 후보 구성 로직을 그대로 이동:<br />
+<code>daily_blog(당일)</code> + <code>weekly_blog(월요일)</code> + <code>monthly_blog(1일)</code> + <code>day_pillar_blog 01~60</code> + <code>zodiac_blog 01~12</code> + <code>animal_blog 01~12</code> → <code>(content_type, fortune_type, ref_key)</code> 튜플 리스트. <strong>daily_sns는 후보에 없음</strong> (AC-10).</p>
+<h3>2.2 항목 처리 헬퍼 — <code>_fortune_publish_item_result(d, cfg, ctype, ftype, ref_key)</code></h3>
+<p>기존 판정 순서를 <strong>그대로</strong> 이식 (회귀 방지):<br />
+1. 행 없음/<code>content</code> 빈 문자열 → 스킵 ("콘텐츠 없음 (미생성)")<br />
+2. <code>status == "published"</code> → 스킵 ("이미 발행됨")<br />
+3. <code>status == "qc_failed"</code> → 스킵 ("검수 대기 (qc_failed)") — 수동 검토 대상 자동 발행 금지<br />
+4. content JSON 파싱 실패/<code>title</code> 없음 → 스킵 ("콘텐츠 형식 오류")<br />
+5. <code>publish_client.publish_fortune(...)</code> 성공 → <code>log_collection("publish")</code> + <code>{ok: true, status: "published"}</code><br />
+6. <code>BlogPublishError</code> → <code>update_fortune_generation(status="publish_failed")</code> + <code>log_collection("error")</code> + <code>{ok: false, status: "failed", reason: ...}</code></p>
+<p>DB 상태 갱신·collection_log 기록은 <strong>기존 코드와 동일 라인</strong> — 리턴만 추가된다. (NFR-5)</p>
+<h3>2.3 결과 수집 헬퍼 — <code>publish_all_fortune_items(d, cfg, today, budget_seconds=None)</code></h3>
+<ul>
+<li>후보 순회하며 2.2 호출, 결과 리스트 반환</li>
+<li><code>budget_seconds</code> 지정 시 항목 처리 전 <code>time.monotonic()</code> 경과 검사 — 초과하면 <strong>남은 후보 전부</strong> <code>{ok: false, status: "skipped", reason: "시간 예산"}</code> (OQ-1)</li>
+<li><code>budget_seconds=None</code>이면 기존과 동일한 무제한 순회 (기존 호출 경로 불변)</li>
+<li><strong>주의</strong>: <code>blog_publish_enabled</code>/<code>blog_api_url</code> 검사는 기존처럼 <code>_publish_all_fortune</code>(및 엔드포인트)에서 수행 — 헬퍼는 발행 활성 상태에서만 호출 (기존 가드 위치 불변)</li>
+</ul>
+<h3>2.4 위임 — <code>_publish_all_fortune(d, cfg, today)</code></h3>
+<pre><code class="language-python">def _publish_all_fortune(d, cfg, today):
+    if not cfg.get(&quot;blog_publish_enabled&quot;) or not cfg.get(&quot;blog_api_url&quot;):
+        return
+    publish_all_fortune_items(d, cfg, today)   # 반환값 무시 — 기존 동작 동일
+</code></pre>
+<p><strong>동작 불변 증명</strong>: test_fortune_publish.py 11건 전부 수정 없이 통과 (publish_failed 재시도·qc_failed 미발행·비활성 스킵·고정 콘텐츠 발행·weekly/monthly 등).</p>
+<h3>2.5 <code>fortune_generate_step</code> — 키워드 전용 파라미터 추가 (기본값 불변)</h3>
+<pre><code class="language-python">def fortune_generate_step(d, cfg, today, *, publish=True):
+    ...
+    if publish:
+        _publish_all_fortune(d, cfg, today)
+    return created
+</code></pre>
+<ul>
+<li>기존 호출자(collect.run_collection·기존 테스트)는 기본값 True → <strong>동작 100% 불변</strong></li>
+<li>엔드포인트는 <code>publish=False</code>로 호출해 무예산 내부 발행을 건너뛰고, (b) 단계의 예산 적용 발행으로 단일화 (OQ-1 — 총 실행 60초 예산 통제)</li>
+</ul>
+<h2>3. publish_client.py — <code>BlogPublishError.status_code</code> (OQ-2)</h2>
+<pre><code class="language-python">class BlogPublishError(Exception):
+    def __init__(self, message, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
+</code></pre>
+<ul>
+<li><code>_post</code>의 모든 raise 지점에 <code>status_code=resp.status_code</code> 전달 (네트워크 오류는 None)</li>
+<li><strong>메시지 포맷 <code>HTTP {status}: {body[:120]}</code> 불변</strong> (기존 테스트·로그 파서 호환 — NFR-5)</li>
+<li>401(즉시 실패)·429(재시도 3회 후 최종 실패) 모두 status_code 보존 → 문자열 파싱 제거 (OQ-2 권장안)</li>
+</ul>
+<h2>4. 엔드포인트 설계 — <code>POST /fortune/publish</code></h2>
+<h3>4.1 라우트·인증·DB (v15 패턴 재사용)</h3>
+<ul>
+<li><code>create_app(cfg)</code> 내부에 추가, <code>dependencies=[Depends(require_token)]</code> (AC-2 — development 생략, 비개발 무토큰 401)</li>
+<li>DB: 기존 <code>run_db(fn)</code> 헬퍼 사용 (lock + CONNECTION_ERRORS 재연결) — cfg는 <code>create_app(cfg)</code> 클로저 그대로</li>
+<li>today: <code>config_mod.today_kst().isoformat()</code> (A-3 — KST)</li>
+</ul>
+<h3>4.2 동작 순서 (FR-1)</h3>
+<pre><code class="language-python">FORTUNE_PUBLISH_BUDGET_SECONDS = 55   # 모듈 상수 — Vercel 60초 한도 대비 마진 5초 (테스트가 결정적 패치 가능)
+@app.post(&quot;/fortune/publish&quot;, dependencies=[Depends(require_token)])
+def fortune_publish():
+    import collect, time as time_mod
+    today = config_mod.today_kst().isoformat()
+    started = time_mod.monotonic()
+    enabled = bool(cfg.get(&quot;blog_publish_enabled&quot;) and cfg.get(&quot;blog_api_url&quot;))
+    def _run(d):
+        try:
+            created = collect.fortune_generate_step(d, cfg, today, publish=False)  # (a) 생성 — LLM 1회 시도
+        except Exception as e:                                   # 생성 실패도 발행은 진행 (부분 수행)
+            logger.warning(&quot;fortune generate step failed: %s&quot;, e); created = 0
+        if not enabled:                                          # FR-4 — 발행 시도 0건
+            return created, []
+        remaining = max(0, FORTUNE_PUBLISH_BUDGET_SECONDS - int(time_mod.monotonic() - started))
+        return created, collect.publish_all_fortune_items(d, cfg, today, budget_seconds=remaining)  # (b)
+    created, items = run_db(_run)
+    ... # (c) 응답 구성
+</code></pre>
+<h3>4.3 응답 JSON 스키마 (AC-1)</h3>
+<pre><code class="language-json">{
+  &quot;created&quot;: 2, &quot;published&quot;: 1, &quot;failed&quot;: 1, &quot;skipped&quot;: 84,
+  &quot;enabled&quot;: true,
+  &quot;message&quot;: &quot;발행 완료 — 성공 1건 / 실패 1건 / 스킵 84건 (생성 2건)&quot;,
+  &quot;items&quot;: [
+    {&quot;ref&quot;: &quot;2026-08-13&quot;, &quot;content_type&quot;: &quot;daily_blog&quot;, &quot;ok&quot;: true,  &quot;status&quot;: &quot;published&quot;, &quot;reason&quot;: &quot;&quot;},
+    {&quot;ref&quot;: &quot;01&quot;,         &quot;content_type&quot;: &quot;zodiac_blog&quot;, &quot;ok&quot;: false, &quot;status&quot;: &quot;failed&quot;,   &quot;reason&quot;: &quot;HTTP 401 — 토큰 불일치 — autoblog DASHBOARD_TOKEN 확인 필요&quot;},
+    {&quot;ref&quot;: &quot;02&quot;,         &quot;content_type&quot;: &quot;zodiac_blog&quot;, &quot;ok&quot;: false, &quot;status&quot;: &quot;skipped&quot;,  &quot;reason&quot;: &quot;시간 예산&quot;},
+    {&quot;ref&quot;: &quot;2026-08-13&quot;, &quot;content_type&quot;: &quot;daily_sns&quot;,   &quot;ok&quot;: false, &quot;status&quot;: &quot;not_target&quot;, &quot;reason&quot;: &quot;발행 대상 아님 — SNS 요약은 발행 후보가 아님 (*_blog만)&quot;}
+  ]
+}
+</code></pre>
+<ul>
+<li>집계: <code>published</code>=ok 건수, <code>failed</code>=status=="failed" 건수, <code>skipped</code>=status in ("skipped","not_target") 건수</li>
+<li><code>message</code> — enabled=False: <code>"발행 비활성 — BLOG_PUBLISH_ENABLED=1 및 BLOG_API_URL 설정 필요"</code> (AC-9) / 예산 조기 종료 시 "시간 예산 초과 — 재클릭으로 이어서 발행" 문구 병기</li>
+<li>daily_sns 항목: 오늘자 daily_sns 행이 <strong>존재할 때만</strong> <code>not_target</code> 레코드 추가 (AC-10 — 구분 표시, 발행 시도 없음)</li>
+</ul>
+<h3>4.4 401/429 힌트 매핑 (AC-4·AC-5 — <code>status_code</code> 기반)</h3>
+<table>
+<thead>
+<tr>
+<th>status_code</th>
+<th>reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>401</td>
+<td><code>HTTP 401 — 토큰 불일치 — autoblog DASHBOARD_TOKEN 확인 필요</code></td>
+</tr>
+<tr>
+<td>429</td>
+<td><code>HTTP 429 — 쿼터 소진 — autoblog Bailian token-plan 주간 쿼터 확인</code></td>
+</tr>
+<tr>
+<td>기타(5xx·400 등)</td>
+<td>기존 메시지(<code>HTTP {status}: {body[:120]}</code>) 그대로 — 120자 이내 (A-5)</td>
+</tr>
+<tr>
+<td>None(네트워크)</td>
+<td><code>network error: ...</code> (120자 이내)</td>
+</tr>
+</tbody>
+</table>
+<h2>5. Vercel 60초 예산 정책 (OQ-1 확정 지침 반영)</h2>
+<table>
+<thead>
+<tr>
+<th>단계</th>
+<th>정책</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>생성 (a)</td>
+<td><code>fortune_generate_step</code> 재사용 — <strong>LLM 생성 1회 시도/타입</strong> (기존 구조 그대로 — 재시도 없음, 실패 시 부분 수행 후 발행 진행)</td>
+</tr>
+<tr>
+<td>발행 (b)</td>
+<td><code>budget_seconds = max(0, 55 - 경과)</code> — 항목 시작마다 경과 검사, 초과 시 <strong>남은 후보 전부 <code>skipped("시간 예산")</code></strong></td>
+</tr>
+<tr>
+<td>총합</td>
+<td>55초 상한 (60초 서버리스 한도 - 5초 마진). 401(즉시 실패)·400(즉시 실패)은 항목당 ~1초로 빠르게 완료 — 실제 운영 실패(401) 시 예산 소진 없이 전 항목 실패 사유 수집</td>
+</tr>
+<tr>
+<td>위험 고지</td>
+<td>LLM 키 있는 환경에서 생성 2회 호출이 55초를 넘으면 발행이 <code>시간 예산</code>으로 축소될 수 있음 — 버튼 재클릭(멱등)으로 이어서 처리 가능 (NFR-4 멱등: slug upsert + published 스킵)</td>
+</tr>
+</tbody>
+</table>
+<h2>6. 대시보드 — static/index.html (FR-2)</h2>
+<ul>
+<li>상단바: "지금 수집 실행" 옆에 <code>&lt;button class="btn btn-primary" id="fortuneBtn" onclick="publishFortune()"&gt;운세 발행&lt;/button&gt;</code> (NFR-6 — <code>&lt;button&gt;</code>+라벨)</li>
+<li><code>publishFortune()</code>: <code>fortuneBusy</code> 가드(진행 중 비활성 + "발행 중..." 표시, 기존 <code>collect()</code> 패턴 동일) → <code>api('/fortune/publish', {method:'POST', headers:authHeaders()})</code> (기존 헬퍼 재사용, 401 시 기존 "토큰이 올바르지 않습니다" 안내)</li>
+<li>결과 렌더링 (<code>#fortunePanel</code> — 상단바 하단 인라인 카드, <code>renderFortuneResult</code>):</li>
+<li>요약: <code>setStatus("성공 N건 / 실패 N건 / 스킵 M건 (생성 C건)")</code></li>
+<li>항목별: ref_date·content_type·상태 라벨(성공/실패/스킵/발행 대상 아님)·사유 (모두 <code>esc()</code> — XSS 방지, autoblog body 원문 포함 가능)</li>
+<li><code>enabled:false</code> → "발행 비활성 — BLOG_PUBLISH_ENABLED=1 필요" 안내 (AC-7 — 실패 처리 아님)</li>
+<li>실패 행은 warn 스타일, 401/429 사유는 서버 reason에 이미 포함된 힌트 문구 그대로 표시</li>
+</ul>
+<h2>7. 테스트 계획 (TDD — 신규만, 기존 수정 0)</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>파일</th>
+<th>검증</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>T1</td>
+<td>test_api.py</td>
+<td>production 무토큰 → 401 (make_app(env="production") 패턴)</td>
+</tr>
+<tr>
+<td>T2</td>
+<td>test_api.py</td>
+<td>후보 2건(200/401) → 200·items ok/실패 reason 401·서버 크래시 없음</td>
+</tr>
+<tr>
+<td>T3</td>
+<td>test_api.py</td>
+<td>disabled → enabled:false+안내, publish 호출 0회</td>
+</tr>
+<tr>
+<td>T4</td>
+<td>test_api.py</td>
+<td>LLM 키 없음+고정 미생성 → created&gt;0 후 발행 (fortune_generate_step 경유)</td>
+</tr>
+<tr>
+<td>T5</td>
+<td>test_fortune_publish.py</td>
+<td>헬퍼 혼합(200/401/429/5xx/qc_failed/published) → 항목별 상태·사유, daily_sns 비포함</td>
+</tr>
+<tr>
+<td>T6</td>
+<td>test_api.py</td>
+<td>publish_failed 행 재발행 → published</td>
+</tr>
+<tr>
+<td>T7+</td>
+<td>test_fortune_publish.py</td>
+<td>budget_seconds=0 → 전 항목 skipped("시간 예산")</td>
+</tr>
+<tr>
+<td>T8+</td>
+<td>test_publish_client.py</td>
+<td>status_code (401/429/None) + 메시지 포맷 불변</td>
+</tr>
+</tbody>
+</table>
+<p>테스트 픽스처: 기존 <code>make_app</code>/<code>_Resp</code>/<code>_cfg</code> 패턴 재사용, <code>monkeypatch.setattr(publish_client.requests, "post", ...)</code> + <code>publish_client.time.sleep</code> 패치(429 백오프), <code>llm_client.has_api_key</code> 패치.</p>
+<h2>8. 제약·리스크</h2>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>기존 테스트 수정 금지</td>
+<td>신규 추가만 — <code>_publish_all_fortune</code> 위임은 11건 회귀로 증명</td>
+</tr>
+<tr>
+<td>재시도 정책 불변</td>
+<td><code>publish_client._post</code> 429·5xx 백오프 3회 / 400·401 즉시 실패 — 신규 재시도 없음</td>
+</tr>
+<tr>
+<td>Vercel 60초</td>
+<td>55초 예산 + skipped("시간 예산") — 멱등 재클릭으로 이어서 처리</td>
+</tr>
+<tr>
+<td>실통신 불가</td>
+<td>autoblog 401(토큰 불일치) — 테스트는 전부 mock. 실패 사유 표시 로직이 실제 401을 우아하게 처리하는지가 QA 핵심 포인트</td>
+</tr>
+<tr>
+<td>AC-8</td>
+<td>server.py는 collect 헬퍼만 호출 — requests.post 직호출·후보 하드코딩·slug 재구현 부재를 코드 리뷰로 검증</td>
+</tr>
+</tbody>
+</table>
+</main>
+</body>
+</html>

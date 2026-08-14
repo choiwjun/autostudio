@@ -27,16 +27,32 @@ def _section_heading_lines(body):
             if ln.startswith("## ") and "자주 묻는 질문" not in ln]
 
 
+def _is_data_uri(url):
+    """v27 (AC4-4): 나노바나나 data URI 저장분 판별 — data:{mime};base64,{...}."""
+    return isinstance(url, str) and url.startswith("data:")
+
+
 def _image_lines(draft, marker, label):
     urls = [u for u in _json_list(draft.get("section_images")) if u]
     lines = []
     if draft.get("image_url"):
-        lines += [f"![{label}]({draft['image_url']})", ""]
+        if _is_data_uri(draft["image_url"]):
+            # v27 (AC4-4): data URI는 에디터 임포트 미지원 — 라인 생략 + 수동 업로드
+            # 안내 주석 (사용자가 블로그 에디터에서 직접 업로드). 네이버 플레인은
+            # _image_lines 미호출이라 무영향.
+            lines += [f"<!-- {label}: data URI 이미지 — 블로그 에디터에서 직접 업로드하세요 -->", ""]
+        else:
+            lines += [f"![{label}]({draft['image_url']})", ""]
     img_i = 0
     for line in (draft.get("body") or "").splitlines():
         lines.append(line)
         if line.startswith("## ") and "자주 묻는 질문" not in line and img_i < len(urls):
-            lines += ["", f"![섹션 이미지 {img_i + 1}]({urls[img_i]})", ""]
+            if _is_data_uri(urls[img_i]):
+                lines += ["",
+                          f"<!-- 섹션 이미지 {img_i + 1}: data URI 이미지 — "
+                          "블로그 에디터에서 직접 업로드하세요 -->", ""]
+            else:
+                lines += ["", f"![섹션 이미지 {img_i + 1}]({urls[img_i]})", ""]
             img_i += 1
     return lines
 

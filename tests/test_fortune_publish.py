@@ -304,3 +304,80 @@ def test_weekly_and_monthly_created_on_schedule(monkeypatch, tmp_path):
     monthly = d.get_fortune_generation("2026-09", "monthly_blog")
     assert monthly and monthly["status"] == "published"
     d.close()
+
+
+# ---------- v28: 항목별 결과 수집 헬퍼 (수동 발행 엔드포인트용) ----------
+
+
+def _seed(d, ref, ctype, status="generated"):
+    d.upsert_fortune_generation(ref, ctype, "", grounding="g")
+    d.update_fortune_generation(
+        ref, ctype, json.dumps(_blog_content(ref), ensure_ascii=False),
+        status=status)
+
+
+def test_publish_all_fortune_items_collects_per_item(monkeypatch, tmp_path):
+    # T5 (AC-3~AC-5, AC-10): 200/401/429/5xx/qc_failed/published 혼합 —
+    # 항목별 상태·사유 정확성, daily_sns 비포함, DB 상태 갱신 기존 동작 유지
+    import collect
+    d = _open(tmp_path)
+    cfg = _cfg(tmp_path)
+    _seed(d, "2026-08-10", "daily_blog")                     # → 성공
+    _seed(d, "01", "day_pillar_blog")                        # → 401 즉시 실패
+    _seed(d, "01", "zodiac_blog")                            # → 429 재시도 후 실패
+    _seed(d, "01", "animal_blog")                            # → 503 재시도 후 실패
+    _seed(d, "02", "zodiac_blog", status="qc_failed")        # → 스킵 (검수 대기)
+    _seed(d, "02", "animal_blog", status="published")        # → 스킵 (이미 발행됨)
+    _seed(d, "2026-08-10", "daily_sns")                      # → 발행 후보 아님
+
+    def fake_post(url, json, headers, timeout):
+        slug = json["slug"]
+        if slug == "fortune-day-pillar-01":
+            return _Resp(401, "unauthorized")
+        if slug == "fortune-zodiac-01":
+            return _Resp(429, "quota exhausted")
+        if slug == "fortune-animal-01":
+            return _Resp(503, "boom")
+        return _Resp(200, {})
+
+    monkeypatch.setattr(publish_client.requests, "post", fake_post)
+    monkeypatch.setattr(publish_client.time, "sleep", lambda s: None)
+    items = collect.publish_all_fortune_items(d, cfg, "2026-08-10")
+    by = {(it["content_type"], it["ref"]): it for it in items}
+    assert ("daily_sns", "2026-08-10") not in by  # AC-10 — 후보에 없음
+    assert by[("daily_blog", "2026-08-10")]["ok"] is True
+    assert by[("daily_blog", "2026-08-10")]["status"] == "published"
+    assert by[("day_pillar_blog", "01")]["status"] == "failed"
+    assert by[("day_pillar_blog", "01")]["reason"].startswith("HTTP 401")
+    assert "토큰 불일치" in by[("day_pillar_blog", "01")]["reason"]
+    assert by[("zodiac_blog", "01")]["status"] == "failed"
+    assert by[("zodiac_blog", "01")]["reason"].startswith("HTTP 429")
+    assert "쿼터 소진" in by[("zodiac_blog", "01")]["reason"]
+    assert by[("animal_blog", "01")]["status"] == "failed"
+    assert "HTTP 503" in by[("animal_blog", "01")]["reason"]
+    assert by[("zodiac_blog", "02")]["status"] == "skipped"
+    assert "검수 대기" in by[("zodiac_blog", "02")]["reason"]
+    assert by[("animal_blog", "02")]["status"] == "skipped"
+    assert "이미 발행됨" in by[("animal_blog", "02")]["reason"]
+    # DB 상태 갱신 — 기존 _publish_all_fortune과 동일 동작
+    assert d.get_fortune_generation("2026-08-10", "daily_blog")["status"] == "published"
+    assert d.get_fortune_generation("01", "day_pillar_blog")["status"] == "publish_failed"
+    assert d.get_fortune_generation("02", "zodiac_blog")["status"] == "qc_failed"
+    d.close()
+
+
+def test_publish_all_fortune_items_budget_skips_rest(monkeypatch, tmp_path):
+    # OQ-1: 예산 0 → 발행 시도 없이 전 항목 skipped("시간 예산") — 멱등 재클릭 전제
+    import collect
+    d = _open(tmp_path)
+    _seed(d, "2026-08-10", "daily_blog")
+    calls = []
+    monkeypatch.setattr(publish_client.requests, "post",
+                        lambda *a, **kw: (calls.append(1), _Resp(200, {}))[1])
+    items = collect.publish_all_fortune_items(d, _cfg(tmp_path), "2026-08-10",
+                                              budget_seconds=0)
+    assert calls == []
+    assert len(items) == 86  # daily 1 + weekly 1(월요일) + 고정 60/12/12
+    assert all(it["status"] == "skipped" and it["reason"] == "시간 예산"
+               for it in items)
+    d.close()

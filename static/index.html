@@ -77,6 +77,13 @@
 
   /* 필터 바 */
   .filters { padding: 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+  /* v28: 운세 발행 — 상단바 버튼 묶음 + 결과 패널 */
+  .top-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .fortune-panel { padding: 16px; margin-bottom: 14px; }
+  .fortune-panel h2 { margin: 0 0 8px; font-size: 15px; }
+  .fortune-panel .summary { margin-bottom: 8px; line-height: 1.7; }
+  .fortune-panel table td, .fortune-panel table th { padding: 6px 8px; text-align: left; font-size: 12.5px; }
+  .fortune-panel table tr.fail td { color: var(--warning); }
   .filters select, .filters input { height: 34px; padding: 0 10px; border: 1px solid var(--border);
     border-radius: 10px; background: rgba(15, 23, 42, .6); font-size: 13px; color: var(--text);
     font-family: inherit; transition: border-color .15s ease, box-shadow .15s ease; }
@@ -275,7 +282,10 @@
         <h1>키워드 대시보드</h1>
         <p class="sub">AI 인용 · 수요 · CPC 기반 상용화 키워드 우선순위</p>
       </div>
-      <button class="btn btn-primary" id="collectBtn" onclick="collect()">지금 수집 실행</button>
+      <div class="top-actions">
+        <button class="btn btn-primary" id="collectBtn" onclick="collect()">지금 수집 실행</button>
+        <button class="btn" id="fortuneBtn" onclick="publishFortune()">운세 발행</button>
+      </div>
     </div>
   </header>
 
@@ -305,6 +315,12 @@
     </section>
 
     <span id="status"></span>
+
+    <section class="card fortune-panel hidden" id="fortunePanel" aria-label="운세 발행 결과">
+      <h2>운세 발행 결과</h2>
+      <div class="summary" id="fortuneSummary"></div>
+      <div id="fortuneItems"></div>
+    </section>
 
     <section class="card filters" aria-label="필터">
       <select id="category" onchange="resetAndLoad()" aria-label="분야 필터">
@@ -748,6 +764,62 @@ async function collect() {
   await refreshStatus();
   loadTopKpi();
   load();
+}
+
+// v28: 운세 수동 발행 (대시보드 "운세 발행" 버튼) — POST /fortune/publish
+let fortuneBusy = false;
+
+async function publishFortune() {
+  if (fortuneBusy) return;
+  fortuneBusy = true;
+  const btn = document.getElementById('fortuneBtn');
+  btn.disabled = true;
+  btn.textContent = '발행 중...';
+  setStatus('운세 발행 실행 중... (최대 60초)');
+  const panel = document.getElementById('fortunePanel');
+  panel.classList.remove('hidden');
+  document.getElementById('fortuneSummary').textContent = '발행 중...';
+  document.getElementById('fortuneItems').innerHTML = '';
+  try {
+    const res = await api('/fortune/publish', { method: 'POST', headers: authHeaders() });
+    renderFortuneResult(res);
+  } catch (e) {
+    if (String(e.message) !== '401') {
+      setStatus('운세 발행 요청이 실패했습니다 (시간 초과 가능) — 다시 시도하세요', true);
+    }
+    document.getElementById('fortuneSummary').textContent = '요청 실패 — 서버 로그를 확인하세요';
+  } finally {
+    fortuneBusy = false;
+    btn.disabled = false;
+    btn.textContent = '운세 발행';
+  }
+}
+
+function renderFortuneResult(res) {
+  const summaryEl = document.getElementById('fortuneSummary');
+  const itemsEl = document.getElementById('fortuneItems');
+  if (!res.enabled) {
+    const msg = res.message || '발행 비활성 — BLOG_PUBLISH_ENABLED=1 필요';
+    setStatus(msg, true);
+    summaryEl.textContent = msg;
+    itemsEl.innerHTML = '';
+    return;
+  }
+  const msg = res.message || `성공 ${res.published}건 / 실패 ${res.failed}건 / 스킵 ${res.skipped}건 (생성 ${res.created}건)`;
+  setStatus(msg);
+  summaryEl.textContent = msg;
+  if (!res.items || !res.items.length) {
+    itemsEl.innerHTML = '<p class="empty">발행 대상이 없습니다</p>';
+    return;
+  }
+  const statusLabel = { published: '성공', failed: '실패', skipped: '스킵', not_target: '발행 대상 아님' };
+  itemsEl.innerHTML = '<table class="mini-table"><thead><tr><th>기준일</th><th>타입</th><th>결과</th><th>사유</th></tr></thead><tbody>'
+    + res.items.map(it => {
+      const label = statusLabel[it.status] || it.status;
+      const cls = it.status === 'failed' ? ' class="fail"' : '';
+      return `<tr${cls}><td>${esc(it.ref)}</td><td>${esc(it.content_type)}</td><td>${esc(label)}</td><td>${esc(it.reason || '')}</td></tr>`;
+    }).join('')
+    + '</tbody></table>';
 }
 
 async function refreshStatus() {

@@ -324,12 +324,15 @@ def retire(d, today, now):
     return len(victims)
 
 
-def fortune_generate_step(d, cfg, today):
+def fortune_generate_step(d, cfg, today, *, publish=True):
     """v22.2(3.3): 운세 콘텐츠 생성 — daily(매일)·weekly(월요일)·monthly(1일)
     + 고정 콘텐츠(일주 60·별자리 12·띠 12 — 하루 상한만큼 순차).
     - LLM 키 없으면 생성은 생략하되 발행 실패분 재시도는 수행
     - 멱등: 같은 (기준일, 타입) 이미 생성 시 스킵
     - 실패해도 수집 성과는 보존 — 로그만 기록
+    - v28: publish 키워드 — 수동 발행 엔드포인트가 생성만 수행(publish=False)하고
+      예산 적용 발행(publish_all_fortune_items)을 별도 단계로 실행할 수 있게 분리.
+      기본값 True — 기존 호출자(run_collection·테스트) 동작 불변.
     반환: 생성 건수 (0 = 스킵/생략/실패)"""
     import llm_client
     has_llm = llm_client.has_api_key()
@@ -437,18 +440,26 @@ def fortune_generate_step(d, cfg, today):
                 break  # 타입당 1개씩 순환
         if not progressed:
             break
-    # 발행 — 생성·검수 통과분과 실패 재시도분 전부
-    _publish_all_fortune(d, cfg, today)
+    # 발행 — 생성·검수 통과분과 실패 재시도분 전부 (v28: publish=False 시 생략 —
+    # 엔드포인트가 예산 적용 발행을 단일 책임으로 수행)
+    if publish:
+        _publish_all_fortune(d, cfg, today)
     return created
 
 
-def _publish_all_fortune(d, cfg, today):
-    """모든 운세 글 발행 대상 (daily/weekly/monthly/고정) — 발행·재시도.
-    qc_failed는 수동 검토 대상 — 자동 발행 안 함."""
-    if not cfg.get("blog_publish_enabled") or not cfg.get("blog_api_url"):
-        return
-    import json as json_mod
-    import publish_client
+# v28: 운세 발행 항목별 결과 수집 (수동 발행 엔드포인트용 — FR-3 재사용).
+# 기존 _publish_all_fortune의 후보 구성·상태 판정·DB 갱신·로그를 헬퍼로 추출하고
+# _publish_all_fortune은 이 헬퍼로 위임 — 동작 불변 (test_fortune_publish.py 11건).
+FORTUNE_CANDIDATE_FIXED = (("day_pillar_blog", 60), ("zodiac_blog", 12),
+                           ("animal_blog", 12))
+FORTUNE_SKIP_REASON_BUDGET = "시간 예산"
+
+
+def _fortune_publish_candidates(today):
+    """발행 후보 목록 — (content_type, fortune_type, ref_key).
+    daily_blog(당일) + weekly_blog(월요일) + monthly_blog(1일) +
+    day_pillar_blog 01~60 + zodiac_blog 01~12 + animal_blog 01~12.
+    daily_sns는 발행 후보가 아님 (AC-10)."""
     today_dt = date.fromisoformat(today)
     monday = (today_dt - timedelta(days=today_dt.weekday())).isoformat()
     candidates = [("daily_blog", "daily", today)]
@@ -457,31 +468,87 @@ def _publish_all_fortune(d, cfg, today):
     if today_dt.day == 1:
         candidates.append(("monthly_blog", "monthly",
                            today_dt.strftime("%Y-%m")))
-    for ctype, count in (("day_pillar_blog", 60), ("zodiac_blog", 12),
-                         ("animal_blog", 12)):
+    for ctype, count in FORTUNE_CANDIDATE_FIXED:
         for i in range(1, count + 1):
             candidates.append((ctype, ctype.replace("_blog", ""), f"{i:02d}"))
-    for ctype, ftype, ref_key in candidates:
-        row = d.get_fortune_generation(ref_key, ctype)
-        if not row or not row["content"]:
+    return candidates
+
+
+def _fortune_publish_failure_reason(e):
+    """BlogPublishError → 항목별 실패 사유 (AC-4/AC-5 — status_code 기반 힌트).
+    메시지는 120자 이내 (요구사항 A-5). status_code 없음(네트워크 등)은 원문."""
+    status = getattr(e, "status_code", None)
+    if status == 401:
+        return "HTTP 401 — 토큰 불일치 — autoblog DASHBOARD_TOKEN 확인 필요"
+    if status == 429:
+        return "HTTP 429 — 쿼터 소진 — autoblog Bailian token-plan 주간 쿼터 확인"
+    return str(e)[:120]
+
+
+def _fortune_publish_item_result(d, cfg, ctype, ftype, ref_key):
+    """발행 후보 1건 처리 — 기존 _publish_all_fortune와 동일한 판정 순서·
+    DB 상태 갱신(update_fortune_generation)·collection_log 기록.
+    반환: 항목별 결과 레코드 {ref, content_type, ok, status, reason}."""
+    import publish_client
+    row = d.get_fortune_generation(ref_key, ctype)
+    if not row or not row["content"]:
+        return {"ref": ref_key, "content_type": ctype, "ok": False,
+                "status": "skipped", "reason": "콘텐츠 없음 (미생성)"}
+    if row["status"] == "published":
+        return {"ref": ref_key, "content_type": ctype, "ok": False,
+                "status": "skipped", "reason": "이미 발행됨"}
+    if row["status"] == "qc_failed":
+        return {"ref": ref_key, "content_type": ctype, "ok": False,
+                "status": "skipped", "reason": "검수 대기 (qc_failed)"}
+    try:
+        content = json.loads(row["content"])
+        if not isinstance(content, dict) or not content.get("title"):
+            return {"ref": ref_key, "content_type": ctype, "ok": False,
+                    "status": "skipped", "reason": "콘텐츠 형식 오류"}
+    except json.JSONDecodeError:
+        return {"ref": ref_key, "content_type": ctype, "ok": False,
+                "status": "skipped", "reason": "콘텐츠 형식 오류"}
+    try:
+        publish_client.publish_fortune(cfg, d, ref_key, content, ftype)
+        d.log_collection("(fortune)", "publish",
+                         f"운세 발행: {ftype}/{ref_key}", now_kst())
+        return {"ref": ref_key, "content_type": ctype, "ok": True,
+                "status": "published", "reason": ""}
+    except publish_client.BlogPublishError as e:
+        d.update_fortune_generation(
+            ref_key, ctype, row["content"], status="publish_failed")
+        d.log_collection("(fortune)", "error",
+                         f"운세 발행 실패: {e}", now_kst())
+        return {"ref": ref_key, "content_type": ctype, "ok": False,
+                "status": "failed", "reason": _fortune_publish_failure_reason(e)}
+
+
+def publish_all_fortune_items(d, cfg, today, budget_seconds=None):
+    """모든 운세 발행 후보 순회 — 항목별 결과 리스트 반환 (v28).
+    상태 갱신·로그는 기존 _publish_all_fortune와 동일. budget_seconds 지정 시
+    초과 후 남은 후보는 skipped(시간 예산)로 반환 (OQ-1 — Vercel 60초 예산).
+    blog_publish_enabled/blog_api_url 검사는 호출자 책임 (기존 가드 위치 유지)."""
+    started = time.monotonic()
+    results = []
+    for ctype, ftype, ref_key in _fortune_publish_candidates(today):
+        if budget_seconds is not None and                 time.monotonic() - started >= budget_seconds:
+            results.append({"ref": ref_key, "content_type": ctype, "ok": False,
+                            "status": "skipped",
+                            "reason": FORTUNE_SKIP_REASON_BUDGET})
             continue
-        if row["status"] in ("published", "qc_failed"):
-            continue
-        try:
-            content = json_mod.loads(row["content"])
-            if not isinstance(content, dict) or not content.get("title"):
-                continue
-        except json_mod.JSONDecodeError:
-            continue
-        try:
-            publish_client.publish_fortune(cfg, d, ref_key, content, ftype)
-            d.log_collection("(fortune)", "publish",
-                             f"운세 발행: {ftype}/{ref_key}", now_kst())
-        except publish_client.BlogPublishError as e:
-            d.update_fortune_generation(
-                ref_key, ctype, row["content"], status="publish_failed")
-            d.log_collection("(fortune)", "error",
-                             f"운세 발행 실패: {e}", now_kst())
+        results.append(_fortune_publish_item_result(d, cfg, ctype, ftype,
+                                                    ref_key))
+    return results
+
+
+def _publish_all_fortune(d, cfg, today):
+    """모든 운세 글 발행 대상 (daily/weekly/monthly/고정) — 발행·재시도.
+    qc_failed는 수동 검토 대상 — 자동 발행 안 함.
+    v28: 항목별 결과 수집 헬퍼(publish_all_fortune_items)로 위임 — 동작 불변
+    (반환값 없음 유지 — 기존 호출자·테스트 호환)."""
+    if not cfg.get("blog_publish_enabled") or not cfg.get("blog_api_url"):
+        return
+    publish_all_fortune_items(d, cfg, today)
 
 
 def now_kst():

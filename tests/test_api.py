@@ -813,3 +813,162 @@ def test_planner_publish_log_and_age(tmp_path, monkeypatch):
     assert body2["publish_queue"] == []
     assert body2["recent_published"][0]["draft_id"] == did
     assert body2["recent_published"][0]["published_at"] != ""
+
+
+# ---------- v28: 운세 수동 발행 (POST /fortune/publish) ----------
+
+
+class _FortuneResp:
+    def __init__(self, status, text=""):
+        import json as json_mod
+        self.status_code = status
+        self.text = text if isinstance(text, str) else json_mod.dumps(text)
+
+    def json(self):
+        return {"ok": True}
+
+
+def make_fortune_app(tmp_path, env="development", **overrides):
+    """운세 발행 테스트용 앱 — make_app과 동일 픽스처 + 블로그 발행 cfg."""
+    dbfile = f"sqlite:///{tmp_path / 'fortune.db'}"
+    d = db.Database(dbfile)
+    d.init()
+    d.close()
+    cfg = {"db_url": dbfile, "dashboard_token": "sekret",
+           "manual_budget_seconds": 45, "env": env,
+           "blog_api_url": "https://blog.example.com", "blog_token": "tok",
+           "blog_publish_enabled": True, "fortune_fixed_per_day": 0}
+    cfg.update(overrides)
+    return create_app(cfg)
+
+
+def _seed_fortune(d, ref, ctype, status="generated"):
+    import json as json_mod
+    body = {"title": f"{ref} {ctype} 운세", "summary": "요약",
+            "body": f"## 총평\n{ref} 기준 본문입니다."}
+    d.upsert_fortune_generation(ref, ctype, "", grounding="g")
+    d.update_fortune_generation(
+        ref, ctype, json_mod.dumps(body, ensure_ascii=False), status=status)
+
+
+def _open_fortune_db(tmp_path):
+    d = db.Database(f"sqlite:///{tmp_path / 'fortune.db'}")
+    d.init()
+    return d
+
+
+def test_fortune_publish_endpoint_requires_token(tmp_path, monkeypatch):
+    # AC-2: 프로덕션 무토큰 401 (기존 require_token 체계 재사용)
+    import llm_client
+    monkeypatch.setattr(llm_client, "has_api_key", lambda: False)
+    prod = TestClient(make_fortune_app(tmp_path, env="production"))
+    assert prod.post("/fortune/publish").status_code == 401
+    body = prod.post("/fortune/publish", headers=AUTH).json()
+    assert body["enabled"] is True and body["created"] == 0
+
+
+def test_fortune_publish_endpoint_partial_results(tmp_path, monkeypatch):
+    # AC-1/AC-3/AC-4: 1건 성공 + 1건 401 실패 → 200 + 항목별 결과, 서버 크래시 없음
+    import config as config_mod
+    import llm_client
+    import publish_client
+    monkeypatch.setattr(llm_client, "has_api_key", lambda: False)
+    today = config_mod.today_kst().isoformat()
+    d = _open_fortune_db(tmp_path)
+    _seed_fortune(d, today, "daily_blog")
+    _seed_fortune(d, "01", "zodiac_blog")
+    d.close()
+
+    def fake_post(url, json, headers, timeout):
+        if json["slug"] == "fortune-zodiac-01":
+            return _FortuneResp(401, "unauthorized")
+        return _FortuneResp(200, {})
+
+    monkeypatch.setattr(publish_client.requests, "post", fake_post)
+    client = TestClient(make_fortune_app(tmp_path))
+    r = client.post("/fortune/publish")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["enabled"] is True
+    assert body["created"] == 0
+    assert body["published"] == 1 and body["failed"] == 1
+    by = {(it["content_type"], it["ref"]): it for it in body["items"]}
+    assert by[("daily_blog", today)]["ok"] is True
+    assert by[("daily_blog", today)]["status"] == "published"
+    assert by[("zodiac_blog", "01")]["ok"] is False
+    assert by[("zodiac_blog", "01")]["status"] == "failed"
+    assert by[("zodiac_blog", "01")]["reason"].startswith("HTTP 401")
+    assert "토큰 불일치" in by[("zodiac_blog", "01")]["reason"]
+    # DB 상태 반영 — 성공은 published, 실패는 publish_failed
+    d2 = _open_fortune_db(tmp_path)
+    assert d2.get_fortune_generation(today, "daily_blog")["status"] == "published"
+    assert d2.get_fortune_generation("01", "zodiac_blog")["status"] == "publish_failed"
+    d2.close()
+
+
+def test_fortune_publish_endpoint_disabled(tmp_path, monkeypatch):
+    # AC-9/FR-4: BLOG_PUBLISH_ENABLED=0 → 200 + enabled:false + 안내, 발행 0회, DB 불변
+    import config as config_mod
+    import llm_client
+    import publish_client
+    monkeypatch.setattr(llm_client, "has_api_key", lambda: False)
+    today = config_mod.today_kst().isoformat()
+    d = _open_fortune_db(tmp_path)
+    _seed_fortune(d, today, "daily_blog")
+    d.close()
+    calls = []
+    monkeypatch.setattr(publish_client.requests, "post",
+                        lambda *a, **kw: (calls.append(1), _FortuneResp(200, {}))[1])
+    client = TestClient(make_fortune_app(tmp_path, blog_publish_enabled=False))
+    body = client.post("/fortune/publish").json()
+    assert body["enabled"] is False
+    assert "발행 비활성" in body["message"]
+    assert body["items"] == []
+    assert body["published"] == 0 and body["failed"] == 0
+    assert calls == []  # 발행 시도 0건
+    d2 = _open_fortune_db(tmp_path)
+    assert d2.get_fortune_generation(today, "daily_blog")["status"] == "generated"
+    d2.close()
+
+
+def test_fortune_publish_endpoint_generates_then_publishes(tmp_path, monkeypatch):
+    # FR-1-a: 미생성 콘텐츠 생성(1회 시도) 후 발행 — LLM 키 없음 + 고정 콘텐츠
+    import llm_client
+    import publish_client
+    monkeypatch.setattr(llm_client, "has_api_key", lambda: False)
+    published = []
+    monkeypatch.setattr(publish_client.requests, "post",
+                        lambda url, json, headers, timeout: (
+                            published.append(json["slug"]), _FortuneResp(200, {}))[1])
+    client = TestClient(make_fortune_app(tmp_path, fortune_fixed_per_day=2))
+    body = client.post("/fortune/publish").json()
+    assert body["created"] == 2  # day_pillar 01 + zodiac 01 (순환 상한)
+    assert body["published"] == 2
+    assert "fortune-day-pillar-01" in published
+    assert "fortune-zodiac-01" in published
+    d = _open_fortune_db(tmp_path)
+    assert d.get_fortune_generation("01", "day_pillar_blog")["status"] == "published"
+    assert d.get_fortune_generation("01", "zodiac_blog")["status"] == "published"
+    d.close()
+
+
+def test_fortune_publish_endpoint_retries_previous_failures(tmp_path, monkeypatch):
+    # FR-1-b: status=publish_failed 행이 재발행 시도되고 성공 시 published 갱신
+    import config as config_mod
+    import llm_client
+    import publish_client
+    monkeypatch.setattr(llm_client, "has_api_key", lambda: False)
+    today = config_mod.today_kst().isoformat()
+    d = _open_fortune_db(tmp_path)
+    _seed_fortune(d, today, "daily_blog", status="publish_failed")
+    d.close()
+    monkeypatch.setattr(publish_client.requests, "post",
+                        lambda *a, **kw: _FortuneResp(200, {}))
+    client = TestClient(make_fortune_app(tmp_path))
+    body = client.post("/fortune/publish").json()
+    daily = next(it for it in body["items"] if it["content_type"] == "daily_blog")
+    assert daily["ok"] is True and daily["status"] == "published"
+    assert body["published"] == 1 and body["failed"] == 0
+    d2 = _open_fortune_db(tmp_path)
+    assert d2.get_fortune_generation(today, "daily_blog")["status"] == "published"
+    d2.close()
