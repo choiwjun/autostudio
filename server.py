@@ -131,9 +131,10 @@ class PublishedUrlIn(BaseModel):
 
 # v30: KDP 파이프라인 (K-1~K-4) 요청 모델
 class KdpBookCreateIn(BaseModel):
-    # K-1: 수동 책 생성 트리거
+    # K-1: 수동 책 생성 트리거 (R-1: source_keyword로 배치 generate 스테이지 연결)
     title: str
     lang: str = "en"
+    source_keyword: str = ""
 
 
 class KdpGenerateIn(BaseModel):
@@ -1054,9 +1055,10 @@ def create_app(cfg):
 
     @app.post("/kdp/books", dependencies=[Depends(require_token)])
     def kdp_book_create(body: KdpBookCreateIn):
-        # K-1: 책 생성 트리거 (후보 수락)
+        # K-1: 책 생성 트리거 (후보 수락) — R-1: source_keyword 전달로 배치 generate 연결
         bid = run_db(lambda d: d.insert_kdp_book(
             title=body.title, status="draft", lang=body.lang,
+            source_keyword=body.source_keyword,
             created_at=config_mod.now_kst_iso()))
         return {"ok": True, "book_id": bid}
 

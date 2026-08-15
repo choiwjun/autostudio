@@ -93,3 +93,80 @@ def test_run_pipeline_full_flow(tmp_path, monkeypatch):
     d2 = db.Database(cfg["db_url"]); d2.init()
     assert d2.get_kdp_book(bid)["status"] == "ready"
     d2.close()
+
+
+# ----- R-1: 배치 research 실제 호출 (자율 신규 주제 산출) -----
+
+def test_research_stage_calls_run_research_with_upcoming_keywords(tmp_path, monkeypatch):
+    # R-1: _run_research_stage가 '곧 뜰' 상위 키워드로 run_research를 실제 호출
+    d = db.Database(_cfg(tmp_path)["db_url"]); d.init()
+    d.upsert_keyword("절약 챌린지", category="금융", day="2026-08-01")
+    d.upsert_keyword("걷기 습관", category="건강", day="2026-08-01")
+    d.close()
+    captured = {}
+
+    def fake_research(db_conn, cfg, keywords, snapshot_fetcher=None,
+                      translator=None, limit=10):
+        captured["keywords"] = list(keywords)
+        captured["limit"] = limit
+        return {"candidates": [{"id": 1, "lang": "en"}],
+                "conversion_rate": 0.5, "suggestion": "", "skipped": []}
+
+    monkeypatch.setattr(kp, "run_research", fake_research)
+    d2 = db.Database(_cfg(tmp_path)["db_url"]); d2.init()
+    result = {"research": 0}
+    n = kp._run_research_stage(d2, _cfg(tmp_path), result)
+    d2.close()
+    assert n == 1 and result["research"] == 1
+    assert captured["limit"] == kp.RESEARCH_KEYWORD_LIMIT
+    kws = {k for k, _ in captured["keywords"]}
+    assert kws == {"절약 챌린지", "걷기 습관"}
+
+
+def test_research_stage_isolates_failure(tmp_path, monkeypatch):
+    # R-1: run_research 예외는 격리 — errors 기록 후 스테이지 0 반환 (파이프라인 중단 X)
+    d = db.Database(_cfg(tmp_path)["db_url"]); d.init()
+    d.upsert_keyword("절약 챌린지", category="금융", day="2026-08-01")
+    d.close()
+
+    def boom(*a, **k):
+        raise RuntimeError("amazon down")
+
+    monkeypatch.setattr(kp, "run_research", boom)
+    d2 = db.Database(_cfg(tmp_path)["db_url"]); d2.init()
+    result = {"research": 0, "errors": []}
+    n = kp._run_research_stage(d2, _cfg(tmp_path), result)
+    d2.close()
+    assert n == 0 and result["research"] == 0
+    assert any("research" in e for e in result["errors"])
+
+
+# ----- R-2: 배치 assemble 표지 첨부 -----
+
+def test_assemble_stage_attaches_cover_png(tmp_path, monkeypatch):
+    # R-2: cover_bytes 미지정 시 make_cover_image 생성 → build_epub에 첨부
+    d = db.Database(_cfg(tmp_path)["db_url"]); d.init()
+    bid = _seed_book(d, "52주 절약 챌린지 워크북", status="ready")
+    d.insert_kdp_chapter(bid, seq=1, title="챕터 1",
+                         body_md="word " * 500, word_count=500, status="done")
+    d.close()
+    captured = {}
+
+    def fake_assemble(book, chapters, cover_bytes=None, out_path=None):
+        captured["cover"] = cover_bytes
+        if out_path:
+            with open(out_path, "wb") as f:
+                f.write(b"PK-MOCK-EPUB")
+        return b"PK-MOCK-EPUB"
+
+    monkeypatch.setattr(kp, "build_epub", fake_assemble)
+    cfg = _cfg(tmp_path)
+    cfg["kdp_epub_dir"] = str(tmp_path / "out")
+    d2 = db.Database(cfg["db_url"]); d2.init()
+    result = {"assembled": 0}
+    n = kp._run_assemble_stage(d2, cfg, result)
+    d2.close()
+    assert n == 1 and result["assembled"] == 1
+    cover = captured.get("cover")
+    assert cover is not None and cover[:8] == b"\x89PNG\r\n\x1a\n"
+    # AI 공개 문구 포함 (M-1 정합 — PNG는 바이너리라 시그니처 검증, 문구는 make_cover_image 단위 테스트 담당)

@@ -313,11 +313,17 @@ VM_SYNTAX_OK
 ## 4. 잔존(비차단) 버그·정보 — R-1·R-2 (승인 저해 아님)
 
 ### [R-1] H-1 research 단계가 run_research 미호출(스텁) — Medium(정보·백로그)
+
+> **✅ 해소 (v30.1, 2026-08-16)**: `_run_research_stage`가 '곧 뜰' 상위 키워드(opportunity DESC 10개)로 `run_research` 실제 호출 — 배치 자율 신규 주제 산출 가동. 후보별 `source_keyword` 추적(기존 마지막 키워드 일괄 기록 잠재 버그 수정), `POST /kdp/books`에 source_keyword 수용, 실패 격리(errors 기록 후 파이프라인 계속). 테스트: research 실제 호출·실패 격리 2건 추가.
+
 - kdp_pipeline._run_research_stage는 status='draft'·source_keyword 책을 세는(count) 것만 하고 `run_research`를 호출하지 않음. 배치가 **신규 키워드→후보 산출(K-1)을 자율 수행하지 못함**.
 - **완화**: 아키텍처상 K-1은 서버 /kdp/books(POST)로 사용자 수락 후보를 draft 책으로 저장 → 배치가 그 draft 책을 generate(②)부터 처리하는 **이원화 흐름**. 후보 수락(K-1)은 서버, 생성~출간(K-2~K-4)은 배치 → 실질 파이프라인 완주. 단 배치 자율 연구는 미가동.
 - **권고(비차단)**: ① _run_research_stage를 draft·source_keyword 기반 `run_research(...)` 호출로 강화(멱등) ② 또는 함수명/주석을 'research 카운터'로 정정해 명시적 축소. mock run_research로 테스트 커버 가능.
 
 ### [R-2] M-1 배치 assemble 경로가 cover 미첨부 — Low(정보)
+
+> **✅ 해소 (v30.1, 2026-08-16)**: `_run_assemble_stage`가 cover_bytes 미지정 시 `make_cover_image`로 표지 생성·첨부 — 배치 EPUB도 'AI-generated' 공개 문구 포함 표지 보장. 테스트: PNG 표지 첨부 1건 추가.
+
 - _run_assemble_stage가 build_epub 호출 시 cover_bytes=None(미첨부) → 배치-assemble EPUB 표지 없음(→ AI-generated 표지 오버레이 미내장).
 - **완화**: ① make_cover_image(서버 /kdp/books/{id}/epub)는 항상 'AI-generated' 하드코딩 + QC #6이 cover_text로 공개 문구 강제 → **정책(공개) 측면 보장**. ② 배치에서 title 기반 make_cover_image로 cover_bytes 생성·전달 시 해소.
 - **권고(비차단)**: _run_assemble_stage에서 ready 책에 make_cover_image(title, subtitle)로 cover_bytes 생성 후 build_epub 전달.

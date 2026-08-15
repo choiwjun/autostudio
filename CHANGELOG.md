@@ -2,6 +2,15 @@
 
 이 프로젝트의 버전 이력. 버전 규칙: 기능 단위로 커밋 메시지에 표기 (비공식 SemVer).
 
+## v30.1 — 2026-08-16 (KDP 백로그 R-1/R-2 해소)
+
+### 수정
+- **R-1 (배치 research 스텁 → 실제 호출)**: `kdp_pipeline._run_research_stage`가 '곧 뜰' 상위 키워드(opportunity DESC 10개)로 `run_research`를 실제 실행 — 배치 자율 신규 주제 산출 가능. 실패 격리(errors 기록, 파이프라인 중단 없음)
+  - `kdp_research.run_research` 저장 시 **후보별 source_keyword 추적** (기존 코드는 마지막 키워드를 모든 후보에 기록하는 잠재 버그 — R-1 연결 과정에서 수정)
+  - `POST /kdp/books`에 `source_keyword` 수용 (서버 수락 경로도 배치 generate 스테이지와 연결)
+- **R-2 (배치 EPUB 표지 첨부)**: `_run_assemble_stage`가 cover_bytes 미지정 시 `make_cover_image`로 표지 생성·첨부 — 배치 EPUB도 'AI-generated' 공개 문구 포함 표지 보장 (M-1 정합)
+- **검증**: 전체 테스트 **467 passed / 10 skipped** (기존 464 + 신규 3: research 실제 호출·실패 격리·표지 첨부, 회귀 0)
+
 ## v30 — 2026-08-16 (KDP 파이프라인 구현 — K-1~K-4, 개발QA 승인)
 
 ### 구현 (work-pipeline: 디자인→디자인QA→개발 TDD→개발QA)

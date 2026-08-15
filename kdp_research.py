@@ -247,11 +247,13 @@ def run_research(d, cfg, keywords, snapshot_fetcher=None, translator=None, limit
         en = english_candidate(keyword, category, translator=translator, snapshot=snap)
         if en:
             en["niche"] = niche_score(snap["items"] if snap else [])
+            en["source_keyword"] = keyword  # R-1: 후보별 원본 키워드 추적
             candidates.append(en)
         # 영어 미적중(수요 없음/현지화 불가) → 한국어 병행 후보
         ko = korean_candidate(keyword, category, snapshot=snap)
         if en is None and ko:
             ko["niche"] = niche_score(snap["items"] if snap else [])
+            ko["source_keyword"] = keyword  # R-1: 후보별 원본 키워드 추적
             candidates.append(ko)
         elif en is None and ko is None:
             skipped.append(keyword)
@@ -264,11 +266,13 @@ def run_research(d, cfg, keywords, snapshot_fetcher=None, translator=None, limit
         suggestion = ("영어 전환율이 {:.0%}로 낮습니다 — KDP KR 한국어 전자책 "
                       "병행 비중을 확대하세요.".format(conversion_rate))
     # 저장 (title UNIQUE — 중복 무시)
+    # R-1: source_keyword에 원본 키워드 기록 — 배치 generate 스테이지가
+    # 'source_keyword 있는 draft 책'을 대상으로 하므로 end-to-end 연결에 필수.
     persisted = []
     for c in candidates[:limit]:
         kid = d.insert_kdp_book(
             title=c["title"], status="draft", lang=c["lang"], priority=0.0,
-            source_keyword="", created_at="",
+            source_keyword=c.get("source_keyword", ""), created_at="",
             description="", keywords_json=json.dumps(c["keywords"], ensure_ascii=False),
             category=c["category"],
             evidence_json=json.dumps(c.get("niche", {}), ensure_ascii=False))

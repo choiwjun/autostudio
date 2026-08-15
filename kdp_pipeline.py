@@ -18,29 +18,48 @@ logger = logging.getLogger("kdp_pipeline")
 
 DAILY_PUBLISH_LIMIT = 3        # 일 3권 게이트 (AC-K4-1)
 MONITOR_HOURS = 48             # 48h 모니터링 (AC-K4-2)
+RESEARCH_KEYWORD_LIMIT = 10    # R-1: 배치 research 입력 '곧 뜰' 상위 키워드 수 (12-kdp §2 후보 상한)
 
 # H-1: 모듈 수준 별칭 — 배치 단계가 이 이름을 호출(keyword)하므로 테스트가
 # monkeypatch.setattr(kp, "generate_book", ...)로 결정적으로 대체 가능.
 run_research = kdp_research.run_research
 generate_book = kdp_book.generate_book
 build_epub = ebook_builder.build_epub
+make_cover_image = ebook_builder.make_cover_image  # R-2: 배치 EPUB 표지 첨부용
 
 
-def _run_research_stage(d, cfg, result):
-    """H-1 ① research — status='draft'·source_keyword 있는 책 후보에 run_research 수행.
-    (서버 /kdp/books 생성 시점에 후보가 저장됨 — 배치는 저장된 draft 책을 후보로 재처리)
-    반환: 처리한 후보(draft) 수."""
-    drafts = d.list_kdp_books(status="draft")
-    if not drafts:
+def _research_keywords(d, limit=RESEARCH_KEYWORD_LIMIT):
+    """R-1: 배치 research 입력 키워드 — '곧 뜰' 상위(opportunity DESC) N개.
+    v20 프리셋 자산 재사용 (12-kdp §4 kdp_research.py — 키워드→주제 변환)."""
+    rows = d.query_keywords(sort="opportunity", sort_dir="desc", limit=limit)
+    return [(r["keyword"], r.get("category") or "") for r in rows
+            if r.get("keyword")]
+
+
+def _run_research_stage(d, cfg, result, snapshot_fetcher=None, translator=None):
+    """H-1 ① research — 배치 자율 신규 주제 선정: '곧 뜰' 상위 키워드 →
+    run_research(영어 현지화·아마존 스냅샷·틈새 판정) → kdp_books(draft) 후보 저장.
+    R-1: 기존 count 스텁 → run_research 실제 호출 (저장된 후보는 ② generate가 처리).
+    snapshot_fetcher/translator 미지정 시 기본(실제 아마존 스냅샷·rule/LLM 번역) 사용.
+    실패는 격리 — 한 단계 실패가 파이프라인 전체를 중단하지 않음.
+    반환: 저장된 후보 수."""
+    keywords = _research_keywords(d)
+    if not keywords:
         return 0
-    for book in drafts:
-        kw = book.get("source_keyword")
-        if not kw:
-            continue
-        # 이미 후보로 저장된 책이므로 중복 생성 방지 — 재처리만 허용(멱등)
-        result.setdefault("research", 0)
-        result["research"] += 1
-    return len(drafts)
+    try:
+        res = run_research(d, cfg, keywords, snapshot_fetcher=snapshot_fetcher,
+                           translator=translator, limit=RESEARCH_KEYWORD_LIMIT)
+        result["research"] = len(res.get("candidates", []))
+        result["research_skipped"] = len(res.get("skipped", []))
+        result["conversion_rate"] = res.get("conversion_rate", 0.0)
+        suggestion = res.get("suggestion")
+        if suggestion:
+            logger.info("K-1 전환율 제안: %s", suggestion)
+        return result["research"]
+    except Exception as e:
+        logger.warning("pip research failed: %s", e)
+        result.setdefault("errors", []).append(f"research: {e}")
+        return 0
 
 
 def _run_generate_stage(d, cfg, result, runner=None):
@@ -66,7 +85,9 @@ def _run_generate_stage(d, cfg, result, runner=None):
 
 
 def _run_assemble_stage(d, cfg, result, cover_bytes=None):
-    """H-1 ③ assemble — ready 책에 build_epub → EPUB 저장(out 경로). 반환: 저장 수."""
+    """H-1 ③ assemble — ready 책에 build_epub → EPUB 저장(out 경로). 반환: 저장 수.
+    R-2: cover_bytes 미지정 시 make_cover_image로 표지 생성·첨부 (배치 EPUB도
+    AI 공개 문구 포함 표지 보장 — M-1/QA-D3 정합)."""
     out_dir = cfg.get("kdp_epub_dir") or os.path.join(os.getcwd(), "out")
     os.makedirs(out_dir, exist_ok=True)
     ready = d.list_kdp_books(status="ready")
@@ -76,9 +97,13 @@ def _run_assemble_stage(d, cfg, result, cover_bytes=None):
         if not chapters:
             continue
         try:
+            cb = cover_bytes
+            if cb is None:
+                cb = make_cover_image(
+                    title=book.get("title") or "Book",
+                    subtitle=(book.get("description") or "")[:60])
             out_path = os.path.join(out_dir, "kdp-%d.epub" % book["id"])
-            build_epub(book, chapters, cover_bytes=cover_bytes,
-                                     out_path=out_path)
+            build_epub(book, chapters, cover_bytes=cb, out_path=out_path)
             done += 1
         except Exception as e:
             logger.warning("pip assemble book=%s failed: %s", book["id"], e)
