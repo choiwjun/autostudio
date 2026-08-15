@@ -146,6 +146,84 @@ CREATE TABLE IF NOT EXISTS fortune_generations (
     updated_at TEXT NOT NULL DEFAULT '',
     UNIQUE(ref_date, content_type)
 );
+
+-- v30: KDP 파이프라인 (12-kdp §3 + QA-D3)
+CREATE TABLE IF NOT EXISTS kdp_books (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL UNIQUE,
+    title_ko TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    keywords TEXT NOT NULL DEFAULT '[]',
+    category TEXT NOT NULL DEFAULT '',
+    category2 TEXT NOT NULL DEFAULT '',
+    pen_name TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'draft',
+    priority REAL NOT NULL DEFAULT 0,
+    source_keyword TEXT NOT NULL DEFAULT '',
+    lang TEXT NOT NULL DEFAULT 'en',
+    evidence TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_kdp_books_status ON kdp_books(status, priority);
+CREATE TABLE IF NOT EXISTS kdp_chapters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL REFERENCES kdp_books(id),
+    seq INTEGER NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    body_md TEXT NOT NULL DEFAULT '',
+    word_count INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    status_detail TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT '',
+    UNIQUE(book_id, seq)
+);
+CREATE TABLE IF NOT EXISTS kdp_covers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL REFERENCES kdp_books(id),
+    image_url TEXT NOT NULL DEFAULT '',
+    size TEXT NOT NULL DEFAULT '6x9',
+    created_at TEXT NOT NULL DEFAULT '',
+    UNIQUE(book_id)
+);
+CREATE TABLE IF NOT EXISTS kdp_publish (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL REFERENCES kdp_books(id),
+    publish_date TEXT NOT NULL DEFAULT '',
+    price REAL NOT NULL DEFAULT 0,
+    royalty_rate REAL NOT NULL DEFAULT 0.7,
+    expected_royalty REAL NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    verified_at TEXT NOT NULL DEFAULT '',
+    mirror_status TEXT NOT NULL DEFAULT '',
+    price_ok INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT '',
+    UNIQUE(book_id, publish_date)
+);
+-- v30 (QA-D3): 성과 입력 (AC-DB-1)
+CREATE TABLE IF NOT EXISTS kdp_performance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL REFERENCES kdp_books(id),
+    year_month TEXT NOT NULL,
+    sales INTEGER NOT NULL DEFAULT 0,
+    royalty REAL NOT NULL DEFAULT 0,
+    measured_by TEXT NOT NULL DEFAULT 'manual',
+    created_at TEXT NOT NULL DEFAULT '',
+    UNIQUE(book_id, year_month)
+);
+-- v30 (QA-D3): QC 결과 저장 (8항목)
+CREATE TABLE IF NOT EXISTS kdp_qc_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL REFERENCES kdp_books(id),
+    run_at TEXT NOT NULL,
+    qc_item TEXT NOT NULL,
+    passed INTEGER NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    UNIQUE(book_id, run_at, qc_item)
+);
+CREATE INDEX IF NOT EXISTS idx_kdp_qc_book_run ON kdp_qc_results(book_id, run_at);
+
 """,
     "postgres": """
 CREATE TABLE IF NOT EXISTS seed_keywords (
@@ -278,8 +356,85 @@ CREATE TABLE IF NOT EXISTS fortune_generations (
     status TEXT NOT NULL DEFAULT 'generated',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT '',
-    UNIQUE(ref_date, content_type)
 );
+
+-- v30: KDP 파이프라인 (12-kdp §3 + QA-D3)
+CREATE TABLE IF NOT EXISTS kdp_books (
+    id SERIAL PRIMARY KEY,
+    title TEXT NOT NULL UNIQUE,
+    title_ko TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    keywords TEXT NOT NULL DEFAULT '[]',
+    category TEXT NOT NULL DEFAULT '',
+    category2 TEXT NOT NULL DEFAULT '',
+    pen_name TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'draft',
+    priority DOUBLE PRECISION NOT NULL DEFAULT 0,
+    source_keyword TEXT NOT NULL DEFAULT '',
+    lang TEXT NOT NULL DEFAULT 'en',
+    evidence TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_kdp_books_status ON kdp_books(status, priority);
+CREATE TABLE IF NOT EXISTS kdp_chapters (
+    id SERIAL PRIMARY KEY,
+    book_id INTEGER NOT NULL REFERENCES kdp_books(id),
+    seq INTEGER NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    body_md TEXT NOT NULL DEFAULT '',
+    word_count INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    status_detail TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT '',
+    UNIQUE(book_id, seq)
+);
+CREATE TABLE IF NOT EXISTS kdp_covers (
+    id SERIAL PRIMARY KEY,
+    book_id INTEGER NOT NULL REFERENCES kdp_books(id),
+    image_url TEXT NOT NULL DEFAULT '',
+    size TEXT NOT NULL DEFAULT '6x9',
+    created_at TEXT NOT NULL DEFAULT '',
+    UNIQUE(book_id)
+);
+CREATE TABLE IF NOT EXISTS kdp_publish (
+    id SERIAL PRIMARY KEY,
+    book_id INTEGER NOT NULL REFERENCES kdp_books(id),
+    publish_date TEXT NOT NULL DEFAULT '',
+    price DOUBLE PRECISION NOT NULL DEFAULT 0,
+    royalty_rate DOUBLE PRECISION NOT NULL DEFAULT 0.7,
+    expected_royalty DOUBLE PRECISION NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    verified_at TEXT NOT NULL DEFAULT '',
+    mirror_status TEXT NOT NULL DEFAULT '',
+    price_ok INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT '',
+    UNIQUE(book_id, publish_date)
+);
+-- v30 (QA-D3): 성과 입력 (AC-DB-1)
+CREATE TABLE IF NOT EXISTS kdp_performance (
+    id SERIAL PRIMARY KEY,
+    book_id INTEGER NOT NULL REFERENCES kdp_books(id),
+    year_month TEXT NOT NULL,
+    sales INTEGER NOT NULL DEFAULT 0,
+    royalty DOUBLE PRECISION NOT NULL DEFAULT 0,
+    measured_by TEXT NOT NULL DEFAULT 'manual',
+    created_at TEXT NOT NULL DEFAULT '',
+    UNIQUE(book_id, year_month)
+);
+-- v30 (QA-D3): QC 결과 저장 (8항목)
+CREATE TABLE IF NOT EXISTS kdp_qc_results (
+    id SERIAL PRIMARY KEY,
+    book_id INTEGER NOT NULL REFERENCES kdp_books(id),
+    run_at TEXT NOT NULL,
+    qc_item TEXT NOT NULL,
+    passed INTEGER NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    UNIQUE(book_id, run_at, qc_item)
+);
+CREATE INDEX IF NOT EXISTS idx_kdp_qc_book_run ON kdp_qc_results(book_id, run_at);
+
 """,
 }
 
@@ -1520,6 +1675,335 @@ LIMIT ?"""
         params = (ref_date, limit) if ref_date else (limit,)
         return self._qd(sql, params, fetch=True)
 
+
+    # ---------- v30: KDP 파이프라인 (12-kdp §3 + QA-D3) ----------
+
+    def insert_kdp_book(self, title, status="draft", lang="en", priority=0.0,
+                        source_keyword="", created_at="", title_ko="",
+                        description="", keywords_json="[]", category="",
+                        category2="", pen_name="", evidence_json="{}",
+                        updated_at=""):
+        """KDP 책 후보 저장 — title UNIQUE(중복 무시).
+        v30: K-1 주제 선정 결과 저장, status 기본 draft."""
+        created_at = created_at or config_mod.now_kst_iso()
+        updated_at = updated_at or created_at
+        # RETURNING/lastrowid 패턴 (기존 insert_draft 관례)
+        values = (title, title_ko, description, keywords_json, category,
+                  category2, pen_name, status, priority, source_keyword,
+                  lang, evidence_json, created_at, updated_at)
+        if self.dialect == "postgres":
+            for attempt in (0, 1):
+                try:
+                    with self.conn.cursor() as cur:
+                        cur.execute(
+                            "INSERT INTO kdp_books (title, title_ko, description, "
+                            "keywords, category, category2, pen_name, status, "
+                            "priority, source_keyword, lang, evidence, created_at, "
+                            "updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, "
+                            "%s, %s, %s, %s, %s, %s) ON CONFLICT (title) DO NOTHING "
+                            "RETURNING id",
+                            values)
+                        row = cur.fetchone()
+                        self.conn.commit()
+                        return row["id"] if row else self._book_id_by_title(title)
+                except CONNECTION_ERRORS:
+                    if attempt == 1:
+                        raise
+                    self._connect()
+        self._qd(
+            "INSERT OR IGNORE INTO kdp_books (title, title_ko, description, "
+            "keywords, category, category2, pen_name, status, priority, "
+            "source_keyword, lang, evidence, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            values)
+        return self._book_id_by_title(title)
+
+    def _book_id_by_title(self, title):
+        rows = self._qd(
+            "SELECT id FROM kdp_books WHERE title = ?", (title,), fetch=True)
+        return rows[0]["id"] if rows else None
+
+    def get_kdp_book(self, book_id):
+        rows = self._qd(
+            "SELECT * FROM kdp_books WHERE id = ?", (book_id,), fetch=True)
+        return rows[0] if rows else None
+
+    def list_kdp_books(self, status="", limit=200):
+        sql = ("SELECT * FROM kdp_books "
+               + ("WHERE status = ? " if status else "")
+               + "ORDER BY status != 'draft', priority DESC, id DESC LIMIT ?")
+        params = (status, limit) if status else (limit,)
+        return self._qd(sql, params, fetch=True)
+
+    def update_kdp_book_status(self, book_id, status, updated_at=""):
+        updated_at = updated_at or config_mod.now_kst_iso()
+        self._qd(
+            "UPDATE kdp_books SET status = ?, updated_at = ? WHERE id = ?",
+            (status, updated_at, book_id))
+
+    def update_kdp_book_meta(self, book_id, updated_at="", **fields):
+        """메타(keywords/category/pen_name 등) 선택 갱신 — 키우는 필드만 UPDATE."""
+        updated_at = updated_at or config_mod.now_kst_iso()
+        cols = [k for k in fields.keys() if k in (
+            "title_ko", "description", "keywords", "category", "category2",
+            "pen_name", "evidence", "title")]
+        if not cols:
+            return
+        assignments = ", ".join(f"{c} = ?" for c in cols) + ", updated_at = ?"
+        values = tuple(fields[c] for c in cols) + (updated_at, book_id)
+        self._qd(f"UPDATE kdp_books SET {assignments} WHERE id = ?", values)
+
+    def insert_kdp_chapter(self, book_id, seq, title="", body_md="",
+                           word_count=0, status="pending", status_detail="",
+                           created_at="", updated_at=""):
+        created_at = created_at or config_mod.now_kst_iso()
+        updated_at = updated_at or created_at
+        values = (book_id, seq, title, body_md, word_count, status,
+                  status_detail, created_at, updated_at)
+        if self.dialect == "postgres":
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO kdp_chapters (book_id, seq, title, body_md, "
+                    "word_count, status, status_detail, created_at, updated_at) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                    "ON CONFLICT (book_id, seq) DO UPDATE SET title = EXCLUDED.title, "
+                    "body_md = EXCLUDED.body_md, word_count = EXCLUDED.word_count, "
+                    "status = EXCLUDED.status, status_detail = EXCLUDED.status_detail, "
+                    "updated_at = EXCLUDED.updated_at RETURNING id",
+                    values)
+                cid = cur.fetchone()["id"]
+                self.conn.commit()
+                return cid
+        self._qd(
+            "INSERT INTO kdp_chapters (book_id, seq, title, body_md, word_count, "
+            "status, status_detail, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (book_id, seq) DO UPDATE SET title = excluded.title, "
+            "body_md = excluded.body_md, word_count = excluded.word_count, "
+            "status = excluded.status, status_detail = excluded.status_detail, "
+            "updated_at = excluded.updated_at",
+            values)
+        return self._chapter_id(book_id, seq)
+
+    def _chapter_id(self, book_id, seq):
+        rows = self._qd(
+            "SELECT id FROM kdp_chapters WHERE book_id = ? AND seq = ?",
+            (book_id, seq), fetch=True)
+        return rows[0]["id"] if rows else None
+
+    def list_kdp_chapters(self, book_id):
+        return self._qd(
+            "SELECT * FROM kdp_chapters WHERE book_id = ? ORDER BY seq",
+            (book_id,), fetch=True)
+
+    def update_kdp_chapter(self, chapter_id, updated_at="", **fields):
+        updated_at = updated_at or config_mod.now_kst_iso()
+        cols = [k for k in fields.keys() if k in (
+            "title", "body_md", "word_count", "status", "status_detail")]
+        if not cols:
+            return
+        assignments = ", ".join(f"{c} = ?" for c in cols) + ", updated_at = ?"
+        values = tuple(fields[c] for c in cols) + (updated_at, chapter_id)
+        self._qd(f"UPDATE kdp_chapters SET {assignments} WHERE id = ?", values)
+
+    def upsert_kdp_cover(self, book_id, image_url, size="6x9", created_at=""):
+        created_at = created_at or config_mod.now_kst_iso()
+        if self.dialect == "postgres":
+            self._q(
+                None,
+                "INSERT INTO kdp_covers (book_id, image_url, size, created_at) "
+                "VALUES (%s, %s, %s, %s) ON CONFLICT (book_id) DO UPDATE SET "
+                "image_url = EXCLUDED.image_url, size = EXCLUDED.size",
+                (book_id, image_url, size, created_at))
+            return
+        self._qd(
+            "INSERT INTO kdp_covers (book_id, image_url, size, created_at) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT (book_id) DO UPDATE SET "
+            "image_url = excluded.image_url, size = excluded.size",
+            (book_id, image_url, size, created_at))
+
+    def get_kdp_cover(self, book_id):
+        rows = self._qd(
+            "SELECT * FROM kdp_covers WHERE book_id = ?", (book_id,), fetch=True)
+        return rows[0] if rows else None
+
+    def insert_kdp_publish(self, book_id, publish_date, price=0.0,
+                           royalty_rate=0.7, status="pending"):
+        expected = round(price * royalty_rate - 0.06, 2)
+        values = (book_id, publish_date, price, royalty_rate, expected, status)
+        if self.dialect == "postgres":
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO kdp_publish (book_id, publish_date, price, "
+                    "royalty_rate, expected_royalty, status) "
+                    "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+                    values)
+                pid = cur.fetchone()["id"]
+                self.conn.commit()
+                return pid
+        cur = self.conn.execute(
+            "INSERT INTO kdp_publish (book_id, publish_date, price, "
+            "royalty_rate, expected_royalty, status) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            values)
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_kdp_publish(self, status=""):
+        sql = ("SELECT p.*, b.title, b.pen_name, b.category FROM kdp_publish p "
+               "LEFT JOIN kdp_books b ON b.id = p.book_id "
+               + ("WHERE p.status = ? " if status else "")
+               + "ORDER BY p.publish_date DESC, p.id DESC")
+        params = (status,) if status else ()
+        return self._qd(sql, params, fetch=True)
+
+    def verify_kdp_publish(self, publish_id, verified_at="", mirror_status="",
+                           price_ok=1):
+        """48h 확인 — status→verified + verified_at·mirror 기록 (AC-K4-2②)."""
+        verified_at = verified_at or config_mod.now_kst_iso()
+        self._qd(
+            "UPDATE kdp_publish SET status = 'verified', verified_at = ?, "
+            "mirror_status = ?, price_ok = ? WHERE id = ?",
+            (verified_at, mirror_status, price_ok, publish_id))
+
+    def publish_day_gate(self, publish_date, max_per_day=3):
+        """일 3권 게이트 (AC-K4-1) + M-2 원자적 슬롯 선점.
+        트랜잭션(BEGIN IMMEDIATE / Postgres 단일 트랜잭션) 내에서 오늘 이미
+        published인 수를 재확인한 뒤 max_per_day 미만분만 published로 전이 —
+        동시 배치/API 호출에도 총 3권 초과 불가."""
+        now = config_mod.now_kst_iso()
+        if self.dialect == "postgres":
+            return self._claim_postgres(publish_date, max_per_day, now)
+        # SQLite: BEGIN IMMEDIATE로 쓰기 잠금 선점 후 재확인·전이 (원자화)
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            already = self.conn.execute(
+                "SELECT COUNT(*) c FROM kdp_publish WHERE publish_date = ? "
+                "AND status = 'published'", (publish_date,)).fetchone()["c"]
+            remaining = max(0, max_per_day - already)
+            if remaining > 0:
+                rows = self.conn.execute(
+                    "SELECT p.id, p.book_id, b.priority FROM kdp_publish p "
+                    "LEFT JOIN kdp_books b ON b.id = p.book_id "
+                    "WHERE p.publish_date = ? AND p.status = 'pending' "
+                    "AND b.status = 'ready' "
+                    "ORDER BY b.priority DESC, p.id LIMIT ?",
+                    (publish_date, remaining)).fetchall()
+            else:
+                rows = []
+            allowed = [dict(r) for r in rows]
+            for a in allowed:
+                self.conn.execute(
+                    "UPDATE kdp_publish SET status = 'published' WHERE id = ?",
+                    (a["id"],))
+                self.conn.execute(
+                    "UPDATE kdp_books SET status = 'published', updated_at = ? "
+                    "WHERE id = ?", (now, a["book_id"]))
+            pended = self.conn.execute(
+                "SELECT COUNT(*) c FROM kdp_publish p "
+                "LEFT JOIN kdp_books b ON b.id = p.book_id "
+                "WHERE p.publish_date = ? AND p.status = 'pending' "
+                "AND b.status = 'ready'", (publish_date,)).fetchone()["c"]
+            self.conn.commit()
+            return {"published": len(allowed), "pended": pended,
+                    "items": [a["id"] for a in allowed]}
+        except Exception:
+            self.conn.rollback()
+            raise
+
+    def _claim_postgres(self, publish_date, max_per_day, now):
+        """Postgres 원자적 게이트 — 단일 트랜잭션 + FOR UPDATE로 동시 선점 차단."""
+        import psycopg2
+        for attempt in (0, 1):
+            try:
+                with self.conn.cursor() as cur:
+                    cur.execute("BEGIN")
+                    cur.execute(
+                        "SELECT COUNT(*) FROM kdp_publish WHERE publish_date = %s "
+                        "AND status = 'published'", (publish_date,))
+                    already = cur.fetchone()[0]
+                    remaining = max(0, max_per_day - already)
+                    if remaining > 0:
+                        cur.execute(
+                            "SELECT p.id, p.book_id FROM kdp_publish p "
+                            "LEFT JOIN kdp_books b ON b.id = p.book_id "
+                            "WHERE p.publish_date = %s AND p.status = 'pending' "
+                            "AND b.status = 'ready' "
+                            "ORDER BY b.priority DESC, p.id LIMIT %s FOR UPDATE",
+                            (publish_date, remaining))
+                        rows = cur.fetchall()
+                    else:
+                        rows = []
+                    for r in rows:
+                        cur.execute(
+                            "UPDATE kdp_publish SET status = 'published' WHERE id = %s",
+                            (r[0],))
+                        cur.execute(
+                            "UPDATE kdp_books SET status = 'published', updated_at = %s "
+                            "WHERE id = %s", (now, r[1]))
+                    cur.execute(
+                        "SELECT COUNT(*) FROM kdp_publish p "
+                        "LEFT JOIN kdp_books b ON b.id = p.book_id "
+                        "WHERE p.publish_date = %s AND p.status = 'pending' "
+                        "AND b.status = 'ready'", (publish_date,))
+                    pended = cur.fetchone()[0]
+                    self.conn.commit()
+                    return {"published": len(rows), "pended": pended,
+                            "items": [r[0] for r in rows]}
+            except CONNECTION_ERRORS:
+                if attempt == 1:
+                    raise
+                self._connect()
+    def upsert_kdp_performance(self, book_id, year_month, sales=0, royalty=0.0,
+                               measured_by="manual"):
+        # UPSERT (book_id, year_month)
+        if self.dialect == "postgres":
+            self._q(
+                None,
+                "INSERT INTO kdp_performance (book_id, year_month, sales, royalty, "
+                "measured_by) VALUES (%s, %s, %s, %s, %s) "
+                "ON CONFLICT (book_id, year_month) DO UPDATE SET sales = EXCLUDED.sales, "
+                "royalty = EXCLUDED.royalty, measured_by = EXCLUDED.measured_by",
+                (book_id, year_month, sales, royalty, measured_by))
+        else:
+            self._qd(
+                "INSERT INTO kdp_performance (book_id, year_month, sales, royalty, "
+                "measured_by) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT (book_id, year_month) DO UPDATE SET sales = excluded.sales, "
+                "royalty = excluded.royalty, measured_by = excluded.measured_by",
+                (book_id, year_month, sales, royalty, measured_by))
+
+    def list_kdp_performance(self, year_month=""):
+        sql = ("SELECT * FROM kdp_performance "
+               + ("WHERE year_month = ? " if year_month else "")
+               + "ORDER BY year_month DESC, id DESC")
+        params = (year_month,) if year_month else ()
+        return self._qd(sql, params, fetch=True)
+
+    def kdp_monthly_summary(self):
+        """월별 로열티 합계 (AC-DB-1④) — {year_month: royalty}. """
+        rows = self._qd(
+            "SELECT year_month, SUM(royalty) AS royalty FROM kdp_performance "
+            "GROUP BY year_month ORDER BY year_month", (), fetch=True)
+        return {r["year_month"]: r["royalty"] for r in rows}
+
+    def replace_kdp_qc_results(self, book_id, run_at, results):
+        """QC 결과 런 저장 — 기존 (book_id, run_at) 삭제 후 재삽입. """
+        self._qd("DELETE FROM kdp_qc_results WHERE book_id = ? AND run_at = ?",
+                 (book_id, run_at))
+        for r in results:
+            self._qd(
+                "INSERT OR REPLACE INTO kdp_qc_results (book_id, run_at, qc_item, "
+                "passed, detail) VALUES (?, ?, ?, ?, ?)",
+                (book_id, run_at, r["qc_item"], 1 if r["passed"] else 0,
+                 r.get("detail") or ""))
+
+    def get_kdp_qc_results(self, book_id):
+        return self._qd(
+            "SELECT qc_item, passed, detail FROM kdp_qc_results "
+            "WHERE book_id = ? ORDER BY id", (book_id,), fetch=True)
+
     def close(self):
+
         if self.conn:
             self.conn.close()

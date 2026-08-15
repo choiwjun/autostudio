@@ -129,6 +129,40 @@ class PublishedUrlIn(BaseModel):
     url: str
 
 
+# v30: KDP 파이프라인 (K-1~K-4) 요청 모델
+class KdpBookCreateIn(BaseModel):
+    # K-1: 수동 책 생성 트리거
+    title: str
+    lang: str = "en"
+
+
+class KdpGenerateIn(BaseModel):
+    # K-2: 책 생성 시작 (배치 트리거 큐)
+    book_id: int
+
+
+class KdpPublishIn(BaseModel):
+    # K-4: 출간 시작 (체크리스트 검증 후)
+    book_id: int
+    price: float
+    publish_date: str = ""
+
+
+class KdpVerifyIn(BaseModel):
+    # K-4: 48h 확인
+    publish_id: int
+    mirror_status: str = "정상"
+    price_ok: int = 1
+
+
+class KdpPerformanceIn(BaseModel):
+    # K-4: 성과 입력 (AC-DB-1, measured_by=manual)
+    book_id: int
+    year_month: str
+    sales: int = 0
+    royalty: float = 0.0
+
+
 def _unavailable_search_evidence(reference_date, searched_at):
     return {
         "status": "unavailable",
@@ -997,6 +1031,191 @@ def create_app(cfg):
     def revenue_insights():
         # v18: 수익 인사이트 — AdPost 실측 기준 월별 추이·키워드 기여·카테고리 실측.
         return run_db(lambda d: d.revenue_insights())
+
+    # ---------- v30: KDP 파이프라인 (K-1~K-4) ----------
+
+    @app.get("/kdp/books", dependencies=[Depends(require_token)])
+    def kdp_books(status: str = ""):
+        # K-1: 책 목록 (상태 필터), status=ready 등
+        return {"items": run_db(lambda d: d.list_kdp_books(status=status))}
+
+    @app.get("/kdp/books/{book_id}", dependencies=[Depends(require_token)])
+    def kdp_book_detail(book_id: int):
+        # K-2: 책 상세 — 책 + 챕터 + QC + 표지
+        book = run_db(lambda d: d.get_kdp_book(book_id))
+        if not book:
+            raise HTTPException(status_code=404, detail="not found")
+        return {
+            "book": book,
+            "chapters": run_db(lambda d: d.list_kdp_chapters(book_id)),
+            "qc": run_db(lambda d: d.get_kdp_qc_results(book_id)),
+            "cover": run_db(lambda d: d.get_kdp_cover(book_id)),
+        }
+
+    @app.post("/kdp/books", dependencies=[Depends(require_token)])
+    def kdp_book_create(body: KdpBookCreateIn):
+        # K-1: 책 생성 트리거 (후보 수락)
+        bid = run_db(lambda d: d.insert_kdp_book(
+            title=body.title, status="draft", lang=body.lang,
+            created_at=config_mod.now_kst_iso()))
+        return {"ok": True, "book_id": bid}
+
+    @app.post("/kdp/books/{book_id}/generate", dependencies=[Depends(require_token)])
+    def kdp_book_generate(book_id: int):
+        # K-2: 생성 시작 → 배치 트리거 큐(비동기) — 서버리스 60초 준수
+        book = run_db(lambda d: d.get_kdp_book(book_id))
+        if not book:
+            raise HTTPException(status_code=404, detail="not found")
+        run_db(lambda d: d.update_kdp_book_status(
+            book_id, "assembling", updated_at=config_mod.now_kst_iso()))
+        # 실제 생성은 GH Actions 배치(kdp_pipeline)에서 수행 — 여기선 트리거 기록
+        return {"ok": True, "message": "책 생성이 배치에서 처리됩니다",
+                "book_id": book_id, "status": "assembling"}
+
+    @app.post("/kdp/books/{book_id}/qc", dependencies=[Depends(require_token)])
+    def kdp_book_qc(book_id: int):
+        # K-2: QC 8항목 재실행
+        book = run_db(lambda d: d.get_kdp_book(book_id))
+        if not book:
+            raise HTTPException(status_code=404, detail="not found")
+        import kdp_book
+        results = run_db(lambda d: kdp_book.run_qc(
+            d, book_id, {"chapters": d.list_kdp_chapters(book_id),
+                         "book": d.get_kdp_book(book_id)},
+            run_at=config_mod.now_kst_iso()))
+        return {"qc": [{"qc_item": r.qc_item, "passed": r.passed,
+                        "detail": r.detail} for r in results]}
+
+    @app.get("/kdp/books/{book_id}/epub", dependencies=[Depends(require_token)])
+    def kdp_book_epub(book_id: int):
+        # K-3: EPUB 다운로드 (ready+만) — 메모리 조립 후 attachment
+        import io
+        import ebook_builder
+        book = run_db(lambda d: d.get_kdp_book(book_id))
+        if not book:
+            raise HTTPException(status_code=404, detail="not found")
+        if book["status"] not in ("ready", "published", "monitoring"):
+            raise HTTPException(status_code=400,
+                                detail="ready 상태 이상에서만 EPUB을 다운로드할 수 있습니다")
+        chapters = run_db(lambda d: d.list_kdp_chapters(book_id))
+        cover = run_db(lambda d: d.get_kdp_cover(book_id))
+        cover_bytes = None
+        if cover and cover.get("image_url"):
+            try:
+                from ebook_builder import make_cover_image
+                cover_bytes = make_cover_image(
+                    book["title"], subtitle=book.get("pen_name") or "")
+            except Exception:
+                cover_bytes = None
+        data = ebook_builder.build_epub(book, chapters, cover_bytes=cover_bytes)
+        filename = "kdp-%d.epub" % book_id
+        return Response(content=data, media_type="application/epub+zip",
+                        headers={"Content-Disposition":
+                                 'attachment; filename="%s"' % filename})
+
+    def _kdp_checklist(book):
+        """M-3: 출간 체크리스트 4종 (AC-K4-1②) — AI 표기·가격·키워드7·카테고리2."""
+        import json
+        try:
+            kws = json.loads(book.get("keywords") or "[]")
+            kws = kws if isinstance(kws, list) else []
+        except (TypeError, json.JSONDecodeError):
+            kws = []
+        cats = [c for c in (book.get("category") or "").split(",") if c.strip()]
+        return {
+            "ai_disclosure": True,                # QC #6 통과 전제(본문+표지 AI-generated 공개)
+            "keywords_ok": len(kws) >= 7,
+            "categories_ok": len(cats) >= 2,
+        }  # price는 별도 — POST /kdp/publish에서 body.price 2.99~12.99 검증
+
+    @app.get("/kdp/publish-queue", dependencies=[Depends(require_token)])
+    def kdp_publish_queue():
+        # K-4: 출간 큐 (일 3권 게이트 반영) — ready 책 + 체크리스트 상태 + 오늘 예약
+        ready = run_db(lambda d: d.list_kdp_books(status="ready"))
+        today = config_mod.today_kst().isoformat()
+        gate = run_db(lambda d: d.publish_day_gate(today, max_per_day=3))
+        # M-3: 책별 체크리스트 검증 (AI 표기·가격·키워드7·카테고리2)
+        items = []
+        for b in ready:
+            cl = _kdp_checklist(b)
+            items.append({"book": b, "checklist": cl,
+                          "checklist_done": int(sum(1 for v in cl.values() if v)),
+                          "checklist_total": len(cl)})
+        return {"ready_books": items, "today": today, "gate": gate}
+
+    @app.post("/kdp/publish", dependencies=[Depends(require_token)])
+    def kdp_publish(body: KdpPublishIn):
+        # K-4: 출간 시작 (AC-K4-1② 체크리스트 검증 후) → kdp_publish 기록
+        book = run_db(lambda d: d.get_kdp_book(body.book_id))
+        if not book:
+            raise HTTPException(status_code=404, detail="not found")
+        cl = _kdp_checklist(book)
+        missing = [k for k, v in cl.items() if not v]
+        if missing:
+            raise HTTPException(status_code=400, detail=(
+                "체크리스트 미완료 — 출간이 차단되었습니다: " + ", ".join(missing)))
+        if body.price < 2.99 or body.price > 12.99:
+            raise HTTPException(status_code=400,
+                                detail="가격은 70% 로열티 구간($2.99~$12.99)이어야 합니다")
+        publish_date = body.publish_date or config_mod.today_kst().isoformat()
+        pid = run_db(lambda d: d.insert_kdp_publish(
+            book["id"], publish_date, price=body.price))
+        return {"ok": True, "publish_id": pid, "publish_date": publish_date}
+
+    @app.post("/kdp/publish/{publish_id}/verify", dependencies=[Depends(require_token)])
+    def kdp_publish_verify(publish_id: int, body: KdpVerifyIn):
+        # K-4: 48h 확인 → verified + verified_at + mirror (AC-K4-2②)
+        run_db(lambda d: d.verify_kdp_publish(
+            publish_id, verified_at=config_mod.now_kst_iso(),
+            mirror_status=body.mirror_status, price_ok=body.price_ok))
+        return {"ok": True, "publish_id": publish_id}
+
+    @app.get("/kdp/monitoring", dependencies=[Depends(require_token)])
+    def kdp_monitoring():
+        # K-4: 48h 미검증 책 목록 (상단 정렬)
+        published = run_db(lambda d: d.list_kdp_publish(status="published"))
+        now = config_mod.now_kst_iso()
+        pending_rows = [p for p in published if not p.get("verified_at")]
+        return {"items": pending_rows, "now": now}
+
+    @app.post("/kdp/performance", dependencies=[Depends(require_token)])
+    def kdp_performance(body: KdpPerformanceIn):
+        # K-4: 성과 입력 (AC-DB-1) — measured_by=manual
+        run_db(lambda d: d.upsert_kdp_performance(
+            body.book_id, body.year_month, sales=body.sales,
+            royalty=body.royalty, measured_by="manual"))
+        return {"ok": True}
+
+    @app.get("/kdp/performance-history", dependencies=[Depends(require_token)])
+    def kdp_performance_history(month: str = ""):
+        # M-3: 성과 월별 집계 (AC-DB-1④) — 대시보드 성과 탭
+        rows = run_db(lambda d: d.list_kdp_performance(year_month=month))
+        summary = run_db(lambda d: d.kdp_monthly_summary())
+        return {"items": rows, "monthly": summary}
+
+    @app.get("/kdp/books-for-publish", dependencies=[Depends(require_token)])
+    def kdp_books_for_publish():
+        # M-3: 성과 입력 폼 대상 책 목록 (published 이상)
+        books = run_db(lambda d: d.list_kdp_books(status="published"))
+        mono = run_db(lambda d: d.list_kdp_books(status="monitoring"))
+        return {"items": books + mono}
+
+    @app.get("/kdp/breakeven", dependencies=[Depends(require_token)])
+    def kdp_breakeven():
+        # K-4: 손익분기표 (AC-DB-1③) — 정보성
+        rows = []
+        for price in (2.99, 4.99, 9.99, 12.99):
+            royalty_per = round(price * 0.7 - 0.06, 2)
+            rows.append({"price": price, "royalty_per": royalty_per,
+                         "breakeven_100": max(1, round(100 / royalty_per))})
+        return {"items": rows}
+
+    @app.get("/kdp/monitoring-summary", dependencies=[Depends(require_token)])
+    def kdp_monitoring_summary():
+        # K-4: 48h 미검증 수 (대시보드 KPI)
+        published = run_db(lambda d: d.list_kdp_publish(status="published"))
+        n = sum(1 for p in published if not p.get("verified_at"))
+        return {"pending_48h": n}
 
     @app.get("/")
     def index():

@@ -10,3 +10,24 @@ import pytest
 @pytest.fixture(autouse=True)
 def _clear_gemini_api_key(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+
+# v30: 테스트 격리 확장 — collect.main()이 config.load_config()→load_dotenv(".env.local")로
+# 실제 API 키(BAILIAN/OPENCODE/BLOG)를 프로세스 os.environ에 주입해, 이후 실행되는
+# run_collection 계열 테스트가 진짜 LLM/발행 API를 호출하며 행(行)에 걸리던 문제 차단.
+# (증상: test_blocked_crawl_marks_partial_and_exit 이후의 테스트가 무한 대기)
+# 기존 패턴과 동일 — 테스트 본문에서 monkeypatch.setenv(...)로 명시 설정하는 순서.
+# GEMINI와 달리 네이버 크롤링 키도 함께 격리 (외부 호출 전면 차단).
+@pytest.fixture(autouse=True)
+def _clear_external_api_keys(monkeypatch):
+    for key in (
+        "BAILIAN_TOKEN_PLAN_API_KEY",
+        "OPENCODE_GO_API_KEY",
+        "DASHSCOPE_API_KEY",
+        "BLOG_API_URL",
+        "BLOG_TOKEN",
+        "BLOG_PUBLISH_ENABLED",
+        "NAVER_CLIENT_ID",
+        "NAVER_CLIENT_SECRET",
+    ):
+        monkeypatch.delenv(key, raising=False)

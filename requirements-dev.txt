@@ -2,3 +2,7 @@
 -r requirements.txt
 pytest==8.3.4
 httpx==0.28.1
+# v30: KDP 파이프라인 (K-3) — EPUB 조립·표지·마크다운
+ebooklib>=0.18
+Pillow>=10.0
+markdown>=3.4

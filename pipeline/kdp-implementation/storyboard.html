@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>storyboard</title>
+<style>
+:root { --accent:#2B5FDB; --bg:#ffffff; --fg:#1a1a2e; --muted:#666; --border:#e2e8f0; --code-bg:#f6f8fa; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#0f1117; --fg:#e6e6e6; --muted:#9ca3af; --border:#2a2f3a; --code-bg:#161b26; }
+}
+* { box-sizing: border-box; }
+body { font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; background:var(--bg);
+       color:var(--fg); line-height:1.7; margin:0; padding:2rem 1rem; }
+main { max-width: 860px; margin: 0 auto; }
+h1 { font-size:1.9rem; border-bottom:3px solid var(--accent); padding-bottom:.4rem; }
+h2 { font-size:1.4rem; margin-top:2.2rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.15rem; margin-top:1.6rem; }
+h4 { font-size:1rem; margin-top:1.2rem; color:var(--accent); }
+a { color:var(--accent); }
+code { background:var(--code-bg); padding:.15em .4em; border-radius:4px; font-size:.9em;
+       font-family:'JetBrains Mono','D2Coding',Consolas,monospace; }
+pre { background:var(--code-bg); padding:1rem; border-radius:8px; overflow-x:auto; border:1px solid var(--border); }
+pre code { background:none; padding:0; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.93rem; }
+th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); font-weight:600; }
+tr:nth-child(even) td { background:rgba(127,127,127,.05); }
+blockquote { border-left:4px solid var(--accent); margin:1rem 0; padding:.5rem 1rem;
+             background:rgba(43,95,219,.06); border-radius:0 6px 6px 0; }
+blockquote p { margin:.3rem 0; }
+hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
+li { margin:.25rem 0; }
+strong { font-weight:700; }
+.meta { color:var(--muted); font-size:.85rem; margin-bottom:1.5rem; }
+</style>
+</head>
+<body>
+<main>
+<div class="meta">📄 storyboard · 생성: 2026-08-15 22:42</div>
+<h1>autostudio — KDP 대시보드 탭 UI 스토리보드 (storyboard.md)</h1>
+<blockquote>
+<p>작성: 디자인팀 · 프로젝트: autostudio · 작업 디렉토리: <code>pipeline/kdp-implementation/</code><br />
+상위: <code>pipeline/shorts-kdp-research/plan.md</code>(F-4·F-7, AC-K4-1·AC-K4-2·AC-DB-1) · <code>pipeline/shorts-kdp-research/userflow.md</code>(여정 2·3) · <code>docs/planning/12-kdp-pipeline.md</code>(§3·4·5·6)<br />
+설계 원칙 ▶ <code>design-system.md</code> — 기존 <code>static/index.html</code> v18 탭 패턴·CSS 토큰을 <strong>그대로 확장</strong> (새 팔레트/새 컴포넌트 스타일 금지)<br />
+상태: 디자인 산출물 1/2 · 쇼츠 탭은 <strong>제외</strong> (KDP 탭만 정의)</p>
+</blockquote>
+<hr />
+<h2>1. 화면 구성 요약</h2>
+<h3>1.1 탭 배치 (기존 v18 탭 패턴 확장)</h3>
+<p>기존 대시보드는 최상단 <code>.tabs</code>(키워드 목록 / 게시 플래너 / 수익 인사이트)를 가진다. KDP 파이프라인 구현을 위해 <strong>"KDP 출간" 탭 1개를 최상단 탭에 추가</strong>하고, 탭 내부는 기존 <code>.seg</code> 세그먼트 컨트롤로 4개 하위 화면(책 목록 · 출간 큐 · 48h 모니터링 · 성과 입력)을 전환한다.</p>
+<pre><code>┌─────────────────────────────────────────────────────────────────────┐
+│ (최상단 .tabs — 기존 3개 + 신규 1개)                                │
+│  [ 키워드 목록 ]  [ 게시 플래너 ]  [ 수익 인사이트 ]  [ KDP 출간 ] ← 신규 (class=&quot;on&quot;) │
+└─────────────────────────────────────────────────────────────────────┘
+        │  tabKdp (.tabpane)
+        ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  KDP 출간 패널 (card)                                              │
+│  ┌───────────────────────────────────────────────────────────────┐ │
+│  │ (.seg 세그먼트 — KDP 내부 하위 탭)                             │ │
+│  │ [ 책 목록 ] [ 출간 큐 ] [ 48h 모니터링 ] [ 성과 입력 ]           │ │
+│  └───────────────────────────────────────────────────────────────┘ │
+│  ┌───────────────────────────────────────────────────────────────┐ │
+│  │ 하위 탭에 따른 화면(A·B·C·D) → 이하 §2~§5                       │ │
+│  └───────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+</code></pre>
+<blockquote>
+<p>상단 <code>#status</code>·<strong>KPI 카드</strong>(§1.2)는 <code>tabKdp</code> 아래 고정 재사용.</p>
+</blockquote>
+<h3>1.2 KPI 카드 (기존 <code>.kpis</code>/<code>.kpi</code> 구조 재사용 — 책 목록 상단)</h3>
+<pre><code>┌──────────────┬──────────────┬──────────────┬──────────────┐
+│ .kpi          │ .kpi          │ .kpi          │ .kpi          │
+│ KDP 책        │ ready / 출간대기│ 오늘 출간      │ 48h 미검증     │
+│ 6권           │ 4권           │ 2 / 3권        │ 1권            │
+│ draft~monitoring│ (게이트: 3권)│ (진행 중)      │ (경고: .warn)  │
+└──────────────┴──────────────┴──────────────┴──────────────┘
+</code></pre>
+<ul>
+<li>4번째 KPI <code>48h 미검증</code>은 값이 0보다 크면 <code>.kpi-value.warn</code>(기존 <code>--warning</code> 색) 적용 → "48h 미확인 강조" (AC-K4-2).</li>
+</ul>
+<h3>1.3 AC → 화면 매핑 총괄표</h3>
+<table>
+<thead>
+<tr>
+<th>수용 기준</th>
+<th>화면(§)</th>
+<th>화면 요소</th>
+<th>요건 충족 지점</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>AC-K4-1</strong> (출간 큐·일 3권 게이트)</td>
+<td>§3 출간 큐, §2 책 목록</td>
+<td>ready 책 목록, 3권 게이트 카운터, pending 배지, 체크리스트</td>
+<td>§3-1 3권 초과 pending, §3-3 체크리스트 미완료 차단 메시지</td>
+</tr>
+<tr>
+<td><strong>AC-K4-2</strong> (48h 모니터링·검증)</td>
+<td>§4 48h 모니터링</td>
+<td>미검증 책 목록, verified 저장, 가격·미러 경고</td>
+<td>§4-1 미검증 강조 배지, §4-2 확인 버튼·verified 저장, §4-3 이상 경고</td>
+</tr>
+<tr>
+<td><strong>AC-DB-1</strong> (성과 입력·손익분기)</td>
+<td>§5 성과 입력</td>
+<td>수동 입력 폼, 측정 경로 표시, 손익분기표, 월별 집계</td>
+<td>§5-1 수동 입력 폼, §5-2 측정 경로 "수동", §5-3 손익분기표, §5-4 월별 집계</td>
+</tr>
+<tr>
+<td>K-2 책 생성 상태 추적</td>
+<td>§2 책 목록</td>
+<td>상태 배지(draft/assembling/ready), 챕터 진행률 바</td>
+<td>여정 2 — 상태 전이 표시</td>
+</tr>
+<tr>
+<td>K-3 EPUB 다운로드</td>
+<td>§2 책 목록</td>
+<td>EPUB 다운로드 버튼(ready 이상만 활성)</td>
+<td>여정 2 — 다운로드 버튼</td>
+</tr>
+<tr>
+<td>QC 8항목 결과</td>
+<td>§2.2 책 상세</td>
+<td>QC 8항목 결과표(항목·기준·결과)</td>
+<td>여정 2 — QC 리포트</td>
+</tr>
+<tr>
+<td>출간 체크리스트 4종</td>
+<td>§3-3</td>
+<td>AI 표기·가격($2.99~$12.99)·키워드 7·카테고리 2</td>
+<td>12-kdp §5 정책 게이트</td>
+</tr>
+<tr>
+<td>상태 정의(빈/로딩/오류/게이트/48h)</td>
+<td>§6</td>
+<td>전 화면 공통 상태 패턴</td>
+<td>§6</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>2. 화면 A — 책 목록 (KDP 루트, 기본 하위 탭)</h2>
+<h3>2.1 와이어프레임</h3>
+<pre><code>┌────────────────────────────────────────────────────────────────────────────┐
+│ [ 책 목록 · KDP 전자책 ]        [+ 책 생성]  (&lt;-- .btn-primary, K-1~K-3 지정)  │
+│ ┌────────────────────────────────────────────────────────────────────────┐│
+│ │ # | 제목                   | 상태배지  | 카테고리  | 챕터 진행  | EPUB | QC | 생성일   ││
+│ ├────────────────────────────────────────────────────────────────────────┤│
+│ │ 1 | 52주 절약 챌린지 워크북  | [ready]   | Self-Help | ▓▓▓░░ 6/10 |[다운]|[리포트]│ 08-14 ││
+│ │ 2 | 하루 한 줄 그릿 트레이닝 | [assembling]| Motiva   | ▓▓░░░ 4/9  |[대기] |[—]     │ 08-13 ││
+│ │ 3 | 60일주 성격 해석 가이드   | [draft]   | Horoscope | ▓░░░░ 1/6  |[대기] |[—]     │ 08-12 ││
+│ │ 4 | 부자 되는 데일리 루틴    | [monitoring]| Finance  | ▓▓▓▓▓ 10/10 |[다운]|[리포트]│ 08-01 ││
+│ └────────────────────────────────────────────────────────────────────────┘│
+│  (행 클릭 → 책 상세 모달 §2.2 / 행 hover → 기존 tr:hover 테두리 강조)          │
+└────────────────────────────────────────────────────────────────────────────┘
+</code></pre>
+<ul>
+<li><strong>상태 배지 매핑</strong> (기존 <code>.badge</code> 네온 글로우 변형만 재사용 — <code>design-system.md</code> §4-1):</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>status</th>
+<th>배지 클래스</th>
+<th>라벨</th>
+<th>시각적 신호</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>draft</td>
+<td><code>.badge.b-gray</code></td>
+<td>draft</td>
+<td>중립 (생성 시작 전)</td>
+</tr>
+<tr>
+<td>assembling</td>
+<td><code>.badge.b-blue</code></td>
+<td>assembling</td>
+<td>진행 중 (챕터 생성·QC 진행)</td>
+</tr>
+<tr>
+<td>ready</td>
+<td><code>.badge.b-green</code></td>
+<td>ready</td>
+<td>완성·출간 대기 (검수 통과)</td>
+</tr>
+<tr>
+<td>published</td>
+<td><code>.badge.b-gold</code></td>
+<td>published</td>
+<td>출간 완료</td>
+</tr>
+<tr>
+<td>monitoring</td>
+<td><code>.badge.b-warn</code></td>
+<td>monitoring</td>
+<td>출간 후 48h 검증 대기 (경고성)</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>챕터 진행률 바</strong>: 기존 <code>.gauge.g-blue</code>(파란 그라데이션) 틀을 유지하며 완료 챕터 수를 <code>x/y</code>로 병기 (상세는 <code>design-system.md</code> §4-2).</li>
+<li><strong>EPUB 버튼</strong>: <code>.btn.btn-sm.btn-gen</code>. <code>ready / published / monitoring</code>에서만 활성, <code>draft / assembling</code>은 <code>.btn:disabled</code> (K-3).</li>
+<li><strong>QC 리포트</strong>: <code>.btn.btn-sm</code> "리포트" (<code>ready</code> 이상). 클릭 → <code>#detail</code> 모달 재사용, §2.2 QC 결과표 렌더.</li>
+<li><strong>생성일</strong>: <code>created_at</code> (yyyy-mm-dd).</li>
+</ul>
+<h3>2.2 책 상세 모달 (기존 <code>#detail .panel</code> 구조 재사용, width 760px)</h3>
+<pre><code>┌────────────────────────────────────────────────────────────┐
+│ 52주 절약 챌린지 워크북        [ready]                  [✕] │ ← .panel-head + 상태배지
+├────────────────────────────────────────────────────────────┤
+│  아웃라인 · 챕터 (6~12)            (챕터 진행률 바 + 6/10)    │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ # | 챕터 제목       | 상태    | 단어수   | 액션        │  │
+│  │ 1 | 왜 52주인가     | [done]  | 912     | [본문 보기]  │  │
+│  │ 2 | 예산 세우기      | [done]  | 1,103   | [본문 보기]  │  │
+│  │ 3 | 주간 체크인      | [done]  | 987     | [본문 보기]  │  │
+│  │ 4 | 월간 리뷰        | [done]  | 1,011   | [본문 보기]  │  │
+│  │ 5 | 절약 트래커       | [done]  | 964     | [본문 보기]  │  │
+│  │ 6 | 주간 챌린지        | [done]  | 1,048   | [본문 보기]  │  │
+│  │ 7 ~ 10 | (미생성)     | [pending](·dim) | —      | —           │  │
+│  │  (진행률 6/10 — 완료 6챕터 [done] / 미생성 4챕터 [pending]) │  │
+│  └──────────────────────────────────────────────────────┘  │
+│ ▶ QC 8항목 결과 (챕터 QC 리포트 — 클릭 시 펼침/접힘)          │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ # | QC 항목        | 기준 요약                   | 결과  │  │
+│  │ 1 | 표절 유사성     | 타 도서 문장 유사 문장 검출   | [PASS] │  │
+│  │ 2 | 금지어          | 광고성 과장·KDP 위반어        | [PASS] │  │
+│  │ 3 | 사실성          | 수치·주장 출처, &quot;추정&quot; 표기     | [PASS] │  │
+│  │ 4 | 챕터 간 중복      | 임베딩 유사도 ≥0.8 재작성     | [WARN] │  │
+│  │ 5 | 길이(±20%)·가독성 | 800~1,200단어, FK 점수       | [PASS] │  │
+│  │ 6 | AI 표기          | AI-generated 공개 문구      | [PASS] │  │
+│  │ 7 | 마크다운 정합     | 파싱·EPUB 변환 경고 0        | [PASS] │  │
+│  │ 8 | 메타데이터        | 키워드7·카테고리2·펜네임       | [PASS] │  │
+│  └──────────────────────────────────────────────────────┘  │
+│  (실패/WARN 항목은 .no / .warn-txt 색, 클릭 시 상세 사유 표시)  │
+│ ────────────────────────────────────────────────────────── │
+│ [EPUB 다운로드]  [검수 재실행]  [재생성]  (.btn-sm / .btn-gen)│
+└────────────────────────────────────────────────────────────┘
+</code></pre>
+<ul>
+<li><strong>액션</strong>: <code>+책 생성</code>(책 목록), <code>재생성</code>(전체 재생성), <code>검수 재실행</code>(QC 8항목만 재실행 — AC-K2-2). 실행 중엔 <code>.btn:disabled</code> + <code>.spinner</code>(기존).</li>
+<li><strong>상태 규칙</strong>: 모달 상단에 챕터 진행률 바 <code>.gauge.g-blue</code>, 완료 챕터 <code>[done]</code>(<code>.ok</code>), 미생성 <code>[pending]</code>(<code>.dim</code>).</li>
+</ul>
+<hr />
+<h2>3. 화면 B — 출간 큐 (AC-K4-1)</h2>
+<h3>3.1 와이어프레임 — 정상(4권 이상, 게이트 반영)</h3>
+<pre><code>┌──────────────────────────────────────────────────────────────────────┐
+│  출간 큐 · 일 3권 게이트                    오늘 예약: 2 / 3권         │
+│ [확인 배너(.draft-block-style)] 오늘: 2026-08-15 — 내일 00:00 게이트 초기화 │
+│ ════════════════════════════════════════════════════════════════════ │
+│  ▸ 오늘 출간 가능 (ready 책 — priority 내림차순)                        │
+│  ┌───────────────────────────────────────────────────────────────┐  │
+│  │ 순번 | 제목                  | 상태   | 가격   | 체크리스트 | 작업     │  │
+│  │  1   | 52주 절약 챌린지 워크북  | [ready]| $9.99  | ✅ 4/4   | [출간 시작]│  │
+│  │  2   | 하루 한 줄 그릿 트레이닝 | [ready]| $4.99  | ✅ 4/4   | [출간 시작]│  │
+│  │  3   | 부자 되는 데일리 루틴   | [ready]| $12.99 | ⚠️ 3/4   | [체크리스트]│  │ ← 차단
+│  └───────────────────────────────────────────────────────────────┘  │
+│  ▸ 오늘 게이트 초과분 (pending — 내일 자동 허용)                        │
+│  ┌───────────────────────────────────────────────────────────────┐  │
+│  │ 4   | 60일주 성격 해석 가이드   | [ready]| $2.99  | ✅ 4/4   | [pending]  │  │ ← 초과분 .b-gray
+│  │ 5   | 인생을 바꾸는 리스트들    | [ready]| $7.99  | ✅ 4/4   | [pending]  │  │ ← 초과분
+│  └───────────────────────────────────────────────────────────────┘  │
+│  (상단 .steps: [출간 체크] → [EPUB] → [48h 모니터링] → [성과 입력] 단계 표시)  │
+└──────────────────────────────────────────────────────────────────────┘
+</code></pre>
+<ul>
+<li><strong>3권 게이트 카운터</strong>: <code>오늘 예약: 2 / 3권</code>. 3권 도달 시 추가 선택 불가 + 초과분을 <code>pending</code> 배지(<code>.badge.b-gray</code>)로 표기 — <strong>AC-K4-1①</strong> (초과분 = "다음날 자동 허용" 엣지).</li>
+<li><strong>출간 시작 흐름</strong>: <code>[출간 시작]</code> 클릭 → §3.2 업로드 체크리스트 모달 → 수동 업로드 완료 후 <code>status: published</code> 전이 — <strong>AC-K4-1③</strong>.</li>
+</ul>
+<h3>3.2 업로드 체크리스트 모달 (수동 업로드 전 게이트)</h3>
+<pre><code>┌────────────────────────────────────────────────────────────┐
+│  업로드 체크리스트 — &quot;52주 절약 챌린지 워크북&quot;         [✕]      │
+├────────────────────────────────────────────────────────────┤
+│  KDP 웹(수동)으로 EPUB 업로드 전 확인 항목.                    │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ ☐ ① AI 생성 콘텐츠 공개 표기 (AI-generated 문구) ← QC#6 │  │
+│  │ ✓ ② 가격 70% 구간 $2.99~$12.99 (입력: $9.99)          │  │
+│  │ ☐ ③ 키워드 7개 (현재 5개 — 2개 부족) → [키워드 편집]      │  │
+│  │ ✓ ④ 카테고리 2개 (Self-Help / Money Management)        │  │
+│  └──────────────────────────────────────────────────────┘  │
+│  [완료 요약: 2/4 ⚠️]                                          │
+│  [저장]  [뒤로]   (미완료 시 §3.3 게이트 차단 메시지 노출)      │
+└────────────────────────────────────────────────────────────┘
+</code></pre>
+<h3>3.3 체크리스트 미완료 게이트 차단 메시지 (AC-K4-1 엣지 — "체크리스트 미완료: 게이트 차단")</h3>
+<ul>
+<li><code>[출간 시작]</code> 클릭 시 미완료 항목이 있으면 <strong>출간 개시 차단</strong> (일 3권 여부와 무관). 상단 <code>#status.warn</code> 배너 + 해당 행 표시:</li>
+</ul>
+<pre><code>⚠️ [차단 배너 — .no/.warn-txt 색]
+&quot;출간이 차단되었습니다 — 체크리스트를 완료하세요: 가격, 키워드 7개, AI 표기&quot;
+[ 미완료 항목: 가격($9.99→70% 구간 밖), 키워드 7/7 미달 ] → [체크리스트 열기]
+</code></pre>
+<ul>
+<li>미완료 행의 <code>[출간 시작]</code> 버튼은 <code>.btn:disabled</code> + 행에 <code>.no</code>/<code>.warn-txt</code>로 누락 사유 표기.</li>
+</ul>
+<hr />
+<h2>4. 화면 C — 48h 모니터링 리스트 (AC-K4-2)</h2>
+<h3>4.1 와이어프레임 — 미검증 책 강조</h3>
+<pre><code>┌──────────────────────────────────────────────────────────────────────┐
+│  48h 모니터링 리스트                    미검증: 1권 ⚠️ (전체 2권)        │
+│ ┌────────────────────────────────────────────────────────────────┐  │
+│ │ 제목              | 출간일  | 책상태 | 가격   | 미러 | 48h 경과 | 확인 │  │
+│ ├────────────────────────────────────────────────────────────────┤  │
+│ │ 부자 되는 데일리 루틴 | 08-15 | [검증중]| $9.99 | 정상 | 2h 경과 |[확인]│  │ ← 미검증 강조
+│ │ 52주 절약 챌린지     | 07-30 | [검증중]| $9.99 | 정상 | 26h경과 |[확인]│  │
+│ └────────────────────────────────────────────────────────────────┘  │
+│  * 48h 초과 미검증 행: .b-warn 배지 + tr 테두리(inline style: border 1px solid var(--border-strong)) + [재확인 알림] │
+│  * [확인] → §4.2 다이얼로그 → verified 저장 (AC-K4-2②)                     │
+└──────────────────────────────────────────────────────────────────────┘
+</code></pre>
+<ul>
+<li><strong>미검증 강조</strong>(AC-K4-2·48h): <code>status=published &amp; verified_at=NULL</code> 책을 목록 <strong>상단 정렬</strong> + <code>.badge.b-warn</code>("검증 대기") + 행 테두리 강조. 48h 경과 시 <code>#status.warn</code> + <code>[재확인 알림]</code> 배너.</li>
+<li><strong>가격·미러 이상 경고</strong>(AC-K4-2③): 해당 셀 <code>.no</code>/<code>.warn-txt</code>로 "이상" 표시 + 우측 <code>[재확인 알림]</code>. 비정상 책은 verified 되어도 경고 신호 유지.</li>
+</ul>
+<h3>4.2 48h 확인 다이얼로그 → verified 저장</h3>
+<pre><code>┌────────────────────────────────────────────────────────────┐
+│  48h 확인 — &quot;부자 되는 데일리 루틴&quot;                   [✕]    │
+├────────────────────────────────────────────────────────────┤
+│  출간 후 Amazon에서 아래 3가지를 확인하세요.                  │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ ✓ 책 상태 (소장/구매 가능)                             │  │
+│  │ ✓ 가격 ($9.99 — 정상)                                 │  │
+│  │ ✓ 미러 (Kindle에서 정상 표시)                          │  │
+│  └──────────────────────────────────────────────────────┘  │
+│  [검증 완료 저장]  [뒤로]                                    │
+│      → kdp_publish.status = verified, verified_at 기록,      │
+│        미러 확인값은 kdp_publish.mirror_status(정상/이상)에 저장 │
+└────────────────────────────────────────────────────────────┘
+</code></pre>
+<ul>
+<li><strong>verified 저장</strong>(AC-K4-2②): <code>[검증 완료 저장]</code> = <code>kdp_publish.status → verified</code> + <code>verified_at</code> 기록. 미러 확인값은 <code>kdp_publish.mirror_status</code>(정상/이상)에 함께 저장(QA-D6)하여 이후 재확인·경고 추적의 근거로 삼는다. 이후 행은 목록에서 빠지고 배지 <code>[verified]</code>(<code>.b-green</code>) 표시.</li>
+</ul>
+<hr />
+<h2>5. 화면 D — 성과 입력 (AC-DB-1)</h2>
+<blockquote>
+<p>⚙ 개발팀 K-4 메모(QA-D3): 성과 입력 저장 데이터는 12-kdp-pipeline.md §3에 테이블이 없어, <strong><code>kdp_performance</code> 테이블(<code>book_id</code>·<code>month</code>·<code>sales</code>·<code>royalty</code>·<code>measured_by=수동</code>)을 신규 추가</strong>해 구현한다. (QC 결과 저장용 테이블도 동일하게 K-4에서 신규 구성 — §3 공백 해소)</p>
+</blockquote>
+<h3>5.1 와이어프레임 — 수동 입력 + 측정 경로 + 손익분기 + 월별 집계</h3>
+<pre><code>┌──────────────────────────────────────────────────────────────────────────┐
+│  수익 · 성과 대시보드 (KDP)                                [레포트 안내]      │
+│ ┌──────────────────────────────────────────┐ ┌──────────────────────────┐ │
+│ │ ▶ 수동 성과 입력                           │ │ ▶ 손익분기표 (참고)          │ │
+│ │    측정 경로: 📄 수동 — Amazon KDP 리포트   │ │  가격    | 로열티/권 | $100= │ │
+│ │  책:  [52주 절약 챌린지 ▼]                 │ │  $2.99   | $2.03    | 49권  │ │
+│ │  월:  [2026-08 ▼]  판매수: [__14__]        │ │  $4.99   | $3.43    | 29권  │ │
+│ │        로열티($): [__97.02__]              │ │  $9.99   | $6.93    | 14권  │ │
+│ │  측정 경로: (●) 수동 — Amazon 리포트        │ │  $12.99  | $9.03    | 11권  │ │
+│ │            ( ) API/Studio — 비활성          │ │  (강조: 현재 가격 $9.99)     │ │
+│ │  [ 저장 ]                    [입력 취소]     │ └──────────────────────────┘ │
+│ └──────────────────────────────────────────┘                              │
+│ ═══════════════════════════════════════════════════════════════════      │
+│ ▼ 월별 집계 (월 × 책)                                                      │
+│ ┌──────────────────────────────────────────────────────────────────┐    │
+│ │  월       | 책 제목            | 판매수 | 로열티($) | 측정 경로    │    │
+│ │  2026-08  | 52주 절약 챌린지     | 14     | 97.02   | 수동        │    │
+│ │  2026-07  | 52주 절약 챌린지     | 11     | 76.23   | 수동        │    │
+│ └──────────────────────────────────────────────────────────────────┘    │
+│  (합계행: .revenue-bar 로 로열티 누적 시각화 — 기존 인사이트 탭 패턴)          │
+└──────────────────────────────────────────────────────────────────────────┘
+</code></pre>
+<ul>
+<li><strong>AC-DB-1① 성과 입력 폼</strong>: 책/월 조합별 <code>판매수</code>·<code>로열티($)</code> 수동 입력 (KDP는 자동 수집 API 부재 → 수동 전사 원칙, plan.md F-7).</li>
+<li><strong>AC-DB-1② 측정 경로 표시</strong>: KDP 전 필드는 <code>수동 — Amazon KDP 리포트</code> 고정 라벨 노출. API/Studio 옵션은 input 비활성(<code>.btn:disabled</code> 취급) (design-system.md §4-4, AC-DB-1 엣지).</li>
+<li><strong>AC-DB-1③ 손익분기표</strong>: §2.2 가격×로열티표를 <code>.mini-table</code>로 렌더, 현재 설정 가격 행 <code>.ok</code> 강조 (표시 전용 — 정보성).</li>
+<li><strong>AC-DB-1④ 월별 집계</strong>: 월×책 그리드 + 합계 행. 미입력 월은 <code>.empty</code>("데이터 없음").</li>
+</ul>
+<hr />
+<h2>6. 공통 상태 정의 (전 화면)</h2>
+<blockquote>
+<p>기존 <code>static/index.html</code> 상태 패턴(<code>.skel</code> 스켈레톤·<code>.empty</code>·<code>#status.warn</code>·모달 <code>#detailError</code>)을 KDP 화면에 동일 재사용.</p>
+</blockquote>
+<h3>6.1 빈 상태 (데이터 없음) — <code>.empty</code></h3>
+<table>
+<thead>
+<tr>
+<th>위치</th>
+<th>메시지 예시</th>
+<th>CTA</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>책 목록 (전체 0건)</td>
+<td>"KDP 책이 없습니다 — 주제 선정 후 '책 생성'으로 시작하세요"</td>
+<td>[+ 책 생성]</td>
+</tr>
+<tr>
+<td>책 목록 (상태 필터 0건)</td>
+<td>"해당 상태의 책이 없습니다 — 필터를 조정하세요"</td>
+<td>[필터 초기화]</td>
+</tr>
+<tr>
+<td>출간 큐 (ready 0권)</td>
+<td>"출간 대기 중인 ready 책이 없습니다 — [책 목록]에서 검수를 완료하세요"</td>
+<td>[책 목록으로]</td>
+</tr>
+<tr>
+<td>48h 모니터링 (0건)</td>
+<td>"검증 대기 책이 없습니다 — 출간 48시간 후 여기에 표시됩니다"</td>
+<td>—</td>
+</tr>
+<tr>
+<td>성과 입력 (미입력 월)</td>
+<td>"기록된 성과가 없습니다 — 입력 폼에서 판매·로열티를 추가하세요"</td>
+<td>[성과 입력]</td>
+</tr>
+<tr>
+<td>QC 리포트 (미생성)</td>
+<td>"검수 전 상태입니다 — [검수 재실행] 후 리포트가 생성됩니다"</td>
+<td>[검수 재실행]</td>
+</tr>
+</tbody>
+</table>
+<h3>6.2 로딩 상태</h3>
+<ul>
+<li><strong>책 목록·출간 큐·모니터링</strong>: 기존 <code>.skel</code>(스켈레톤) 8행 렌더 — <code>.skel td</code> 애니메이션 재사용.</li>
+<li><strong>상세 모달/체크리스트 저장</strong>: <code>.btn:disabled</code> + <code>.spinner</code>(<code>#34d399</code>).</li>
+<li><strong>책 생성/검수/재생성</strong>: <code>.steps</code> + <code>.step.active</code>(blink)/<code>.step.done</code> — 기존 v8 패턴.</li>
+</ul>
+<h3>6.3 오류 상태</h3>
+<table>
+<thead>
+<tr>
+<th>유형</th>
+<th>표시</th>
+<th>CTA</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>API 401</td>
+<td><code>#status.warn</code>: "토큰이 올바르지 않습니다"</td>
+<td>토큰 재설정</td>
+</tr>
+<tr>
+<td>리스트 로드 실패</td>
+<td><code>.empty</code> "데이터를 불러오지 못했습니다"</td>
+<td>[다시 시도]</td>
+</tr>
+<tr>
+<td>상세/QC 로드 실패</td>
+<td>모달 내 <code>#detailError</code>(빨강 .no 배경)</td>
+<td>[다시 시도]·[닫기]</td>
+</tr>
+<tr>
+<td>EPUB 검증 실패</td>
+<td>QC 리포트 <code>.no</code> "변환 경고"</td>
+<td>[재생성]</td>
+</tr>
+<tr>
+<td>작업(생성/검수) 실패</td>
+<td><code>#status.warn</code> + <code>.spinner</code> 해제</td>
+<td>[재시도]</td>
+</tr>
+</tbody>
+</table>
+<h3>6.4 게이트 차단 (AC-K4-1) — §3.3 통합</h3>
+<ul>
+<li><strong>일 3권 초과</strong>: 초과분만 <code>pending</code>(<code>.b-gray</code>) 배지 + "내일 자동 허용" 안내.</li>
+<li><strong>체크리스트 미완료</strong>: 해당 행 <code>[출간 시작]</code> <code>.btn:disabled</code> + 행의 <code>.no</code> 사유 + 상단 <code>#status.warn</code> 차단 배너.</li>
+</ul>
+<h3>6.5 48h 미확인 강조 (AC-K4-2) — §4.1 통합</h3>
+<ul>
+<li>미검증(<code>status=published &amp; verified_at=NULL</code>): 목록 상단 정렬 + <code>.badge.b-warn</code> "검증 대기".</li>
+<li>48h 경과 미검증: 배지/행 테두리 강조(<code>var(--border-strong)</code> 기반 테두리 inline style 또는 기존 활성 경계) + 상단 <code>[재확인 알림]</code> 배너(<code>#status.warn</code>).</li>
+<li>가격/미러 이상: 해당 셀 <code>.no</code>/<code>.warn-txt</code> + <code>[재확인 알림]</code>.</li>
+</ul>
+<hr />
+<h2>7. 재사용 vs 신규 요약 (기존 대시보드 정합성)</h2>
+<table>
+<thead>
+<tr>
+<th>컴포넌트</th>
+<th>기존 index.html 재사용</th>
+<th>KDP 확장 지점</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>탭/하위 탭</td>
+<td><code>.tabs</code> + <code>.seg</code></td>
+<td>최상단 탭 1개 추가, seg 4개</td>
+</tr>
+<tr>
+<td>테이블</td>
+<td><code>table</code>/<code>.mini-table</code>, 스티키 헤더</td>
+<td>컬럼 정의(상태/진행률/QC/EPUB)</td>
+</tr>
+<tr>
+<td>배지</td>
+<td><code>.badge</code> + b-gold/green/blue/warn/gray</td>
+<td>상태 5종 매핑(§2.1) — 신규 색 없음</td>
+</tr>
+<tr>
+<td>진행률 바</td>
+<td><code>.gauge</code> + g-blue/g-green</td>
+<td>챕터 진행률(수치 병기)</td>
+</tr>
+<tr>
+<td>카드/패널</td>
+<td><code>.card</code>/<code>.panel-card</code>/<code>.kpi</code>/<code>.draft-block</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>버튼</td>
+<td><code>.btn</code>/<code>.btn-primary</code>/<code>.btn-sm</code>/<code>.btn-gen</code></td>
+<td>EPUB/출간/저장 버튼</td>
+</tr>
+<tr>
+<td>모달</td>
+<td><code>#detail</code>/<code>#draftModal</code> .panel</td>
+<td>책 상세·체크리스트·48h 확인</td>
+</tr>
+<tr>
+<td>상태</td>
+<td><code>.skel</code>/<code>.empty</code>/<code>#status.warn</code>/<code>.no</code>/<code>.warn-txt</code></td>
+<td>§6 상태 정의</td>
+</tr>
+<tr>
+<td>단계</td>
+<td><code>.steps</code>/<code>.step.active/.done</code></td>
+<td>출간 파이프라인 단계 표시</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>신규 컴포넌트(상태 배지 5종 매핑·챕터 진행률 바·업로드 체크리스트·48h 모니터링 리스트)는 전부 <strong>기존 토큰/클래스를 조합</strong> — 신규 팔레트·스타일 아님. 상세는 <code>design-system.md</code> §4.</p>
+</blockquote>
+<hr />
+<p><em>작성: 디자인팀 · 상태: 디자인 산출물 1/2 · 상위: plan.md·userflow.md·12-kdp-pipeline.md · 인계: 디자인QA팀 → 개발팀(K-4 대시보드)</em></p>
+</main>
+</body>
+</html>

@@ -1,6 +1,6 @@
-# HANDOFF — 작업 인계서 (2026-08-14)
+# HANDOFF — 작업 인계서 (2026-08-16)
 
-> 작성: 오케스트레이터 (Prime Agent 세션) · 프로젝트: autostudio
+> 작성: 오케스트레이터 (DeepSeek Harness 세션) · 프로젝트: autostudio
 > 목적: 진행 중 작업을 다음 세션/에이전트가 즉시 이어받을 수 있도록 상태·산출물·필요 조치를 정리
 
 ---
@@ -10,12 +10,12 @@
 | 작업 | 상태 | 커밋 |
 |---|---|---|
 | v27~v29.6 운세 기능 (생성·발행 분리, 띠 합본, 대상 배지, 레이아웃) | ✅ 완료 + 배포 | `b7cab8c`~`7930795` |
-| **v29.7 쇼츠+KDP 기획 다듬기** (파이프라인 5단계) | ✅ 완료 + 배포 | `cbdc7b0` |
-| **v29.8 기획 2차 개선** (지표 모순·exit criteria 등 7건) | ✅ 완료 + 배포 | `7f0e98d` |
-| **v29.9 오픈소스 조사 반영** (라이선스 정정·MeloTTS·QC 도구) | ✅ 완료 + 배포 | `331f00f` |
-| **쇼츠·KDP 구현 (S-1~S-4 / K-1~K-4)** | ⏸ **다음 단계 — 미착수** | — |
+| v29.7~v29.9 쇼츠+KDP 기획 다듬기 | ✅ 완료 + 배포 | `cbdc7b0`~`331f00f` |
+| **v30 KDP 파이프라인 구현 (K-1~K-4)** — 주제 선정·책 생성·EPUB·출간 큐·48h 모니터링·대시보드 탭 | ✅ 완료 (개발QA 승인, 464 passed) — **커밋 대기/완료 상태 확인 필요** | — |
+| **쇼츠 구현 (S-1~S-4)** | ⏸ **다음 단계 — 미착수** (YouTube Data API v3 키 필요) | — |
+| **KDP 백로그 R-1/R-2** (배치 research 스텁·배치 EPUB 표지 미첨부) | ⏸ 비차단 — 다음 에픽에서 정리 권고 | — |
 
-**현재 브랜치: main, origin과 동기화 완료 (커밋·푸시·배포 전부 반영됨)**
+**현재 브랜치: main (KDP 구현 커밋 여부·origin 동기화는 최근 세션에서 확인 필요)**
 
 ---
 
@@ -67,19 +67,21 @@
 
 ---
 
-## 4. 다음 단계 (구현 — 미착수)
+## 4. 다음 단계
 
-### 쇼츠 (14-shorts-pipeline.md §6, tasks.md S-1~S-4)
-1. **S-1** DB 스키마(youtube_raw·shorts_topics·shorts_scripts) + `shorts_research.py` (유튜브 수집 — API v3) ~3h
+### 쇼츠 구현 (14-shorts-pipeline.md §6, tasks.md S-1~S-4 — 미착수)
+1. **S-1** DB 스키마(youtube_raw·shorts_topics·shorts_scripts) + `shorts_research.py` (유튜브 수집 — API v3) ~3h — **YouTube Data API v3 키 필수**
 2. **S-2** `shorts_topic.py` (주제 판정·틈새 스코어 — 개정 지표) ~2h
-3. **S-3** `shorts_script.py` (스크립트 생성 + 검수 + TTS/자막) ~3h
+3. **S-3** `shorts_script.py` (스크립트 생성 + 검수 + TTS/자막 — edge-tts 라이선스 게이트) ~3h
 4. **S-4** 배치 + 대시보드 탭 + 파일럿 (10개 소재 → 5개 쇼츠)
 
-### KDP (12-kdp-pipeline.md §7, tasks.md K-1~K-4)
-1. **K-1** DB 스키마(kdp_books·chapters·covers) + `kdp_research.py` (주제 선정·영어/한국어 현지화) ~3h
-2. **K-2** `kdp_book.py` (챕터 생성 + 일관성 패스 + QC 8항목) ~5h
-3. **K-3** `ebook_builder.py` (ebooklib/pypub 조립 + calibre/epubcheck 검증) ~3h
-4. **K-4** 배치 + 대시보드 탭 + 출간 큐(일 3권) + 48h 모니터링 ~3h
+### KDP 백로그 (비차단 — 다음 에픽에서 정리 권고)
+1. **R-1** `kdp_pipeline._run_research_stage`가 `run_research` 스텁 — 배치 자율 신규 주제 산출 강화 (현재는 서버 /kdp/books POST 수락 경로로 완주 가능)
+2. **R-2** 배치 `_run_assemble_stage`가 cover_bytes=None으로 EPUB 조립 — make_cover_image로 표지 생성·전달 (AI 문구는 서버 경로·QC로 보장됨)
+
+### KDP 구현 후속 검증 (파일럿 준비)
+- calibre/epubcheck 실제 러너 검증은 GH Actions 배치 최초 실행 시 (로컬은 구조 검증만)
+- KDP 파일럿: "52주 절약 챌린지" 1권 + 아마존 경쟁도 스냅샷 게이트 (OQ-3)
 
 ---
 

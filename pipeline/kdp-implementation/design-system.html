@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>design-system</title>
+<style>
+:root { --accent:#2B5FDB; --bg:#ffffff; --fg:#1a1a2e; --muted:#666; --border:#e2e8f0; --code-bg:#f6f8fa; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#0f1117; --fg:#e6e6e6; --muted:#9ca3af; --border:#2a2f3a; --code-bg:#161b26; }
+}
+* { box-sizing: border-box; }
+body { font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif; background:var(--bg);
+       color:var(--fg); line-height:1.7; margin:0; padding:2rem 1rem; }
+main { max-width: 860px; margin: 0 auto; }
+h1 { font-size:1.9rem; border-bottom:3px solid var(--accent); padding-bottom:.4rem; }
+h2 { font-size:1.4rem; margin-top:2.2rem; border-bottom:1px solid var(--border); padding-bottom:.3rem; }
+h3 { font-size:1.15rem; margin-top:1.6rem; }
+h4 { font-size:1rem; margin-top:1.2rem; color:var(--accent); }
+a { color:var(--accent); }
+code { background:var(--code-bg); padding:.15em .4em; border-radius:4px; font-size:.9em;
+       font-family:'JetBrains Mono','D2Coding',Consolas,monospace; }
+pre { background:var(--code-bg); padding:1rem; border-radius:8px; overflow-x:auto; border:1px solid var(--border); }
+pre code { background:none; padding:0; }
+table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:.93rem; }
+th, td { border:1px solid var(--border); padding:.5rem .7rem; text-align:left; vertical-align:top; }
+th { background:var(--code-bg); font-weight:600; }
+tr:nth-child(even) td { background:rgba(127,127,127,.05); }
+blockquote { border-left:4px solid var(--accent); margin:1rem 0; padding:.5rem 1rem;
+             background:rgba(43,95,219,.06); border-radius:0 6px 6px 0; }
+blockquote p { margin:.3rem 0; }
+hr { border:none; border-top:1px solid var(--border); margin:2rem 0; }
+li { margin:.25rem 0; }
+strong { font-weight:700; }
+.meta { color:var(--muted); font-size:.85rem; margin-bottom:1.5rem; }
+</style>
+</head>
+<body>
+<main>
+<div class="meta">📄 design-system · 생성: 2026-08-15 22:42</div>
+<h1>autostudio — KDP 대시보드 디자인 시스템 (design-system.md)</h1>
+<blockquote>
+<p>작성: 디자인팀 · 프로젝트: autostudio · 작업 디렉토리: <code>pipeline/kdp-implementation/</code><br />
+상위: <code>static/index.html</code>(기존 대시보드 — v18 탭·다크 네오-글래스 팔레트) · <code>pipeline/kdp-implementation/storyboard.md</code>(화면 정의)<br />
+원칙 ▶ <strong>기존 index.html의 토큰·컴포넌트를 그대로 재사용하고 확장</strong>한다. 신규 팔레트·신규 컴포넌트 스타일 도입 금지. 모든 신규 요소는 기존 CSS 변수/클래스를 조합해 정의한다.<br />
+상태: 디자인 산출물 2/2 · 적용 대상: KDP 탭(책 목록·출간 큐·48h 모니터링·성과 입력)</p>
+</blockquote>
+<hr />
+<h2>1. 토큰 요약 (static/index.html에서 추출)</h2>
+<h3>1.1 색상 (CSS 변수 — <code>:root</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>카테고리</th>
+<th>토큰</th>
+<th>값</th>
+<th>용도 (기존)</th>
+<th>KDP 재사용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>브랜드/기본</td>
+<td><code>--primary</code></td>
+<td><code>#6366f1</code></td>
+<td>포커스 테두리·활성 탭</td>
+<td>버튼 포커스·프라이머리 그라데이션</td>
+</tr>
+<tr>
+<td></td>
+<td><code>--primary-dark</code></td>
+<td><code>#4f46e5</code></td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>액센트</td>
+<td><code>--accent-blue</code></td>
+<td><code>#38bdf8</code></td>
+<td>gauge 파란 그라데이션·배지</td>
+<td>assembling 배지·챕터 진행률 바</td>
+</tr>
+<tr>
+<td></td>
+<td><code>--accent-mint</code></td>
+<td><code>#34d399</code></td>
+<td>성공 배지·태그</td>
+<td>ready/verified 배지·PASS</td>
+</tr>
+<tr>
+<td></td>
+<td><code>--accent-amber</code></td>
+<td><code>#fbbf24</code></td>
+<td>경고 배지 (재료)</td>
+<td>가격·미러 경고</td>
+</tr>
+<tr>
+<td></td>
+<td><code>--accent-pink</code></td>
+<td><code>#f472b6</code></td>
+<td>KPI 상단바</td>
+<td>(참조)</td>
+</tr>
+<tr>
+<td>상태</td>
+<td><code>--success</code></td>
+<td><code>#34d399</code></td>
+<td><code>.ok</code> 텍스트·<code>b-green</code></td>
+<td>PASS·verified·완료</td>
+</tr>
+<tr>
+<td></td>
+<td><code>--warning</code></td>
+<td><code>#fbbf24</code></td>
+<td><code>.warn-txt</code>·<code>b-warn</code>·<code>b-gold</code></td>
+<td>monitoring·pending 강조·WARN</td>
+</tr>
+<tr>
+<td></td>
+<td><code>--danger</code></td>
+<td><code>#f87171</code></td>
+<td><code>.no</code> 텍스트·<code>b-warn</code> 강조</td>
+<td>FAIL·차단 메시지</td>
+</tr>
+<tr>
+<td>배경</td>
+<td><code>--bg0</code> <code>#0b1120</code> · <code>--bg1</code> <code>#111a30</code> · <code>--bg2</code> <code>#1e1b4b</code></td>
+<td></td>
+<td>페이지 배경 그라데이션</td>
+<td>(불변)</td>
+</tr>
+<tr>
+<td></td>
+<td><code>--card</code> <code>rgba(255,255,255,.055)</code></td>
+<td></td>
+<td>카드 배경</td>
+<td>(불변)</td>
+</tr>
+<tr>
+<td></td>
+<td><code>--card-solid</code> <code>#151f36</code></td>
+<td></td>
+<td>모달 패널</td>
+<td>책 상세·체크리스트 모달</td>
+</tr>
+<tr>
+<td>테두리</td>
+<td><code>--border</code> <code>rgba(255,255,255,.09)</code> · <code>--border-strong</code> <code>rgba(255,255,255,.16)</code></td>
+<td></td>
+<td>테이블·카드·활성 경계</td>
+<td>48h 미검증 행 강조</td>
+</tr>
+<tr>
+<td>텍스트</td>
+<td><code>--text</code> <code>#e2e8f0</code> · <code>--muted</code> <code>#94a3b8</code> · <code>--dim</code> <code>#64748b</code></td>
+<td></td>
+<td>본문·보조·약화</td>
+<td>(불변)</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>베이스 텍스트-경계 대비는 기존 검증된 콘트라스트 유지. KDP 탭도 동일 토큰만 사용 → 접근성 일관성 보장.</p>
+</blockquote>
+<h3>1.2 폰트 / 간격 / 반경</h3>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>값 (기존)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>폰트</td>
+<td><code>Pretendard Variable</code> → <code>Pretendard</code> → 시스템 폰트 (본문 14px, 표 셀 12.5px(<code>.mini-table</code>)/13px(<code>table</code>), 헤더 11px)</td>
+</tr>
+<tr>
+<td>기본 간격</td>
+<td><code>padding: 12px 16px</code>(셀) · 카드 <code>16px</code> · <code>gap: 8px</code>/<code>14px</code>(그리드)</td>
+</tr>
+<tr>
+<td>반경</td>
+<td>카드 <code>16px</code> · 탭/세그먼트 <code>12px</code>/<code>10px</code> · 버튼 <code>10px</code>/<code>8px</code> · 배지 <code>999px</code> · 게이지 <code>3px</code></td>
+</tr>
+<tr>
+<td>그림자</td>
+<td>카드 hover <code>0 12px 34px rgba(0,0,0,.35)</code> · 배지 <code>0 0 12px rgba(…)</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>KDP 탭 신규 규칙</strong>: 위 수치를 그대로 따른다 — 새 반경(20px 등)·새 그림자·새 폰트 도입 금지.</p>
+<hr />
+<h2>2. 재사용 컴포넌트 매핑 (KDP 탭이 사용하는 기존 클래스)</h2>
+<table>
+<thead>
+<tr>
+<th>기존 컴포넌트</th>
+<th>클래스 (index.html)</th>
+<th>KDP 사용 위치</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>탭 네비게이션</td>
+<td><code>.tabs</code> + <code>.tabs button.on</code></td>
+<td>최상단 "KDP 출간" 탭 추가</td>
+</tr>
+<tr>
+<td>하위 탭(세그먼트)</td>
+<td><code>.seg</code> + <code>.seg button.on</code></td>
+<td>책 목록 / 출간 큐 / 48h / 성과</td>
+</tr>
+<tr>
+<td>KPI 카드</td>
+<td><code>.kpis</code> + <code>.kpi</code>/<code>.kpi-label</code>/<code>.kpi-value(.warn)</code>/<code>.kpi-sub</code></td>
+<td>§1.2 4개 KPI</td>
+</tr>
+<tr>
+<td>카드/패널</td>
+<td><code>.card</code>/<code>.panel-card</code>/<code>.panel-card h3(.dim)</code></td>
+<td>각 화면 섹션</td>
+</tr>
+<tr>
+<td>테이블</td>
+<td><code>table</code>(스티키 헤더) / <code>.mini-table</code></td>
+<td>책 목록·QC·월별 집계</td>
+</tr>
+<tr>
+<td>진행률 게이지</td>
+<td><code>.gauge</code> + <code>.g-blue</code>/<code>.g-green</code></td>
+<td>챕터 진행률 바(§4-2)</td>
+</tr>
+<tr>
+<td>성과 바</td>
+<td><code>.revenue-bar</code></td>
+<td>월별 로열티 누적</td>
+</tr>
+<tr>
+<td>버튼</td>
+<td><code>.btn</code>/<code>.btn-primary</code>/<code>.btn-sm</code>/<code>.btn-gen</code>/<code>.btn-mini</code></td>
+<td>EPUB·출간·저장·액션</td>
+</tr>
+<tr>
+<td>상태 텍스트</td>
+<td><code>.ok</code>/<code>.no</code>/<code>.warn-txt</code>/<code>.rise</code>/<code>.dim</code></td>
+<td>QC 결과·게이트·경고</td>
+</tr>
+<tr>
+<td>배지</td>
+<td><code>.badge</code> + <code>b-gold</code>/<code>b-green</code>/<code>b-blue</code>/<code>b-warn</code>/<code>b-gray</code></td>
+<td>책 상태·pending·verified</td>
+</tr>
+<tr>
+<td>모달</td>
+<td><code>#detail .panel</code>(<code>.panel-head</code>/<code>.panel-body</code>) · <code>.x</code>(닫기 버튼)</td>
+<td>책 상세·체크리스트·48h 확인</td>
+</tr>
+<tr>
+<td>진행 단계</td>
+<td><code>.steps</code>/<code>.step(.active/.done)/.dot</code></td>
+<td>출간 파이프라인 단계</td>
+</tr>
+<tr>
+<td>상태</td>
+<td><code>.skel</code>/<code>.empty</code>/<code>#status(.warn)</code>/<code>#detailError</code></td>
+<td>§6 스토리보드 상태 정의</td>
+</tr>
+<tr>
+<td>스피너</td>
+<td><code>.spinner</code></td>
+<td>실행 중 표시</td>
+</tr>
+<tr>
+<td>---</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h2>3. KDP 탭 신규 추가 컴포넌트 정의 (기존 패턴 조합)</h2>
+<blockquote>
+<p>4개 신규 컴포넌트(책 상태 배지·챕터 진행률 바·업로드 체크리스트·48h 모니터링 리스트)는 <strong>전부 기존 토큰/클래스 조합</strong>으로 정의한다. 스타일 신설이 아니라 "기존 배지/게이지/체크리스트·테이블 패턴을 KDP 의미에 매핑"하는 것.</p>
+</blockquote>
+<h3>3-1. 책 상태 배지 (KDP 신규 의미 매핑)</h3>
+<ul>
+<li><strong>기반 클래스</strong>: 기존 <code>.badge</code>(<code>border-radius:999px; font-size:11px; font-weight:700</code>) + 색 변형 5종 그대로 재사용.</li>
+<li>신규 색을 만들지 않고, 기존 <code>b-gold/green/blue/warn/gray</code> 5종을 KDP status 5종에 매핑한다:</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>KDP status</th>
+<th>배지 조합</th>
+<th>예시 사용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>draft</td>
+<td><code>.badge.b-gray</code></td>
+<td>생성 전(중립)</td>
+</tr>
+<tr>
+<td>assembling</td>
+<td><code>.badge.b-blue</code></td>
+<td>챕터 생성/QC 진행중</td>
+</tr>
+<tr>
+<td>ready</td>
+<td><code>.badge.b-green</code></td>
+<td>검수 통과·출간 대기</td>
+</tr>
+<tr>
+<td>published</td>
+<td><code>.badge.b-gold</code></td>
+<td>출간 완료</td>
+</tr>
+<tr>
+<td>monitoring</td>
+<td><code>.badge.b-warn</code></td>
+<td>출간 후 48h 검증 대기(경고성)</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>파생 접미사 배지</strong> (같은 틀): <code>pending</code>(출간 큐 초과분) → <code>.b-gray</code>, <code>verified</code> → <code>.b-green</code>, <code>검증 대기</code> → <code>.b-warn</code>.</li>
+<li>텍스트 색은 기존 배지의 밝은 톤(<code>#fcd34d</code>/<code>#6ee7b7</code>/<code>#7dd3fc</code>/<code>#fdba74</code>/<code>#cbd5e1</code>)을 그대로 따름.</li>
+</ul>
+<h3>3-2. 챕터 진행률 바 (KDP 신규 — 수치 병기)</h3>
+<ul>
+<li><strong>기반</strong>: 기존 <code>.gauge</code>(width 56px · height 6px · radius 3px) + <code>.g-blue</code>(파란 그라데이션)를 재사용.</li>
+<li>확장 규칙: 진행률 바 옆에 <code>완료/전체</code> 숫자(<code>x/y</code>)를 <code>.num</code>(tabular-nums)으로 병기 → "챕터 6/10" 표기.</li>
+</ul>
+<pre><code>&lt;span class=&quot;gauge g-blue&quot;&gt;&lt;i style=&quot;width:60%&quot;&gt;&lt;/i&gt;&lt;/span&gt;&lt;span class=&quot;num&quot;&gt;6/10&lt;/span&gt;
+# i의 width = (완료 챕터수 ÷ 전체 챕터수) × 100% — 기존 render 패턴 그대로.
+</code></pre>
+<ul>
+<li><code>assembling</code> 진행 중 행은 <code>.g-blue</code>, ready+ 행은 <code>.g-green</code>으로 전환 가능(기존 취향 유지).</li>
+</ul>
+<h3>3-3. 업로드 체크리스트 (KDP 신규 — 기존 <code>.draft-block</code> + <code>.ok/.no/.warn-txt</code>)</h3>
+<ul>
+<li><strong>기반</strong>: 기존 게시 플래너의 "발행 절차 체크리스트"(<code>.draft-block</code>) 패턴과 <code>.ok</code>/<code>.no</code>/<code>.warn-txt</code> 텍스트 상태를 재사용.</li>
+<li>항목(12-kdp §5): ① AI 생성 콘텐츠 공개 표기(QC#6) ② 가격 70% 구간 $2.99~$12.99 ③ 키워드 7개 ④ 카테고리 2개.</li>
+<li>상태 표현: <code>완료 = .ok("✓")</code>, <code>부족 = .warn-txt</code>, <code>차단 = .no</code>. 완료 요약 <code>x/4</code>를 헤더에 병기.</li>
+<li>저장/차단 동작은 storyboard.md §3.3 "게이트 차단" 규칙에 따른다.</li>
+</ul>
+<h3>3-4. 48h 모니터링 리스트 (KDP 신규 — 테이블 + 배지 + 경고 조합)</h3>
+<ul>
+<li><strong>기반</strong>: 기존 <code>table</code>(스티키 헤더)+<code>.mini-table</code> + <code>.badge.b-warn</code> + <code>.no</code>/<code>.warn-txt</code> + <code>.btn-sm</code> 조합.</li>
+<li>컬럼: 제목 · 출간일 · 책 상태 · 가격 · 미러 · 48h 경과 · 확인 액션.</li>
+<li>미검증 책 강조: 값 <code>status=published &amp; verified_at=NULL</code> → 행 상단 정렬 + <code>.badge.b-warn</code>("검증 대기") + 행 테두리 강조(<code>inline style: border 1px solid var(--border-strong)</code> — index.html엔 <code>.border-strong</code> 클래스가 없고 CSS 변수만 존재).</li>
+<li>가격/미러 이상: 해당 셀 <code>.no</code>(빨강)/<code>.warn-txt</code>(주황) + 우측 <code>[재확인 알림]</code>(<code>.btn-sm</code>). <code>[확인]</code> 클릭 → 다이얼로그 → <code>verified</code> 저장.</li>
+<li>미러 확인값 저장(QA-D6): 48h 확인 다이얼로그에서 미러 상태를 <code>kdp_publish.mirror_status</code>(정상/이상) 필드에 저장 권장 — <code>verified</code>와 함께 기록해 이후 재확인·경고 추적의 근거로 삼는다 (12-kdp §3 <code>kdp_publish</code>에 mirror_status 필드 신규 추가 제안).</li>
+<li><strong>측정 경로 노출(AC-DB-1②)</strong>: 성과 탭 입력 폼 옆에 <code>수동 — Amazon KDP 리포트</code> 라벨 고정 표시. API/Studio 옵션은 input 비활성(<code>.btn:disabled</code> 취급)으로 둠 — "채널 비소유 시 입력 비활성" 기존 규칙과 정합.</li>
+</ul>
+<hr />
+<h2>4. 접근성 (a11y) · 모션 정합</h2>
+<ul>
+<li>기존 <code>prefers-reduced-motion: reduce</code> 블록(오로라·KPI·스켈레톤 애니메이션 off)은 KDP 신규 요소에도 동일 적용. 신규 애니메이션 불필요.</li>
+<li>모든 인터랙션 버튼/탭에 기존처럼 <code>aria-label</code> 부여(기존 탭·세그먼트 패턴).</li>
+<li>색상 대비는 기존 토큰만 사용하므로 신규 대비 위험 없음. 배지 색만으로 판단하지 않도록 배지 <strong>라벨 텍스트와 함께</strong> 표기(색만으론 구분 불가).</li>
+</ul>
+<hr />
+<h2>5. 스킬 사용 로그 (이번 산출물에 적용된 스킬/지식)</h2>
+<table>
+<thead>
+<tr>
+<th>스킬/참고</th>
+<th>적용 지점</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>design-system</code></td>
+<td>3계층 토큰(primitive→semantic→component) 관점에서 KDP 신규 컴포넌트가 "기존 primitive 토큰 조합"임을 명시 — 신규 팔레트 금지 원칙의 근거 (§3)</td>
+</tr>
+<tr>
+<td><code>design-auditor</code></td>
+<td>색상 대비·일관성·시각 계층 점검 — 기존 토큰만 재사용해 대비 위험 제거(§4), 상태 색을 배지 라벨 텍스트와 병기</td>
+</tr>
+<tr>
+<td>기존 대시보드 패턴 분석</td>
+<td>index.html v18 탭/seg/badge/gauge/modal/skel/empty 패턴을 inventory화(§2)해 KDP 탭이 이를 조합(§3)</td>
+</tr>
+<tr>
+<td><code>work-pipeline</code></td>
+<td>디자인팀 산출 절차 준수 — 입력 문서(plan/userflow/12-kdp) 전부 읽고 AC 매핑 후 스토리보드·DS 각 1회 산출</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<p><em>작성: 디자인팀 · 상태: 디자인 산출물 2/2 · 상위: index.html + storyboard.md · 인계: 디자인QA팀 → 개발팀(K-4 대시보드)</em></p>
+</main>
+</body>
+</html>

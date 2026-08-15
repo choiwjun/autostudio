@@ -2,6 +2,19 @@
 
 이 프로젝트의 버전 이력. 버전 규칙: 기능 단위로 커밋 메시지에 표기 (비공식 SemVer).
 
+## v30 — 2026-08-16 (KDP 파이프라인 구현 — K-1~K-4, 개발QA 승인)
+
+### 구현 (work-pipeline: 디자인→디자인QA→개발 TDD→개발QA)
+- **K-1 주제 선정** — `kdp_research.py`: '곧 뜰' 키워드 → 영어 현지화(rule+LLM 폴백) · 아마존 검색 스냅샷(상위 20권, URL 인코딩·HTTPS 한정 리다이렉트·5MB 상한 하드닝) · 틈새 판정 · 영어/한국어 양쪽 후보 · 전환율 30% 게이트(KDP KR 병행)
+- **K-2 책 생성** — `kdp_book.py`: 6~12챕터 아웃라인(MIN 강제) · 챕터 2패스(draft_pipeline 재사용) · 일관성 보정 패스 · 챕터당 하드 예산 300초(부분 저장·재개) · **QC 8항목**(표절·금지어·사실성·중복·길이±20%·AI 표기[본문+표지]·마크다운·메타) → kdp_qc_results
+- **K-3 EPUB** — `ebook_builder.py`: ebooklib 조립(markdown 변환·목차·메타) · Pillow 6×9 표지('AI-generated' 공개 문구 오버레이) · 로컬 구조 검증 + GH Actions calibre/epubcheck(ebook-polish --check)
+- **K-4 배치·대시보드** — `kdp_pipeline.py` 5단계 오케스트레이션(research→generate→assemble→출간 큐→48h) · **출간 큐 일 3권 게이트**(트랜잭션 원자화 BEGIN IMMEDIATE/FOR UPDATE) · 48h 모니터링(verified·verified_at·mirror_status) · server.py `/kdp/*` 라우트 13종(require_token, 체크리스트 차단 400) · static/index.html "KDP 출간" 탭(기존 클래스만 재사용) · kdp-pipeline.yml(calibre+openjdk)
+- **DB** — `db.py` KDP 테이블 6종(kdp_books·kdp_chapters·kdp_covers·kdp_publish·kdp_performance·kdp_qc_results, SQLite/Postgres 이중 SQL)
+- **테스트 인프라** — `conftest.py` 외부 API 키 격리 픽스처 추가: collect.main()의 load_dotenv(".env.local")가 실제 키(BAILIAN/OPENCODE/BLOG)를 주입해 이후 테스트가 진짜 LLM/발행 호출로 행(hang)하던 기존 결함 수정 (전체 스위트 안정화)
+- **검증**: 전체 테스트 **464 passed / 10 skipped** (기존 407 + KDP 신규 57, 회귀 0) · 개발QA 2차 재검증 **✅ 승인** (잔존 백로그 R-1: 배치 research 스텁 · R-2: 배치 EPUB 표지 미첨부 — 비차단)
+- 산출 문서: `pipeline/kdp-implementation/` — coding-convention·tech-design·storyboard·design-system·design-qa-report·implementation-report·dev-qa-report (md+html)
+- **백로그**: R-1/R-2 정리 · 쇼츠 S-1~S-4 (YouTube API 키 필요) · HANDOFF 갱신
+
 ## v29.9 — 2026-08-14 (오픈소스 조사 반영 — 라이선스 정정·TTS 대체재)
 
 ### 조사

@@ -1,0 +1,60 @@
+# .github/workflows/kdp-pipeline.yml — K-4 KDP 배치 (daily-collect 패턴)
+name: kdp-pipeline
+
+on:
+  schedule:
+    - cron: '30 21 * * *'   # 매일 06:30 KST (전날 21:30 UTC)
+  workflow_dispatch:
+
+concurrency:
+  group: kdp-pipeline
+  cancel-in-progress: false
+
+jobs:
+  kdp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Python deps
+        run: |
+          pip install -r requirements.txt -r requirements-dev.txt
+      - name: Install calibre + Java + epubcheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y calibre openjdk-17-jre-headless
+      - name: Run KDP pipeline
+        run: python kdp_pipeline.py
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
+          BAILIAN_TOKEN_PLAN_API_KEY: ${{ secrets.BAILIAN_TOKEN_PLAN_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      - name: EPUB 검증 (calibre ebook-polish --check — Java 불필요 폴백)
+        run: |
+          python - <<'PYEOF'
+          import glob, os, subprocess, sys
+          files = glob.glob('out/*.epub')
+          ok = True
+          for f in files:
+              r = subprocess.run(['ebook-polish', '--check', f],
+                                 capture_output=True, text=True)
+              print('POLISH', f, 'rc=', r.returncode)
+              ok = ok and r.returncode == 0
+          sys.exit(0 if ok else 1)
+          PYEOF
+      - name: Keep-alive (스케줄 60일 자동 비활성화 방지)
+        if: github.event_name == 'schedule'
+        run: |
+          last=$(git log -1 --format=%ct)
+          now=$(date +%s)
+          if [ $(( (now - last) / 86400 )) -ge 50 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "chore: keep scheduled workflow alive"
+            git push
+          fi

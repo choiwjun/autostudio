@@ -405,6 +405,7 @@
       <button type="button" id="tabBtnKeywords" class="on" onclick="switchTab('keywords')">키워드 목록</button>
       <button type="button" id="tabBtnPlanner" onclick="switchTab('planner')">게시 플래너</button>
       <button type="button" id="tabBtnInsights" onclick="switchTab('insights')">수익 인사이트</button>
+      <button type="button" id="tabBtnKdp" onclick="switchTab('kdp')">KDP 출간</button>
     </div>
 
     <div id="tabKeywords" class="tabpane on">
@@ -509,6 +510,43 @@
       </div>
       <ul id="seedList"></ul>
     </section>
+
+    <!-- v30: KDP 출간 탭 (storyboard §1.1 — .tabs + 내부 .seg) -->
+    <div id="tabKdp" class="tabpane" aria-label="KDP 출간">
+      <section class="card" aria-label="KDP 출간">
+        <div class="seg" role="group" aria-label="KDP 하위 탭">
+          <button type="button" id="kdpSegBooks" class="on" onclick="kdpSwitch('books')">책 목록</button>
+          <button type="button" id="kdpSegPublish" onclick="kdpSwitch('publish')">출간 큐</button>
+          <button type="button" id="kdpSegMonitor" onclick="kdpSwitch('monitor')">48h 모니터링</button>
+          <button type="button" id="kdpSegPerf" onclick="kdpSwitch('perf')">성과 입력</button>
+        </div>
+        <div id="kdpKpi" class="kpis">
+          <div class="kpi"><div class="kpi-label">KDP 책</div><div class="kpi-value" id="kdpBookCount">-</div><div class="kpi-sub">draft~monitoring</div></div>
+          <div class="kpi"><div class="kpi-label">ready / 출간대기</div><div class="kpi-value" id="kdpReadyCount">-</div><div class="kpi-sub">게이트 3권</div></div>
+          <div class="kpi"><div class="kpi-label">48h 미검증</div><div class="kpi-value" id="kdp48hCount">-</div><div class="kpi-sub">모니터링</div></div>
+        </div>
+        <div id="kdpBooksPane">
+          <div class="table-wrap">
+            <table><thead><tr><th>#</th><th>제목</th><th>상태</th><th>카테고리</th><th>언어</th><th>생성일</th><th>EPUB</th></tr></thead>
+            <tbody id="kdpBookRows"></tbody></table>
+          </div>
+          <div class="empty dim" id="kdpBookEmpty">KDP 책이 없습니다 — 주제 선정 후 '책 생성'으로 시작하세요</div>
+        </div>
+        <div id="kdpPublishPane" class="tabpane" style="display:none">
+          <div class="empty dim">출간 대기 중인 ready 책이 없습니다</div>
+        </div>
+        <div id="kdpMonitorPane" class="tabpane" style="display:none">
+          <div class="empty dim">검증 대기 책이 없습니다</div>
+        </div>
+        <div id="kdpPerfPane" class="tabpane" style="display:none">
+          <div class="mini-table">
+            <table><thead><tr><th>책</th><th>월</th><th>판매수</th><th>로열티($)</th><th>측정 경로</th></tr></thead>
+            <tbody id="kdpPerfRows"></tbody></table>
+          </div>
+          <div class="empty dim" id="kdpPerfEmpty" style="display:none">기록된 성과가 없습니다 — 입력 폼에서 판매·로열티를 추가하세요</div>
+        </div>
+      </section>
+    </div>
   </main>
 
   <div id="detail" role="dialog" aria-modal="true">
@@ -1547,17 +1585,230 @@ async function deleteSeed(id) {
 }
 
 // v18: 탭 전환 — 플래너/인사이트는 첫 표시 시 1회 로드
-let plannerLoaded = false, insightsLoaded = false;
+let plannerLoaded = false, insightsLoaded = false, kdpLoaded = false;
+let kdpSeg = 'books';
 
 function switchTab(name) {
   document.getElementById('tabKeywords').classList.toggle('on', name === 'keywords');
   document.getElementById('tabPlanner').classList.toggle('on', name === 'planner');
   document.getElementById('tabInsights').classList.toggle('on', name === 'insights');
+  document.getElementById('tabKdp').classList.toggle('on', name === 'kdp');
   document.getElementById('tabBtnKeywords').classList.toggle('on', name === 'keywords');
   document.getElementById('tabBtnPlanner').classList.toggle('on', name === 'planner');
   document.getElementById('tabBtnInsights').classList.toggle('on', name === 'insights');
+  document.getElementById('tabBtnKdp').classList.toggle('on', name === 'kdp');
   if (name === 'planner' && !plannerLoaded) { plannerLoaded = true; loadPlanner(); }
   if (name === 'insights' && !insightsLoaded) { insightsLoaded = true; loadInsights(); }
+  if (name === 'kdp' && !kdpLoaded) { kdpLoaded = true; loadKdp(); }
+}
+
+function kdpSwitch(seg) {
+  kdpSeg = seg;
+  ['books', 'publish', 'monitor', 'perf'].forEach(function (s) {
+    var pane = document.getElementById('kdp' + s.charAt(0).toUpperCase() + s.slice(1) + 'Pane');
+    if (pane) pane.style.display = (s === seg) ? 'block' : 'none';
+    var btn = document.getElementById('kdpSeg' + s.charAt(0).toUpperCase() + s.slice(1));
+    if (btn) btn.classList.toggle('on', s === seg);
+  });
+  if (seg === 'books') loadKdpBooks();
+  if (seg === 'publish') loadKdpQueue();
+  if (seg === 'monitor') loadKdpMonitor();
+  if (seg === 'perf') loadKdpPerf();
+}
+
+async function apiKdp(path) {
+  var r = await fetch('/api' + path);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+async function loadKdp() {
+  try {
+    loadKdpBooks();
+  } catch (e) { setStatus('KDP 로드 실패: ' + e.message); }
+}
+
+async function loadKdpBooks() {
+  var data = await apiKdp('/kdp/books');
+  var rows = data.items || [];
+  var tb = document.getElementById('kdpBookRows');
+  tb.innerHTML = '';
+  var ready = 0, kpis = {};
+  kpis['kdpBookCount'] = rows.length;
+  rows.forEach(function (b, i) {
+    if (b.status === 'ready') ready++;
+    var tr = document.createElement('tr');
+    var badge = '<span class="badge ' + kdpBadge(b.status) + '">' + b.status + '</span>';
+    var epub = (b.status === 'ready' || b.status === 'published' || b.status === 'monitoring')
+      ? '<a class="btn btn-sm btn-gen" href="/api/kdp/books/' + b.id + '/epub">다운로드</a>'
+      : '<span class="dim">-</span>';
+    tr.innerHTML = '<td>' + (i + 1) + '</td><td>' + esc(b.title) + '</td><td>' + badge +
+      '</td><td>' + esc(b.category || '-') + '</td><td>' + esc(b.lang || 'en') +
+      '</td><td>' + esc((b.created_at || '').slice(0, 10)) + '</td><td>' + epub + '</td>';
+    tb.appendChild(tr);
+  });
+  document.getElementById('kdpReadyCount').textContent = ready;
+  var d = document.getElementById('kdpBookEmpty');
+  if (d) d.style.display = rows.length ? 'none' : 'block';
+  load48hKpi();
+}
+
+async function load48hKpi() {
+  try {
+    var s = await apiKdp('/kdp/monitoring-summary');
+    var el = document.getElementById('kdp48hCount');
+    el.textContent = s.pending_48h || 0;
+    el.classList.toggle('warn', (s.pending_48h || 0) > 0);
+  } catch (e) {}
+}
+
+function kdpBadge(status) {
+  return { draft: 'b-gray', assembling: 'b-blue', ready: 'b-green',
+           published: 'b-gold', monitoring: 'b-warn' }[status] || 'b-gray';
+}
+
+async function loadKdpQueue() {
+  var data = await apiKdp('/kdp/publish-queue');
+  var items = data.ready_books || [];
+  var today = data.today || '';
+  var gate = data.gate || {};
+  var wrap = document.getElementById('kdpPublishPane');
+  if (!items.length) {
+    wrap.innerHTML = '<div class="empty dim">출간 대기 중인 ready 책이 없습니다</div>';
+    return;
+  }
+  var header = '<div class="kpi-sub">오늘 예약: ' + (gate.published || 0) + ' / 3권</div>'
+    + '<div class="dim">일 3권 게이트 — 3권 초과는 다음날 자동 허용 (pending)</div>';
+  var rows = items.map(function (it, i) {
+    var b = it.book || {};
+    var cl = it.checklist || {};
+    var doneC = it.checklist_done || 0, totalC = it.checklist_total || 4;
+    var clLabel = doneC >= totalC
+      ? '<span class="ok">체크리스트 ' + doneC + '/' + totalC + '</span>'
+      : '<span class="warn-txt">체크리스트 ' + doneC + '/' + totalC + ' (미완료)</span>';
+    var btn = doneC >= totalC
+      ? '<button class="btn btn-sm btn-primary" data-pub="' + (b.id!=null?b.id:'') + '">출간 시작</button>'
+      : '<button class="btn btn-sm" disabled>출간 시작</button>';
+    var missing = [];
+    if (cl.price_ok === false) missing.push('가격');
+    if (cl.keywords_ok === false) missing.push('키워드 7');
+    if (cl.categories_ok === false) missing.push('카테고리 2');
+    if (missing.length) {
+      btn = '<div class="warn-txt">차단: ' + missing.join(', ') + '</div>';
+    }
+    return '<tr><td>' + (i + 1) + '</td><td>' + esc(b.title || '') + '</td>' +
+      '<td>' + clLabel + '</td><td>' + esc(b.category || '-') + '</td><td>' + btn + '</td></tr>';
+  }).join('');
+  wrap.innerHTML = header
+    + '<div class="table-wrap"><table class="mini-table"><thead><tr>'
+    + '<th>순번</th><th>제목</th><th>체크리스트</th><th>카테고리</th><th>출간</th></tr></thead>'
+    + '<tbody>' + rows + '</tbody></table></div>';
+  // 출간 시작 버튼 배선 → POST /kdp/publish (체크리스트 검증은 서버가 수행)
+  Array.prototype.forEach.call(
+    wrap.querySelectorAll('button[data-pub]'), function (btn) {
+      btn.onclick = function () { kdpConfirmPublish(btn.getAttribute('data-pub')); };
+    });
+}
+
+async function kdpConfirmPublish(bookId) {
+  if (!window.confirm('KDP 웹에 수동 업로드 후 출간을 시작하시겠습니까? (가격 9.99 자동)')) return;
+  try {
+    var r = await fetch('/api/kdp/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ book_id: Number(bookId), price: 9.99 }),
+    });
+    var j = await r.json();
+    if (!r.ok) { setStatus(j.detail || '출간 실패', true); return; }
+    setStatus('출간 예약 완료 — publish_id ' + j.publish_id);
+    loadKdpQueue();
+  } catch (e) { setStatus('출간 실패: ' + e.message, true); }
+}
+
+async function loadKdpMonitor() {
+  var data = await apiKdp('/kdp/monitoring');
+  var items = data.items || [];
+  var wrap = document.getElementById('kdpMonitorPane');
+  if (!items.length) { wrap.innerHTML = '<div class="empty dim">검증 대기 책이 없습니다</div>'; return; }
+  var rows = items.map(function (p) {
+    return '<tr><td>' + esc(p.title || '') + '</td><td>' + esc(p.publish_date || '') +
+      '</td><td>$' + esc(p.price || 0) + '</td>' +
+      '<td><button class="btn btn-sm btn-primary" data-verify="' + p.id + '">확인</button></td></tr>';
+  }).join('');
+  wrap.innerHTML = '<div class="table-wrap"><table class="mini-table"><thead><tr>' +
+    '<th>제목</th><th>출간일</th><th>가격</th><th>확인</th></tr></thead><tbody>' +
+    rows + '</tbody></table></div>';
+  Array.prototype.forEach.call(
+    wrap.querySelectorAll('button[data-verify]'), function (btn) {
+      btn.onclick = function () { kdpVerifyPublish(btn.getAttribute('data-verify')); };
+    });
+}
+
+async function kdpVerifyPublish(publishId) {
+  try {
+    var r = await fetch('/api/kdp/publish/' + publishId + '/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ publish_id: Number(publishId), mirror_status: '정상', price_ok: 1 }),
+    });
+    var j = await r.json();
+    if (!r.ok) { setStatus(j.detail || '검증 실패', true); return; }
+    setStatus('48h 확인 완료 — verified 저장됨');
+    loadKdpMonitor();
+  } catch (e) { setStatus('검증 실패: ' + e.message, true); }
+}
+
+async function loadKdpPerf() {
+  var wrap = document.getElementById('kdpPerfPane');
+  var hist = await apiKdp('/kdp/performance-history');
+  var books = await apiKdp('/kdp/books-for-publish');
+  var items = hist.items || [];
+  var monthly = hist.monthly || {};
+  var bookOpts = (books.items || []).map(function (b) {
+    return '<option value="' + b.id + '">' + esc(b.title || '') + '</option>';
+  }).join('');
+  var form = '<div class="draft-block"><h3 class="dim">성과 수동 입력 (측정 경로: 수동 — Amazon KDP 리포트)</h3>' +
+    '<label>책 <select id="perfBook">' + bookOpts + '</select></label> ' +
+    '<label>월 <input id="perfMonth" type="month" value=""></label> ' +
+    '<label>판매수 <input id="perfSales" type="number" value="0"></label> ' +
+    '<label>로열티($) <input id="perfRoyalty" type="number" step="0.01" value="0"></label> ' +
+    '<button class="btn btn-sm btn-primary" id="perfSave">저장</button></div>';
+  var rows = items.map(function (r) {
+    return '<tr><td>' + esc(r.year_month || '') + '</td><td>' +
+      '<td>' + esc(r.sales || 0) + '</td><td>' + esc(r.royalty || 0) + '</td>' +
+      '<td>수동</td></tr>';
+  }).join('');
+  var monRows = Object.keys(monthly).sort().reverse().map(function (m) {
+    return '<tr><td>' + esc(m) + '</td><td colspan="3"></td><td>' + esc(monthly[m]) + '</td></tr>';
+  }).join('');
+  wrap.innerHTML = form
+    + '<div class="mini-table"><table><thead><tr><th>월</th><th>책</th><th>판매수</th><th>로열티($)</th><th>측정 경로</th></tr></thead>'
+    + '<tbody>' + rows
+    + (monRows ? '<tr class="dim"><td colspan="5">월별 로열티 합계</td></tr>' + monRows : '')
+    + '</tbody></table></div>';
+  var saveBtn = document.getElementById('perfSave');
+  if (saveBtn) saveBtn.onclick = kdpSavePerf;
+}
+
+async function kdpSavePerf() {
+  var bookId = document.getElementById('perfBook').value;
+  var month = document.getElementById('perfMonth').value;
+  if (!month) { setStatus('월을 선택하세요', true); return; }
+  try {
+    var r = await fetch('/api/kdp/performance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        book_id: Number(bookId), year_month: month,
+        sales: Number(document.getElementById('perfSales').value || 0),
+        royalty: Number(document.getElementById('perfRoyalty').value || 0),
+      }),
+    });
+    var j = await r.json();
+    if (!r.ok) { setStatus(j.detail || '성과 저장 실패', true); return; }
+    setStatus('성과 저장 완료');
+    loadKdpPerf();
+  } catch (e) { setStatus('성과 저장 실패: ' + e.message, true); }
 }
 
 async function loadPlanner() {
