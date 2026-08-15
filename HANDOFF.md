@@ -9,79 +9,96 @@
 
 | 작업 | 상태 | 커밋 |
 |---|---|---|
-| v26 이미지 DashScope 폴백 + 쿼터 알림 | ✅ 완료 (QA 승인, 파이프라인 종료) | `673fdb1` (커밋됨) |
-| v27 Google Nano Banana 이미지 통합 | ✅ 완료 — QA 승인 + 커밋 | `1863451` |
-| v28 운세 발행 버튼 | ✅ 완료 — QA 승인 + 커밋 + 배포 | `bac0253` + Vercel 배포 |
-| **v29 운세 생성·발행 분리 (수동 게시 지원)** | ✅ 완료 — 커밋+배포 | `b7cab8c` + Vercel |
-| **v29.1 운세 생성 실동작** (LLM 프로바이더·검수·띠 중복 수정) | ✅ 구현 + 459 passed + 실생성 검증 | **커밋/배포 예정** |
-| 운세 발행 401/429 진단 | ✅ 원인 확정 (아래 §4) — 수정은 사용자 설정 필요 | — |
+| v27~v29.6 운세 기능 (생성·발행 분리, 띠 합본, 대상 배지, 레이아웃) | ✅ 완료 + 배포 | `b7cab8c`~`7930795` |
+| **v29.7 쇼츠+KDP 기획 다듬기** (파이프라인 5단계) | ✅ 완료 + 배포 | `cbdc7b0` |
+| **v29.8 기획 2차 개선** (지표 모순·exit criteria 등 7건) | ✅ 완료 + 배포 | `7f0e98d` |
+| **v29.9 오픈소스 조사 반영** (라이선스 정정·MeloTTS·QC 도구) | ✅ 완료 + 배포 | `331f00f` |
+| **쇼츠·KDP 구현 (S-1~S-4 / K-1~K-4)** | ⏸ **다음 단계 — 미착수** | — |
 
-**⚠️ 커밋 전 상태: 미커밋 변경 18파일 + 2개 파이프라인 산출물 디렉토리 (+1,011/-52줄) — §3 순서로 커밋할 것**
+**현재 브랜치: main, origin과 동기화 완료 (커밋·푸시·배포 전부 반영됨)**
 
 ---
 
 ## 2. 파이프라인 운영 상태
 
-- 사용자 요청: 모든 기능 작업을 **work-pipeline(9단계 팀 파이프라인)** 으로 실행. small 모드 = 요구사항팀 → 개발팀 → 개발QA팀
-- v27/v28 모두 small 모드로 진행됨. 산출물은 각 `pipeline/<작업명>/` 아래 (requirements/plan/tech-design/implementation-report/dev-qa-report + .html)
-- **v28 QA 완료** (2026-08-14 본 세션): 실통신(autoblog 실제 401) + E2E(Playwright 버튼 클릭) + 전체 pytest 404 passed → **✅ 승인 (조건부)** — `pipeline/fortune-publish-button/dev-qa-report.md`
-- 완료된 팀 세션은 삭제해도 됨 (`rlm.list_subagents()` → `delete_subagent`). 이름 충돌 시 spawn 전 정리 필수
-- 작업 디렉토리 컨벤션: `pipeline/<영문 snake_case>/` (프로젝트 루트)
+- 사용자 요청: 모든 기능 작업을 **work-pipeline(9단계 팀 파이프라인)** 으로 실행
+- 이번 턴: 쇼츠+KDP 기획 다듬기 = **standard 모드 5단계 완료** (요구사항→리서치→리서치QA→기획→기획QA) + QA 보강 2회 + 오픈소스 조사 반영
+- **사용자 규칙 (중요)**: 커밋·푸시·배포는 **사용자가 명시적으로 말할 때만** — "진행해" 말고는 절대 금지. 글로벌 메모리 저장됨
+- 완료된 팀 세션은 `rlm.list_subagents()` → `delete_subagent`로 삭제해 이름 충돌 방지 (이전 팀 이름 재사용 시 필수)
 
 ---
 
-## 3. 미커밋 작업 상세 (커밋 전 검증 항목 포함)
+## 3. 쇼츠+KDP 기획 작업 상세
 
-### v27 — Nano Banana 이미지 생성 통합
-- **목적**: `GEMINI_API_KEY` 설정 시 이미지 생성 1차 프로바이더를 Google Nano Banana(`gemini-3.1-flash-image`, 16:9·1K·JPEG)로. 실패 시 Bailian→DashScope 폴백. 미설정 시 기존 동작 100% 불변
-- **구현**: `image_gen.py`(interactions API + x-goog-api-key + steps 파싱 → data URI 저장), `llm_client.py`(빈 키 시 Authorization 생략 가드), `server.py`(다운로드 프록시 data URI 분기), `publish.py`(data URI 생략+수동 업로드 주석), `conftest.py`(테스트 격리 autouse), `.env.example`/`daily-collect.yml`/`02-trd.md`/`CHANGELOG.md`
-- **QA**: ✅ 승인 (조건부) — B1 수정 완료: GEMINI_API_KEY `.strip()` 2곳 (image_gen.py L70·L217) + 테스트 1건
-- **산출물**: `pipeline/image-gen-nanobanana/`
-- **운영 전제(사용자 조치)**: Google 계정 billing 활성화 + Windows env 키 trailing LF 제거 (§4)
+### 작업 디렉토리: `pipeline/shorts-kdp-research/`
 
-### v28 — 운세 발행 버튼
-- **목적**: 대시보드 "운세 발행" 버튼 + `POST /fortune/publish` 엔드포인트 — 수동으로 운세 생성·발행 트리거, 항목별 결과(성공/실패 사유) 표시
-- **구현**: `server.py`(엔드포인트·55초 예산·응답 `{created,published,failed,skipped,enabled,message,items[]}`), `collect.py`(헬퍼 3종 + `_publish_all_fortune` 위임 + `fortune_generate_step(publish=True 기본값)`), `publish_client.py`(`BlogPublishError.status_code`), `static/index.html`(버튼+fortunePanel, esc 적용)
-- **검증**: **404 passed / 10 skipped** (기존 테스트 수정 0), JS 문법 OK
-- **QA**: ✅ 승인 (조건부) — 실통신(autoblog 401 환경, HTTP 200·84건 실패 사유 표시·멱등 확인) + E2E(버튼 클릭→패널 렌더링) + semgrep(신규 0건) 3중 검증 → `dev-qa-report.md` 작성 완료
-- **산출물**: `pipeline/fortune-publish-button/`
-- **⚠️ QA 중 발견·해결**: `_qa_tmp/live_401_test.py`가 pytest 수집 대상이 되어 `llm_client.has_api_key` 전역 오염 → 전체 실행 22건 실패. QA 임시 스크립트 삭제로 해결. **향후 QA 임시 .py는 반드시 `_qa_tmp` 밖(커밋 금지) 또는 삭제할 것** — `.gitignore`에 `pipeline/*/_qa_tmp/` 추가됨
+| 산출물 | 내용 |
+|---|---|
+| `requirements.md` | 요구사항 명세 (standard 모드, 사용자 답변 Q1~Q7 포함) |
+| `research-report.md` | 리서치 7주제 (쇼츠 시장·알고리즘·API 정책·KDP 시장·정책·시너지·운세) — 출처 54개 |
+| `research-qa-report.md` | ✅ 승인(조건부) — 수치 40+건 교차 검증 |
+| `plan.md` | PRD — **AC 22개**, F-1~F-7 + F-P(파일럿 게이트) |
+| `trd.md` | 기술 요구사항 — 쿼터 예산(≤100 units), calibre/Java, TTS 라이선스 |
+| `userflow.md` | 여정 5개 |
+| `tasks.md` | **S-1~S-4 / K-1~K-4** 태스크 (총 ~27h, 의존성·AC 연결) |
+| `test-design.md` | TC 66건 (AC↔TC 추적성 유지) |
+| `planning-qa-report.md` | ✅ 승인 — 수치 모순 0건, 8건 매핑 실증 |
+| `opensource-report.md` | **오픈소스 도구 조사 55개** — 라이선스·별·적용 모듈 매핑 |
 
-### 커밋 제안 (QA 승인 후 — §3 순서)
-1. `feat: Google Nano Banana 이미지 생성 통합 (v27) — GEMINI_API_KEY 1차 프로바이더, data URI 저장, 폴백 체인`
-2. `feat: 운세 발행 버튼 — POST /fortune/publish + 대시보드 수동 발행 (v28)`
-3. (필요 시) `docs: HANDOFF 갱신` / 파이프라인 산출물 포함 여부 — 지금까지는 산출물도 함께 커밋하는 관례 (v26처럼)
+### 개정 기획 문서 (docs/planning/)
+- **`14-shorts-pipeline.md`** (+html) — 유튜브 쇼츠 파이프라인 (신규 고도화)
+  - 핵심: 네이버 키워드가 아닌 **유튜브 인기 주제/채널/키워드** 기반
+  - 전략: 쇼츠 광고(RPM $0.01~0.07)=보조, **KDP/운세 유입=실질 수익원**
+  - 지표: 조회급상승·조회/구독·반응비(보조)·틈새 + 공유율(채널 소유 시 조건부)
+  - 파일럿 exit criteria: 30일 조회 1만+·완주율 70%+
+  - TTS: edge-tts(LGPL-3.0·비공식 API) → **MeloTTS(MIT·한국어) 대체 후보**
+- **`12-kdp-pipeline.md`** (+html) — KDP 전자책 (개정)
+  - **개선점 8건 전부 반영** + §10 매핑표 (NFR-4)
+  - 일 3권 통일, 의존성(ebooklib AGPL→pypub 대안, calibre+openjdk), QC 8항목(sentence-transformers·textstat·LanguageTool+py-hanspell), 48h 모니터링, 영어/한국어 병행, 수익 모델(로열티·손익분기), KDP↔쇼츠 시너지
+  - 파일럿: "52주 절약 챌린지" + 아마존 경쟁도 스냅샷 게이트, 90일 50권+
+- **`11-fortune-channel.md`** §9 개정 — 쇼츠 이연 해소 (한국어 운세·영어권 KDP 쇼츠 포함)
+
+### 핵심 결정 (OQ-1~5)
+- OQ-1 수집 빈도: **매일 1회** (쿼터 100 units/일 = 1%)
+- OQ-2 주제 비중: **운세 4 + KDP 3 + 일반 3** (10개 소재 → 5개 쇼츠)
+- OQ-3 KDP 파일럿: **"52주 절약 챌린지" 유지 + 경쟁도 스냅샷 검증**
+- OQ-4 TTS: **edge-tts 채택 → MeloTTS 대체 후보 (파일럿 전 검증)**
+- OQ-5 채널: **분리 권장** (한국어 운세 / 영어 KDP)
 
 ---
 
-## 4. 운세 발행 401/429 진단 결과 (사용자 조치 필요)
+## 4. 다음 단계 (구현 — 미착수)
 
-| 증상 | 원인 | 조치 |
-|---|---|---|
-| **401 invalid token** (autoblog 발행 실패) | autostudio `BLOG_TOKEN` ≠ autoblog 서버 기대 토큰 (로컬 토큰 live probe로 재현) | autoblog(autoblog-pearl.vercel.app) 프로젝트의 `DASHBOARD_TOKEN`을 확인해 autostudio의 `.env.local` **BLOG_TOKEN**과 GH Actions secret `BLOG_TOKEN`을 일치시킬 것 |
-| **429 quota** | autoblog 쪽 Bailian token-plan **주간 쿼터 소진** ("token-plan 1-week quota has been exhausted") | autoblog 서버의 Bailian 키/플랜 점검 (쿼터 리셋 대기 or 키 교체) |
-| 현재 상태 | fortune_generations: publish_failed 다수 + generated — **발행 성공 0건** (최근, 401) | 위 토큰/쿼터 해결 후 대시보드 "운세 발행" 버튼으로 재발행 가능 (publish_failed 자동 재시도 로직 있음) |
+### 쇼츠 (14-shorts-pipeline.md §6, tasks.md S-1~S-4)
+1. **S-1** DB 스키마(youtube_raw·shorts_topics·shorts_scripts) + `shorts_research.py` (유튜브 수집 — API v3) ~3h
+2. **S-2** `shorts_topic.py` (주제 판정·틈새 스코어 — 개정 지표) ~2h
+3. **S-3** `shorts_script.py` (스크립트 생성 + 검수 + TTS/자막) ~3h
+4. **S-4** 배치 + 대시보드 탭 + 파일럿 (10개 소재 → 5개 쇼츠)
 
-**참고**: 네이버 API 연동(수집·활용)은 정상 — daily_stats 2,238행/11일, 매일 스케줄 수집 동작. 401/429는 네이버가 아니라 autoblog 발행 경로의 문제.
+### KDP (12-kdp-pipeline.md §7, tasks.md K-1~K-4)
+1. **K-1** DB 스키마(kdp_books·chapters·covers) + `kdp_research.py` (주제 선정·영어/한국어 현지화) ~3h
+2. **K-2** `kdp_book.py` (챕터 생성 + 일관성 패스 + QC 8항목) ~5h
+3. **K-3** `ebook_builder.py` (ebooklib/pypub 조립 + calibre/epubcheck 검증) ~3h
+4. **K-4** 배치 + 대시보드 탭 + 출간 큐(일 3권) + 48h 모니터링 ~3h
 
 ---
 
-## 5. 사용자 필요 조치 요약 (다음 세션이 안내할 것)
+## 5. 사용자 필요 조치
 
-1. **Google AI Studio billing 활성화** — 나노바나나(유료 전용) 이미지 생성 활성화. 현재 키는 free_tier limit 0 → 429
-2. **Windows User env `GEMINI_API_KEY` trailing LF 제거** — PowerShell: `[Environment]::SetEnvironmentVariable("GEMINI_API_KEY", "<키>", "User")` (값 끝 개행 제거). 코드는 strip 방어 완료됨
-3. **BLOG_TOKEN 교체** (§4) — autoblog 토큰과 일치
-4. **autoblog Bailian 쿼터** (§4) — 429 해소 확인
-5. 배포 필요 시: Vercel 인증이 이 WSL 환경에 없음 (`vercel login` 필요) — GitHub 연동 없이 수동 배포 방식
+1. **YouTube Data API v3 키 발급** (구현 S-1 전 필수) — Google Cloud Console에서 활성화 → `.env.local`에 `YOUTUBE_API_KEY` 추가
+2. **KDP 계정** (K-4 출간 전) — 개인 가입, 펜네임, AI 생성 콘텐츠 공개 표기 준비
+3. (기존 미해결) 네이버쇼핑커넥트 PID Vercel env 설정 / BLOG_TOKEN 교체 / Bailian 쿼터 / Google billing
+4. 배포: Vercel CLI 인증됨 (`bricksoftc-7455`) — `vercel --prod --yes`
 
 ---
 
 ## 6. 환경 메모 (반복 실패 방지)
 
-- **pytest**: `./.venv/Scripts/python.exe -m pytest -q` (Windows venv — WSL에서 exe 직접 실행, `/tmp` 사용 금지 — Windows python이 못 봄. 스크립트는 프로젝트 루트에 둘 것)
-- **⚠️ pytest 수집 오염 주의**: 프로젝트 루트/`tests/` 외 `pipeline/*/` 아래 **QA 임시 .py 파일**이 있으면 pytest가 수집해 모듈 레벨 코드(env/함수 교체)가 전체 테스트를 오염시킨다. QA 임시 스크립트는 사용 직후 삭제하거나 `.gitignore` 대상(`pipeline/*/_qa_tmp/`)에 둘 것
-- **md-to-html 실제 경로**: `/home/wj941/.agents/skills/md-to-html` (`cd` 후 `.venv/bin/python scripts/md2html.py <in> <out>`) — 팀 스펙의 `~/.prime/...` 경로는 **존재하지 않음**
-- **Windows env 키 상속**: Windows User env 변수가 WSL 테스트에 상속될 수 있음 → conftest.py autouse 픽스처가 GEMINI_API_KEY 격리 (v27에서 추가, 유지)
-- **WSL↔Windows 네트워크 격리**: WSL curl로 Windows 서버 접근 불가 — HTTP 검증은 Windows 내부에서 (Playwright Windows 실행 등)
-- **프로덕션 DB**: `.env.local`의 `DATABASE_URL` = Supabase(프로덕션). 읽기 전용 조회 시 psycopg2 사용
-- **401 live probe**: autoblog `POST /api/posts` — 토큰 검증은 본문 검증보다 먼저 (401이 먼저 옴)
+- **pytest**: `./.venv/Scripts/python.exe -m pytest -q` (Windows venv — WSL에서 exe 직접 실행)
+- **⚠️ pycache 함정**: server.py 등 수정 후 uvicorn 재기동 시 `__pycache__`가 stale이면 **구버전 코드 서빙** — 재기동 전 `rm -rf __pycache__` 또는 `PYTHONDONTWRITEBYTECODE=1` 사용
+- **WSL↔Windows 네트워크 격리**: WSL curl로 Windows 서버 접근 불가 — HTTP 검증은 Windows 내부에서 (Playwright·Python 스크립트)
+- **md-to-html 실제 경로**: `/home/wj941/.agents/skills/md-to-html` (`cd` 후 `.venv/bin/python scripts/md2html.py <in> <out>`) — 팀 스펙의 `~/.prime/...` 경로는 존재하지 않음
+- **pytest 수집 오염**: 프로젝트 루트/`tests/` 외 `pipeline/*/` 아래 QA 임시 .py가 있으면 pytest가 수집해 오염 — 임시 스크립트는 사용 직후 삭제 (`.gitignore`에 `pipeline/*/_qa_tmp/` 추가됨)
+- **팀 spawn 전**: 같은 이름 이전 팀 세션 삭제 필수 (`rlm.list_subagents()` → `delete_subagent`)
+- **refine 스킬**: 프로젝트 `refine.py`가 섀도잉 — 스킬은 `/home/wj941/.npm-global/lib/node_modules/prime-agent/dist/skills/refine/src/refine/__init__.py`를 importlib로 직접 로드
+- **프로덕션 DB**: `.env.local` DATABASE_URL = Supabase. 실운영 페이지: `https://autostudio-eight.vercel.app`
