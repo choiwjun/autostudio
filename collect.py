@@ -283,6 +283,7 @@ def update_shop_clicks(d, cfg, today, now, budget_seconds=None, started=None):
         for b in batch:
             cat = resolve_shopping_category(cat_map.get(b["id"], ""), fallback_category)
             cat_groups.setdefault(cat, []).append(b)
+        aborted = False
         for cat, group in cat_groups.items():
             timeout = _budget_timeout(budget_seconds, started, DATALAB_TIMEOUT)
             try:
@@ -292,7 +293,14 @@ def update_shop_clicks(d, cfg, today, now, budget_seconds=None, started=None):
                     cat, start, today, timeout=timeout)
             except DatalabError as e:
                 d.log_collection("(shopping)", "error", str(e), now)
-                break  # 쇼핑 클릭 단계만 중단 — 나머지 파이프라인은 정상 (스펙 §4.4)
+                # 쇼핑 클릭 단계만 중단 — 나머지 파이프라인은 정상 (스펙 §4.4)
+                # v31 (알고리즘 QA): 기존 break는 카테고리 그룹 루프만 빠져나와
+                # 다음 배치가 계속 시도되며 API 장애 시 배치 수만큼 에러·대기가
+                # 반복됐음 — 단계 전체를 중단한다.
+                aborted = True
+                break
+        if aborted:
+            break
             for b in group:
                 val = ratios.get(b["keyword"])
                 if val is not None:  # None = 분야 미매칭 → NULL 유지 (v17)

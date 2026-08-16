@@ -19,6 +19,7 @@ logger = logging.getLogger("kdp_pipeline")
 DAILY_PUBLISH_LIMIT = 3        # 일 3권 게이트 (AC-K4-1)
 MONITOR_HOURS = 48             # 48h 모니터링 (AC-K4-2)
 RESEARCH_KEYWORD_LIMIT = 10    # R-1: 배치 research 입력 '곧 뜰' 상위 키워드 수 (12-kdp §2 후보 상한)
+MAX_GENERATE_PER_RUN = 2       # v31: 실행당 책 생성 상한 — LLM 비용 무한 루프 방지
 
 # H-1: 모듈 수준 별칭 — 배치 단계가 이 이름을 호출(keyword)하므로 테스트가
 # monkeypatch.setattr(kp, "generate_book", ...)로 결정적으로 대체 가능.
@@ -64,13 +65,15 @@ def _run_research_stage(d, cfg, result, snapshot_fetcher=None, translator=None):
 
 def _run_generate_stage(d, cfg, result, runner=None):
     """H-1 ② generate — draft/assembling 책에 generate_book(아웃라인→챕터→일관성→QC) → ready.
-    LLM/스냅샷/이미지는 runner(mock) 또는 기본(실제 파이프라인) 사용. 반환: 생성 완료 수."""
+    LLM/스냅샷/이미지는 runner(mock) 또는 기본(실제 파이프라인) 사용. 반환: 생성 완료 수.
+    v31 (알고리즘 QA): 실행당 생성 상한 — QC 미달·LLM 장애 책이 매일 재생성되며
+    LLM 비용을 무한 소모하던 경로 차단 (책 1권 = 챕터 6~12회 생성)."""
     targets = [b for b in d.list_kdp_books(status="draft")
                if b.get("source_keyword")]
     targets += [b for b in d.list_kdp_books(status="assembling")
                 if b.get("source_keyword")]
     done = 0
-    for book in targets:
+    for book in targets[:MAX_GENERATE_PER_RUN]:
         try:
             res = generate_book(d, cfg, book["id"], runner=runner,
                                          qc_enabled=True, marks_ready=True)

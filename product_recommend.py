@@ -72,11 +72,11 @@ def search_products(client, keyword, max_items=PRODUCT_MAX):
         return []
     items = []
     for raw in data.get("items", []):
+        if len(items) >= max_items:  # v31: append 전 검사 — max_items=0이어도 1개 반환하던 오프바이원
+            break
         parsed = _parse_item(raw)
         if parsed and parsed["price"] > 0:  # 가격 없는 광고성/중고 제외
             items.append(parsed)
-        if len(items) >= max_items:
-            break
     return items
 
 

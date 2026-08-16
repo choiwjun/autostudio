@@ -169,7 +169,7 @@ def resolve_korean_legal_time(date_parts):
              'minute': daylight[1][4] if len(daylight[1]) > 4 else 0, 'second': 0},
             daylight[0])
         if _compare(_parts_tuple(date_parts), _parts_tuple(nonexistent_end)) < 0 \
-                and _compare(_parts_tuple(date_parts), _rule_start_tuple(daylight)) >= 0:
+                and _compare(_parts_tuple(date_parts), _rule_start_tuple((daylight[1],))) >= 0:
             raise NonexistentCivilTimeError(
                 "daylight-saving transition: civil label skipped")
         ambiguous_start = _shift_utc(
@@ -178,7 +178,7 @@ def resolve_korean_legal_time(date_parts):
              'minute': daylight[2][4] if len(daylight[2]) > 4 else 0, 'second': 0},
             -daylight[0])
         if _compare(_parts_tuple(date_parts), _parts_tuple(ambiguous_start)) >= 0 \
-                and _compare(_parts_tuple(date_parts), _parts_tuple(daylight[2])) < 0:
+                and _compare(_parts_tuple(date_parts), _rule_start_tuple((daylight[2],))) < 0:
             raise AmbiguousCivilTimeError(
                 "daylight-saving transition: civil label repeated")
 

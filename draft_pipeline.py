@@ -54,7 +54,9 @@ FAKE_SOURCE_PATTERNS = (
 FAQ_MARKER = "자주 묻는 질문"
 STALE_MONTH_CUES = ("정답", "좋은", "추천", "떠나", "여행지", "지금", "이번", "가볼", "알맞", "최적", "성수기")
 STALE_MONTH_EXCEPTIONS = ("지난", "작년", "내년", "다음", "돌아보", "지났", "지나간", "예정", "계획", "예약", "미리", "부터", "까지", "당시", "회고", "후기")
-MONTH_RE = re.compile(r"(?<![0-9])([1-9]|1[0-2])월")
+# v31 (알고리즘 QA): 연도 선택 캡처 — "2027년 3월 추천"이 월 숫자 비교만으로
+# 과거월 오탐돼 불필요한 재생성을 유발하던 문제. 명시적 미래 연도는 stale 아님.
+MONTH_RE = re.compile(r"(?:(\d{4})\s*년\s*)?(?<![0-9])([1-9]|1[0-2])월")
 
 
 def _publication_context(current_date=None):
@@ -68,8 +70,15 @@ def _publication_context(current_date=None):
 def _stale_month_claim(text, current_date=None):
     current_date = current_date or config_mod.today_kst()
     for match in MONTH_RE.finditer(text or ""):
-        month = int(match.group(1))
-        if month >= current_date.month:
+        # v31: 연도 명시 시 연도 우선 판정 — 미래 연도는 월과 무관하게 통과,
+        # 과거 연도는 월과 무관하게 과거(큐 조합 시 stale).
+        year = int(match.group(1)) if match.group(1) else None
+        month = int(match.group(2))
+        if year is not None and year > current_date.year:
+            continue
+        if year is None and month >= current_date.month:
+            continue
+        if year == current_date.year and month >= current_date.month:
             continue
         start = max(0, match.start() - 70)
         end = min(len(text), match.end() + 90)
@@ -560,6 +569,11 @@ def generate_two_pass(keyword, structure, runner=None, retry_budget_seconds=None
         except DraftGenerationError:
             if attempt == 1:
                 continue
+            # v31 (알고리즘 QA): 2회차 생성 실패 — 1회차 초안(검수 미달이어도
+            # LLM 비용을 이미 지불한 자산)을 버리고 503으로 승격하던 경로 회수.
+            # draft가 있으면 하단 경로에서 경고와 함께 반환한다.
+            if draft is not None:
+                break
             raise
         ok, failed = validate_draft(draft, keyword, current_date,
                                     platform=platform, skeleton=h2s)

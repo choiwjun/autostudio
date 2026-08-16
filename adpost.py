@@ -39,8 +39,18 @@ def _norm_url(url):
 
 
 def _parse_number(raw):
-    """'1,234원'·'12.5'·빈 문자열 → float (파싱 불가 0.0)."""
-    cleaned = re.sub(r"[^\d.\-]", "", str(raw or ""))
+    """'1,234원'·'12.5'·'빈 문자열' → float (파싱 불가 0.0).
+    v31 (알고리즘 QA): 지수 표기('1e5')를 먼저 float로 정확 파싱 — 기존 문자
+    세척('e' 제거)이 100000을 15로 왜곡했음. 쉼표 제거 후 1차 시도, 실패 시
+    기존 세척 경로 폴백."""
+    s = str(raw or "").strip()
+    if not s:
+        return 0.0
+    try:
+        return float(s.replace(",", ""))
+    except ValueError:
+        pass
+    cleaned = re.sub(r"[^\d.\-]", "", s)
     if not cleaned or cleaned in ("-", "."):
         return 0.0
     try:

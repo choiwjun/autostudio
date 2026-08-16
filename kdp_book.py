@@ -148,9 +148,13 @@ def run_qc(d, book_id, draft_pack, snapshot=None, run_at=""):
     bodies = [(ch.get("body_md") or "") for ch in chapters]
     full_text = " ".join(bodies)
     meta_text = full_text + " " + (book.get("description") or "")
-    # M-1: QC #6이 표지(cover) AI 공개 문구도 검사 — draft_pack['cover'] 전달
-    cover_text = draft_pack.get("cover") or ""
-    cover_is_ai = bool(cover_text or draft_pack.get("cover_is_ai", True))
+    # M-1: QC #6이 표지(cover) AI 공개 문구도 검사 — draft_pack['cover'] 전달.
+    # v31 (알고리즘 QA): cover 키 '부재'(생성 단계 — 표지가 아직 없음)는 표지
+    # 검사를 건너뛴다. 기존 or ""가 부재를 빈 문자열로 바꿔 '표지 있음+표기
+    # 없음' 취급, 배치 경로의 ai_disclosure가 영구 실패해 책이 ready에 도달할
+    # 수 없었던 교착의 원인. 키가 있으면(빈 문자열 포함) M-1 검사 유지.
+    cover_text = draft_pack.get("cover")
+    cover_is_ai = draft_pack.get("cover_is_ai", "cover" in draft_pack)
 
     raw_checks = [
         ("plagiarism", check_plagiarism(full_text, reference=snapshot)),
@@ -273,6 +277,22 @@ def generate_book(d, cfg, book_id, runner=None, translator=None,
     consistency_pass([c for c in chapters if c.get("body_md")], runner=runner)
     qc = None
     if qc_enabled:
+        # v31 (알고리즘 QA): AI 표기 백매터 — 생성 프롬프트에 주입 규칙이 없어
+        # QC #6(본문 "ai-generated" 포함)이 구조적으로 실패했던 교착의 두 번째
+        # 원인. 마지막 완성 챕터에 결정적으로 부착하고 DB에도 반영(EPUB 조립
+        # 시 표기 유지). 아마존 AI 콘텐츠 공개 정책 준수 목적 그 자체.
+        for c_ in reversed(chapters):
+            if c_.get("status") == "done" and c_.get("body_md"):
+                c_["body_md"] = (c_["body_md"].rstrip()
+                                 + "\n\n## About This Book\n\n"
+                                   "This book includes AI-generated content "
+                                   "(본 도서는 AI 생성 콘텐츠를 포함합니다).")
+                d.update_kdp_chapter(
+                    seq_id_of(d, book_id, c_["seq"]),
+                    updated_at=config_mod.now_kst_iso(),
+                    body_md=c_["body_md"],
+                    word_count=_word_count(c_["body_md"]))
+                break
         full = [{"body_md": c_.get("body_md") or ""} for c_ in chapters]
         qc = run_qc(d, book_id, {"chapters": full, "book": book},
                     run_at=config_mod.now_kst_iso())

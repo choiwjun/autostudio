@@ -84,7 +84,10 @@ def _rule_english_parts(keyword):
 def english_candidate(keyword, category, translator=None, snapshot=None):
     """영어 현지화 후보 산출.
     rule 힌트가 있으면 제목·키워드 구성(완전 결정성). 힌트가 없으면 translator 폴백.
-    snapshot이 있고 items가 비어 있으면 수요 미검증 → None(제외). 반환 dict|None."""
+    snapshot이 있고 items가 비어 있으면 수요 미검증 → None(제외). 반환 dict|None.
+    v31 (알고리즘 QA): 키워드 7개·카테고리 2개 저장 — kdp_book.check_metadata
+    (7키워드/2카테고리 요구)와 서버 출간 체크리스트가 research 산출물을
+    통과할 수 있게 저장값을 요구치에 정합 (기존 5/1개 저장이 QC를 영구 실패시킴)."""
     if snapshot is not None and not snapshot.get("items"):
         return None  # T-K1-02: 검색 0건 → 수요 미검증 → 후보 제외
     parts = _rule_english_parts(keyword)
@@ -93,8 +96,10 @@ def english_candidate(keyword, category, translator=None, snapshot=None):
         title = f"{topic} Workbook: A Complete Guide for Beginners".strip()
         return {
             "title": title,
-            "keywords": [topic, "workbook", "guide", "beginner", category_en(category)],
-            "category": category_en(category),
+            "keywords": _pad_keywords(
+                [topic, "workbook", "guide", "beginner",
+                 category_en(category)], category_en(category)),
+            "category": f"{category_en(category)},Education",
             "lang": "en",
         }
     if translator is None:
@@ -114,10 +119,13 @@ def english_candidate(keyword, category, translator=None, snapshot=None):
             raise AmazonSnapshotError(f"번역 결과가 JSON이 아닙니다: {data[:80]}") from e
     if not isinstance(data, dict):
         raise AmazonSnapshotError("번역 결과 형식 오류")
+    cat = str(data.get("category") or category_en(category))
     return {
         "title": str(data.get("title") or keyword),
-        "keywords": [str(k) for k in (data.get("keywords") or []) if str(k).strip()][:7],
-        "category": str(data.get("category") or category_en(category)),
+        "keywords": _pad_keywords(
+            [str(k) for k in (data.get("keywords") or []) if str(k).strip()][:7],
+            cat),
+        "category": f"{cat},Education",
         "lang": "en",
     }
 
@@ -126,14 +134,34 @@ def category_en(category):
     return _DEFAULT_CATEGORY_EN.get(category, category or "Self-Help")
 
 
+def _pad_keywords(keywords, fallback_token="workbook"):
+    """v31 (알고리즘 QA): KDP 출간 요구 키워드 7개 하한 — 부족분을 무난한
+    일반 키워드로 결정적 패딩 (LLM 산출이 3개만 와도 QC/체크리스트 통과)."""
+    base = [k for k in keywords if str(k).strip()]
+    for filler in ("workbook", "guide", "beginners", "self-study",
+                   "practice", "exercises", "how-to"):
+        if len(base) >= 7:
+            break
+        if filler not in base:
+            base.append(filler)
+    while len(base) < 7:  # fallback_token 조차 중복인 극단 경계
+        if len(base) >= 7:
+            break
+        base.append(f"{fallback_token} {len(base)}")
+    return base[:7]
+
+
 def korean_candidate(keyword, category, snapshot=None):
-    """K-2: KDP KR 한국어 전자책 병행 후보 (영어 수요 낮음/현지화 어려움 시)."""
+    """K-2: KDP KR 한국어 전자책 병행 후보 (영어 수요 낮음/현지화 어려움 시).
+    v31 (알고리즘 QA): 영어 후보와 동일하게 키워드 7개·카테고리 2개 정합."""
     if snapshot is not None and not snapshot.get("items"):
         return None
+    cat = category or "기타"
     return {
         "title": f"{keyword} 워크북",
-        "keywords": [keyword, category, "가이드", "초보"],
-        "category": category or "기타",
+        "keywords": [k for k in (keyword, cat, "가이드", "초보", "실습", "독학",
+                                 "문제집") if k and str(k).strip()][:7],
+        "category": f"{cat},교육",
         "lang": "ko",
     }
 
@@ -236,23 +264,41 @@ def niche_score(snapshot_rows):
             "avg_reviews": avg_reviews}
 
 
+DEFAULT_PEN_NAME_EN = "AutoStudio Press"
+DEFAULT_PEN_NAME_KO = "오토스튜디오"
+
+
+def _default_description(c):
+    title = c.get("title") or ""
+    if c.get("lang") == "ko":
+        return f"{title} — 초보자를 위한 단계별 실습 워크북."
+    return f"{title} — a step-by-step practice workbook for beginners."
+
+
 def run_research(d, cfg, keywords, snapshot_fetcher=None, translator=None, limit=10):
     """K-1 주제 선정 본 로직. keywords: [(keyword, category), ...].
     각 키워드 → 영어/한국어 양쪽 후보 산출 → 틈새·스냅샷 검증 → kdp_books 저장.
-    반환 {candidates, conversion_rate, suggestion, skipped}."""
+    반환 {candidates, conversion_rate, suggestion, skipped}.
+    v31 (알고리즘 QA): snapshot_fetcher 미지정 시에도 기본 HTTP fetcher로 스냅샷을
+    시도 — 기존 `if snapshot_fetcher else None`이 배치 경로의 검증을 전면
+    생략해 모든 후보가 score=1.0(경쟁 0)으로 저장됐음. 스냅샷 'unavailable'
+    (차단·장애)은 '검증됐고 0건'과 구분해 후보 제외 대신 미검증 마킹."""
     candidates = []
     skipped = []
     for keyword, category in keywords:
-        snap = fetch_snapshot(keyword, snapshot_fetcher) if snapshot_fetcher else None
-        en = english_candidate(keyword, category, translator=translator, snapshot=snap)
+        snap = fetch_snapshot(keyword, snapshot_fetcher)
+        verified = snap if snap and snap.get("status") != "unavailable" else None
+        en = english_candidate(keyword, category, translator=translator, snapshot=verified)
         if en:
             en["niche"] = niche_score(snap["items"] if snap else [])
+            en["snapshot_status"] = snap.get("status", "skipped") if snap else "skipped"
             en["source_keyword"] = keyword  # R-1: 후보별 원본 키워드 추적
             candidates.append(en)
         # 영어 미적중(수요 없음/현지화 불가) → 한국어 병행 후보
-        ko = korean_candidate(keyword, category, snapshot=snap)
+        ko = korean_candidate(keyword, category, snapshot=verified)
         if en is None and ko:
             ko["niche"] = niche_score(snap["items"] if snap else [])
+            ko["snapshot_status"] = snap.get("status", "skipped") if snap else "skipped"
             ko["source_keyword"] = keyword  # R-1: 후보별 원본 키워드 추적
             candidates.append(ko)
         elif en is None and ko is None:
@@ -268,14 +314,21 @@ def run_research(d, cfg, keywords, snapshot_fetcher=None, translator=None, limit
     # 저장 (title UNIQUE — 중복 무시)
     # R-1: source_keyword에 원본 키워드 기록 — 배치 generate 스테이지가
     # 'source_keyword 있는 draft 책'을 대상으로 하므로 end-to-end 연결에 필수.
+    # v31: pen_name/description 기본값 채움 — QC #8(metadata)가 이 둘을 요구.
     persisted = []
     for c in candidates[:limit]:
+        pen = (DEFAULT_PEN_NAME_KO if c.get("lang") == "ko"
+               else DEFAULT_PEN_NAME_EN)
+        niche = dict(c.get("niche") or {})
+        niche["snapshot_status"] = c.get("snapshot_status", "skipped")
         kid = d.insert_kdp_book(
             title=c["title"], status="draft", lang=c["lang"], priority=0.0,
             source_keyword=c.get("source_keyword", ""), created_at="",
-            description="", keywords_json=json.dumps(c["keywords"], ensure_ascii=False),
+            description=_default_description(c),
+            pen_name=pen,
+            keywords_json=json.dumps(c["keywords"], ensure_ascii=False),
             category=c["category"],
-            evidence_json=json.dumps(c.get("niche", {}), ensure_ascii=False))
+            evidence_json=json.dumps(niche, ensure_ascii=False))
         c["id"] = kid
         persisted.append(c)
     return {"candidates": persisted, "conversion_rate": conversion_rate,

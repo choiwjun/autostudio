@@ -76,7 +76,9 @@ def expand_keywords(seeds, url, known=frozenset(), max_new=100, max_depth=2,
     known = set(known) | set(seeds)
     new_found, origins = [], {}
     visited = set(seeds)
-    queue = list(seeds)
+    # v31 (알고리즘 QA): 초기 큐 중복 제거 — visited는 재방지만 막아 시드에
+    # 중복이 있으면 같은 키워드로 HTTP 요청이 반복됐음.
+    queue = list(dict.fromkeys(seeds))
     requests_made = 0
     successes = 0
     consecutive_failures = 0
