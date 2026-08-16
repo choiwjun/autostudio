@@ -613,14 +613,25 @@ LEFT JOIN daily_stats ds
             self.conn.row_factory = sqlite3.Row
 
     def _q_once(self, sqlite_sql, pg_sql, params, fetch=False):
+        # v30.4 (적대적 QA): 실패 시 rollback — 실패한 INSERT가 암시 트랜잭션을
+        # 연 채 두면 다음 성공 커밋 전까지 쓰기 잠금이 잔존해 외부 쓰기(배치 등)가
+        # 'database is locked'로 막히던 문제 차단.
         if self.dialect == "postgres":
-            with self.conn.cursor() as cur:
-                cur.execute(pg_sql, params)
-                rows = [dict(r) for r in cur.fetchall()] if fetch else None
-                self.conn.commit()
-            return rows
-        cur = self.conn.execute(sqlite_sql, params)
-        self.conn.commit()
+            try:
+                with self.conn.cursor() as cur:
+                    cur.execute(pg_sql, params)
+                    rows = [dict(r) for r in cur.fetchall()] if fetch else None
+                    self.conn.commit()
+                return rows
+            except Exception:
+                self.conn.rollback()
+                raise
+        try:
+            cur = self.conn.execute(sqlite_sql, params)
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
         if fetch:
             return [dict(r) for r in cur.fetchall()]
         return None

@@ -12,7 +12,7 @@ import db
 import requests
 from fastapi import Body, Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 logger = logging.getLogger("server")
 
@@ -103,6 +103,18 @@ class SeedIn(BaseModel):
     category: str = ""
 
 
+def _reject_nonfinite(value, field_label):
+    """v30.4 (적대적 QA): NaN/Infinity 차단 공용 검증기.
+    Field(allow_inf_nan=False)를 쓰면 422 에러 응답이 NaN 입력값을 input으로
+    에코하고, Starlette JSONResponse(allow_nan=False)가 그 에코 직렬화에서
+    또다시 500을 내므로 검증기에서 HTTPException을 직접 올린다."""
+    if value != value or value in (float("inf"), float("-inf")):
+        raise HTTPException(
+            status_code=422,
+            detail=f"{field_label}에 NaN/Infinity는 허용되지 않습니다")
+    return value
+
+
 class KeywordPatch(BaseModel):
     active: bool
 
@@ -120,8 +132,15 @@ class DraftIn(BaseModel):
 class FeedbackIn(BaseModel):
     # v10 [6]: 게시 후 성과 피드백 — 서치어드바이저에서 확인한 유입/체류를 수동 입력
     published_at: str = ""
+    # v30.4 (적대적 QA): NaN 차단 — 클램프 max(0, min(100, NaN))이 Python 특성상
+    # 100.0을 반환해 만점 오염이 저장되던 경로 제거. Infinity도 함께 차단.
     performance_score: float  # 0~100 (유입·체류 반영)
     note: str = ""
+
+    @field_validator("performance_score")
+    @classmethod
+    def _score_finite(cls, v):
+        return _reject_nonfinite(v, "성과 점수")
 
 
 class PublishedUrlIn(BaseModel):
@@ -148,6 +167,13 @@ class KdpPublishIn(BaseModel):
     price: float
     publish_date: str = ""
 
+    # v30.4 (적대적 QA): NaN 차단 — NaN < 2.99 / NaN > 12.99가 모두 False라
+    # 구간 검증을 통과하고 저장 계층에서 파열(로컬 500 / Postgres는 NaN 저장).
+    @field_validator("price")
+    @classmethod
+    def _price_finite(cls, v):
+        return _reject_nonfinite(v, "가격")
+
 
 class KdpVerifyIn(BaseModel):
     # K-4: 48h 확인
@@ -162,6 +188,25 @@ class KdpPerformanceIn(BaseModel):
     year_month: str
     sales: int = 0
     royalty: float = 0.0
+
+    # v30.4 (적대적 QA): NaN/Infinity 성과값 차단 (KdpPublishIn과 동일 계열)
+    @field_validator("royalty")
+    @classmethod
+    def _royalty_finite(cls, v):
+        return _reject_nonfinite(v, "로열티")
+
+
+def _validate_text(value, field_label, max_len):
+    """v30.4 (적대적 QA): 저장 전 텍스트 입력 가드 — null byte와 과대 길이 차단.
+    null byte는 SQLite에는 저장되지만 Postgres \u0000 거부로 프로덕션에서만
+    크래시하는 침묵 지뢰. 길이 무제한 입력은 저장 남용(1MB 키워드 관측됨) 경로."""
+    if "\x00" in value:
+        raise HTTPException(
+            status_code=400, detail=f"{field_label}에 null 바이트가 포함되어 있습니다")
+    if len(value) > max_len:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field_label}이(가) 너무 깁니다 (최대 {max_len}자)")
 
 
 def _unavailable_search_evidence(reference_date, searched_at):
@@ -325,6 +370,11 @@ def create_app(cfg):
             except db.CONNECTION_ERRORS:
                 state["db"] = None
                 return fn(get_db())
+            except OverflowError:
+                # v30.4 (적대적 QA): 10^19급 경로/쿼리 정수가 SQLite int64 바인딩에서
+                # OverflowError(→500)를 내던 것을 422로 변환 — 클라이언트 입력 오류
+                raise HTTPException(
+                    status_code=422, detail="숫자가 너무 큽니다")
 
     def _generate_and_store_draft(keyword_id, refresh_of=None, platform="naver"):
         """초안 생성 공통 경로 — 골격 분석 → 최신 검색 근거 → 2패스 생성 → 저장.
@@ -417,8 +467,12 @@ def create_app(cfg):
             return
         # v15: 빈 토큰 통과 경로 제거 — 기동 시 fail-closed로 비개발 환경의 빈 토큰은
         # 이미 거부됐으므로 여기선 토큰이 반드시 존재. 없으면(설정 오류) 전부 401.
+        # v30.4 (적대적 QA): bytes 비교 — str compare_digest는 비-ASCII 헤더에서
+        # TypeError(→500)를 내며, 인증 안 된 요청만으로 서버 에러를 유발할 수 있었음.
         token = cfg.get("dashboard_token", "")
-        if not token or not hmac.compare_digest(authorization, f"Bearer {token}"):
+        expected = f"Bearer {token}".encode("utf-8")
+        supplied = authorization.encode("utf-8", "replace")
+        if not token or not hmac.compare_digest(supplied, expected):
             raise HTTPException(status_code=401, detail="invalid token")
 
     # v15: 읽기 API도 인증 — 키워드·성과 데이터는 수익 전략 자산이라 공개 금지.
@@ -433,6 +487,10 @@ def create_app(cfg):
                       page: int = 1, page_size: int = 50):
         page = max(page, 1)
         page_size = min(max(page_size, 1), 200)
+        # v30.4 (적대적 QA): 거대 page/기간 값 클램프 — OFFSET 바인딩·timedelta가
+        # 각각 OverflowError(→500)를 내던 것을 정상 파라미터로 수렴
+        page = min(page, 1_000_000)
+        discovered_within = min(discovered_within, 36_500)  # 상한 100년
         discovered_since = ""
         if discovered_within > 0:
             discovered_since = (
@@ -502,6 +560,9 @@ def create_app(cfg):
 
     @app.post("/seeds", dependencies=[Depends(require_token)])
     def add_seed(seed: SeedIn):
+        # v30.4 (적대적 QA): 길이/null byte 가드
+        _validate_text(seed.keyword, "키워드", 200)
+        _validate_text(seed.category, "카테고리", 100)
         run_db(lambda d: d.add_seed(seed.keyword, seed.category))
         return {"ok": True}
 
@@ -1056,6 +1117,10 @@ def create_app(cfg):
     @app.post("/kdp/books", dependencies=[Depends(require_token)])
     def kdp_book_create(body: KdpBookCreateIn):
         # K-1: 책 생성 트리거 (후보 수락) — R-1: source_keyword 전달로 배치 generate 연결
+        # v30.4 (적대적 QA): 길이/null byte 가드
+        _validate_text(body.title, "책 제목", 500)
+        _validate_text(body.lang, "언어", 10)
+        _validate_text(body.source_keyword, "소스 키워드", 200)
         bid = run_db(lambda d: d.insert_kdp_book(
             title=body.title, status="draft", lang=body.lang,
             source_keyword=body.source_keyword,
