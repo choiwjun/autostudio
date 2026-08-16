@@ -11,11 +11,12 @@
 |---|---|---|
 | v27~v29.6 운세 기능 (생성·발행 분리, 띠 합본, 대상 배지, 레이아웃) | ✅ 완료 + 배포 | `b7cab8c`~`7930795` |
 | v29.7~v29.9 쇼츠+KDP 기획 다듬기 | ✅ 완료 + 배포 | `cbdc7b0`~`331f00f` |
-| **v30 KDP 파이프라인 구현 (K-1~K-4)** — 주제 선정·책 생성·EPUB·출간 큐·48h 모니터링·대시보드 탭 | ✅ 완료 (개발QA 승인, 464 passed) — **커밋 대기/완료 상태 확인 필요** | — |
+| **v30 KDP 파이프라인 구현 (K-1~K-4)** — 주제 선정·책 생성·EPUB·출간 큐·48h 모니터링·대시보드 탭 | ✅ 완료 + 배포 (개발QA 승인, 464 passed) | `6f1634f` |
+| **v30.1 KDP 백로그 해소 (R-1/R-2)** — 배치 research 자율 실행·배치 EPUB 표지 첨부 | ✅ 완료 + 배포 (467 passed, 회귀 0) | `41522de` |
 | **쇼츠 구현 (S-1~S-4)** | ⏸ **다음 단계 — 미착수** (YouTube Data API v3 키 필요) | — |
-| **KDP 백로그 R-1/R-2** (배치 research 스텁·배치 EPUB 표지 미첨부) | ⏸ 비차단 — 다음 에픽에서 정리 권고 | — |
+| **KDP 파일럿** (52주 워크북 + 아마존 스냅샷 게이트) | ⏸ 대기 — **GH Actions 시크릿 4종 등록 필요** | — |
 
-**현재 브랜치: main (KDP 구현 커밋 여부·origin 동기화는 최근 세션에서 확인 필요)**
+**현재 브랜치: main, origin과 동기화 완료 (v30 `6f1634f`·v30.1 `41522de` 커밋·푸시·배포 반영 — https://autostudio-eight.vercel.app)**
 
 ---
 
@@ -69,28 +70,29 @@
 
 ## 4. 다음 단계
 
+### ⚠️ 선행 조치 (KDP 파일럿 전 필수)
+1. **GH Actions 시크릿 4종 등록** (GitHub → Settings → Secrets): `DATABASE_URL` · `OPENCODE_GO_API_KEY` · `BAILIAN_TOKEN_PLAN_API_KEY` · `GEMINI_API_KEY` — `kdp-pipeline.yml`(스케줄 06:30 KST)이 이 시크릿으로 동작. 미등록 시 배치가 조용히 실패
+2. **calibre/epubcheck 러너 실측** — 배치 최초 실행 시 검증 (로컬은 EPUB 구조 검증만, 12-kdp §2.1)
+
 ### 쇼츠 구현 (14-shorts-pipeline.md §6, tasks.md S-1~S-4 — 미착수)
 1. **S-1** DB 스키마(youtube_raw·shorts_topics·shorts_scripts) + `shorts_research.py` (유튜브 수집 — API v3) ~3h — **YouTube Data API v3 키 필수**
 2. **S-2** `shorts_topic.py` (주제 판정·틈새 스코어 — 개정 지표) ~2h
 3. **S-3** `shorts_script.py` (스크립트 생성 + 검수 + TTS/자막 — edge-tts 라이선스 게이트) ~3h
 4. **S-4** 배치 + 대시보드 탭 + 파일럿 (10개 소재 → 5개 쇼츠)
 
-### KDP 백로그 (비차단 — 다음 에픽에서 정리 권고)
-1. **R-1** `kdp_pipeline._run_research_stage`가 `run_research` 스텁 — 배치 자율 신규 주제 산출 강화 (현재는 서버 /kdp/books POST 수락 경로로 완주 가능)
-2. **R-2** 배치 `_run_assemble_stage`가 cover_bytes=None으로 EPUB 조립 — make_cover_image로 표지 생성·전달 (AI 문구는 서버 경로·QC로 보장됨)
-
-### KDP 구현 후속 검증 (파일럿 준비)
-- calibre/epubcheck 실제 러너 검증은 GH Actions 배치 최초 실행 시 (로컬은 구조 검증만)
-- KDP 파일럿: "52주 절약 챌린지" 1권 + 아마존 경쟁도 스냅샷 게이트 (OQ-3)
+### KDP 파일럿 (시크릿 등록 후)
+- "52주 절약 챌린지" 워크북 1권 + 아마존 경쟁도 스냅샷 게이트 (OQ-3) → exit criteria 90일(50권+·리뷰 5개+)
+- 배치 자율 research(R-1 해소됨)로 신규 주제 후보 자동 산출 → 대시보드에서 승인 → 생성 흐름 확인
 
 ---
 
 ## 5. 사용자 필요 조치
 
-1. **YouTube Data API v3 키 발급** (구현 S-1 전 필수) — Google Cloud Console에서 활성화 → `.env.local`에 `YOUTUBE_API_KEY` 추가
-2. **KDP 계정** (K-4 출간 전) — 개인 가입, 펜네임, AI 생성 콘텐츠 공개 표기 준비
-3. (기존 미해결) 네이버쇼핑커넥트 PID Vercel env 설정 / BLOG_TOKEN 교체 / Bailian 쿼터 / Google billing
-4. 배포: Vercel CLI 인증됨 (`bricksoftc-7455`) — `vercel --prod --yes`
+1. **GH Actions 시크릿 4종 등록** (KDP 배치용 — §4): `DATABASE_URL`·`OPENCODE_GO_API_KEY`·`BAILIAN_TOKEN_PLAN_API_KEY`·`GEMINI_API_KEY`
+2. **YouTube Data API v3 키 발급** (쇼츠 S-1 전 필수) — Google Cloud Console에서 활성화 → `.env.local`에 `YOUTUBE_API_KEY` 추가
+3. **KDP 계정** (출간 전) — 개인 가입, 펜네임, AI 생성 콘텐츠 공개 표기 준비
+4. (기존 미해결) 네이버쇼핑커넥트 PID Vercel env 설정 / BLOG_TOKEN 교체 / Bailian 쿼터 / Google billing
+5. 배포: Vercel CLI 인증됨 (`bricksoftc-7455`) — `vercel --prod --yes` (v30·v30.1 반영 완료)
 
 ---
 
