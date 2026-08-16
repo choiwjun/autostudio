@@ -1284,6 +1284,20 @@ def create_app(cfg):
         n = sum(1 for p in published if not p.get("verified_at"))
         return {"pending_48h": n}
 
+    # ---------- v31: 쇼츠 파이프라인 S-2 — 주제 후보 ----------
+
+    @app.get("/shorts/topics", dependencies=[Depends(require_token)])
+    def shorts_topics(status: str = ""):
+        # S-2: 주제 후보 목록 (score 내림차순) — 대시보드 탭(S-4) 전 데이터 노출
+        import json as json_mod
+        items = run_db(lambda d: d.list_shorts_topics(status=status))
+        for it in items:
+            try:
+                it["evidence"] = json_mod.loads(it.get("evidence") or "{}")
+            except (TypeError, json_mod.JSONDecodeError):
+                it["evidence"] = {}
+        return {"items": items}
+
     @app.get("/")
     def index():
         return FileResponse(os.path.join(

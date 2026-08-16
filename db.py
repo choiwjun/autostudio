@@ -225,6 +225,7 @@ CREATE TABLE IF NOT EXISTS kdp_qc_results (
 CREATE INDEX IF NOT EXISTS idx_kdp_qc_book_run ON kdp_qc_results(book_id, run_at);
 
 -- v30.3: 쇼츠 파이프라인 S-1 — 유튜브 원본 수집 (AC-S1-1: video_id UNIQUE 멱등)
+-- v31: subscriber_count — channels.list에서 취득한 채널 구독자수(정규화 지표 ②용)
 CREATE TABLE IF NOT EXISTS youtube_raw (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     video_id TEXT NOT NULL UNIQUE,
@@ -238,6 +239,7 @@ CREATE TABLE IF NOT EXISTS youtube_raw (
     like_count INTEGER NOT NULL DEFAULT 0,
     comment_count INTEGER NOT NULL DEFAULT 0,
     share_count INTEGER,
+    subscriber_count INTEGER,
     region TEXT NOT NULL DEFAULT 'KR',
     fetched_at TEXT NOT NULL DEFAULT ''
 );
@@ -252,6 +254,17 @@ CREATE TABLE IF NOT EXISTS youtube_quota_log (
     status TEXT NOT NULL DEFAULT 'ok',
     note TEXT NOT NULL DEFAULT ''
 );
+
+-- v31: 쇼츠 파이프라인 S-2 — 주제 후보 산출물 (14-shorts-pipeline §4 데이터 모델)
+CREATE TABLE IF NOT EXISTS shorts_topics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT NOT NULL UNIQUE,
+    score REAL NOT NULL DEFAULT 0,
+    evidence TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'candidate',
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_shorts_topics_score ON shorts_topics(score DESC);
 
 """,
     "postgres": """
@@ -466,6 +479,7 @@ CREATE TABLE IF NOT EXISTS kdp_qc_results (
 CREATE INDEX IF NOT EXISTS idx_kdp_qc_book_run ON kdp_qc_results(book_id, run_at);
 
 -- v30.3: 쇼츠 파이프라인 S-1 — 유튜브 원본 수집 (AC-S1-1: video_id UNIQUE 멱등)
+-- v31: subscriber_count — channels.list에서 취득한 채널 구독자수(정규화 지표 ②용)
 CREATE TABLE IF NOT EXISTS youtube_raw (
     id SERIAL PRIMARY KEY,
     video_id TEXT NOT NULL UNIQUE,
@@ -479,6 +493,7 @@ CREATE TABLE IF NOT EXISTS youtube_raw (
     like_count INTEGER NOT NULL DEFAULT 0,
     comment_count INTEGER NOT NULL DEFAULT 0,
     share_count INTEGER,
+    subscriber_count BIGINT,
     region TEXT NOT NULL DEFAULT 'KR',
     fetched_at TEXT NOT NULL DEFAULT ''
 );
@@ -493,6 +508,17 @@ CREATE TABLE IF NOT EXISTS youtube_quota_log (
     status TEXT NOT NULL DEFAULT 'ok',
     note TEXT NOT NULL DEFAULT ''
 );
+
+-- v31: 쇼츠 파이프라인 S-2 — 주제 후보 산출물 (14-shorts-pipeline §4 데이터 모델)
+CREATE TABLE IF NOT EXISTS shorts_topics (
+    id SERIAL PRIMARY KEY,
+    label TEXT NOT NULL UNIQUE,
+    score DOUBLE PRECISION NOT NULL DEFAULT 0,
+    evidence TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'candidate',
+    created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_shorts_topics_score ON shorts_topics(score DESC);
 
 """,
 }
@@ -705,6 +731,9 @@ LEFT JOIN daily_stats ds
         # v21(B.3): 네이버쇼핑커넥트 상품 블록 — JSON 배열 문자열 (B.4가 렌더링)
         ("drafts", "product_block", "TEXT NOT NULL DEFAULT ''",
          "TEXT NOT NULL DEFAULT ''"),
+        # v31: 쇼츠 S-2 정규화 지표 ②(조회/구독 비율)용 채널 구독자수
+        ("youtube_raw", "subscriber_count", "INTEGER",
+         "BIGINT"),
     )
 
     def _migrate(self):
@@ -2079,18 +2108,26 @@ LIMIT ?"""
         """video_id 기준 멱등 UPSERT — 재수집 시 기존 행 갱신 (AC-S1-1②).
         video: dict (title, tags, description, channel_id, channel_title,
         published_at, view_count, like_count, comment_count, share_count,
-        region, fetched_at)"""
+        subscriber_count, region, fetched_at)"""
         cols = ("video_id", "title", "tags", "description", "channel_id",
                 "channel_title", "published_at", "view_count", "like_count",
-                "comment_count", "share_count", "region", "fetched_at")
-        values = tuple(video.get(c) if video.get(c) is not None else "" for c in cols)
+                "comment_count", "share_count", "subscriber_count", "region",
+                "fetched_at")
+        # v31: NULL 허용 수치 컬럼(share_count·subscriber_count)은 None을
+        # 그대로 NULL로 저장 — 기존 "" 치환이 조건부 지표 판정(5)·지표 ②의
+        # "미수집" 구분을 깨뜨렸음 (""가 값처럼 읽혀 연산 TypeError 유발)
+        _nullable = ("share_count", "subscriber_count")
+        values = tuple(
+            video.get(c) if video.get(c) is not None
+            else (None if c in _nullable else "")
+            for c in cols)
         if self.dialect == "postgres":
             self._q(
                 None,
                 "INSERT INTO youtube_raw (video_id, title, tags, description, "
                 "channel_id, channel_title, published_at, view_count, like_count, "
-                "comment_count, share_count, region, fetched_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "comment_count, share_count, subscriber_count, region, fetched_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                 "ON CONFLICT (video_id) DO UPDATE SET title = EXCLUDED.title, "
                 "tags = EXCLUDED.tags, description = EXCLUDED.description, "
                 "channel_id = EXCLUDED.channel_id, "
@@ -2100,14 +2137,15 @@ LIMIT ?"""
                 "like_count = EXCLUDED.like_count, "
                 "comment_count = EXCLUDED.comment_count, "
                 "share_count = EXCLUDED.share_count, "
+                "subscriber_count = EXCLUDED.subscriber_count, "
                 "region = EXCLUDED.region, fetched_at = EXCLUDED.fetched_at",
                 values)
         else:
             self._qd(
                 "INSERT INTO youtube_raw (video_id, title, tags, description, "
                 "channel_id, channel_title, published_at, view_count, like_count, "
-                "comment_count, share_count, region, fetched_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "comment_count, share_count, subscriber_count, region, fetched_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT (video_id) DO UPDATE SET title = excluded.title, "
                 "tags = excluded.tags, description = excluded.description, "
                 "channel_id = excluded.channel_id, "
@@ -2117,6 +2155,7 @@ LIMIT ?"""
                 "like_count = excluded.like_count, "
                 "comment_count = excluded.comment_count, "
                 "share_count = excluded.share_count, "
+                "subscriber_count = excluded.subscriber_count, "
                 "region = excluded.region, fetched_at = excluded.fetched_at",
                 values)
 
@@ -2153,6 +2192,29 @@ LIMIT ?"""
             (day + "%",), fetch=True)
         total = sum(r["units"] for r in rows)
         return {r["endpoint"]: r["units"] for r in rows}, total
+
+    # ---------- v31: 쇼츠 파이프라인 S-2 — 주제 후보 산출물 ----------
+
+    def upsert_shorts_topic(self, label, score, evidence, status, created_at):
+        """label 기준 UPSERT — score·evidence만 갱신, status는 S-3/S-4가
+        관리하므로 기존 값을 유지한다 (재산출이 진행 상태를 되돌리지 않게)."""
+        self._q(
+            "INSERT INTO shorts_topics (label, score, evidence, status, created_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(label) DO UPDATE SET score = excluded.score, "
+            "evidence = excluded.evidence",
+            "INSERT INTO shorts_topics (label, score, evidence, status, created_at) "
+            "VALUES (%s, %s, %s, %s, %s) "
+            "ON CONFLICT(label) DO UPDATE SET score = EXCLUDED.score, "
+            "evidence = EXCLUDED.evidence",
+            (label, score, evidence, status, created_at))
+
+    def list_shorts_topics(self, status="", limit=50):
+        sql = ("SELECT * FROM shorts_topics "
+               + ("WHERE status = ? " if status else "")
+               + "ORDER BY score DESC, id DESC LIMIT ?")
+        params = (status, limit) if status else (limit,)
+        return self._qd(sql, params, fetch=True)
 
     def close(self):
 

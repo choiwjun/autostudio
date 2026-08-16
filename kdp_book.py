@@ -245,14 +245,33 @@ def generate_chapter(d, refs, runner=None, hard_budget_seconds=HARD_CHAPTER_BUDG
 
 
 def consistency_pass(chapters, runner=None):
-    if runner is not None:
-        prompt = '다음 챕터를 어조·용어·시점 통일해 재구성. JSON: {"body":"..."}'
+    """v31 (알고리즘 QA): 챕터별 어조·용어·시점 통일 재구성 — 기존엔 단일 body를
+    만들어 반환만 하고 호출부가 폐기하는 no-op였다. 이제 각 완성 챕터를 1회
+    재구성 시도하고, 유효(비빈·기존의 50% 이상 — 환각 짧은 본문 거부)하면
+    교체 대상으로 반환한다. 반환: {"passed": True, "updated": n, "bodies": {seq: body}}
+    실패 챕터는 원본 유지(경량 폴백) — 통일 실패가 생성 성공을 무효화하지 않게."""
+    from draft_generator import _run_llm
+    run = runner or _run_llm
+    bodies = {}
+    for ch in chapters:
+        seq = ch.get("seq")
+        body = ch.get("body_md") or ""
+        title = ch.get("title") or ""
+        if not seq or not body:
+            continue
+        prompt = (
+            "다음 챕터 본문을 책 전체의 어조·용어·시점에 맞춰 통일해 재구성하라. "
+            "사실·수치·구성은 그대로 유지하고 문체만 다듬을 것. "
+            f"챕터 제목: {title}\n본문:\n{body}\n\n"
+            'JSON만 반환: {"body": "재구성된 전체 본문"}')
         try:
-            parsed = _parse_chapter_draft(runner(prompt, timeout=120), "consistency")
-            return {"passed": True, "body": parsed.get("body") or ""}
-        except DraftGenerationError:
-            return {"passed": True, "body": ""}
-    return {"passed": True, "body": ""}
+            parsed = _parse_chapter_draft(run(prompt, timeout=120), "consistency")
+        except (DraftGenerationError, Exception):  # noqa: BLE001 — 챕터별 격리
+            continue
+        new_body = (parsed.get("body") or "").strip()
+        if new_body and len(new_body) >= len(body) * 0.5:
+            bodies[seq] = new_body
+    return {"passed": True, "updated": len(bodies), "bodies": bodies}
 
 
 def generate_book(d, cfg, book_id, runner=None, translator=None,
@@ -274,7 +293,18 @@ def generate_book(d, cfg, book_id, runner=None, translator=None,
                 "title": str(o.get("title") or ""), "keyword": keyword,
             }, runner=runner)
             chapters.append(ch)
-    consistency_pass([c for c in chapters if c.get("body_md")], runner=runner)
+    # v31: 일관성 패스 결과 반영 — 재구성 본문을 챕터·DB에 실제 반영
+    cons = consistency_pass([c for c in chapters if c.get("body_md")],
+                            runner=runner)
+    for c_ in chapters:
+        new_body = (cons.get("bodies") or {}).get(c_.get("seq"))
+        if new_body and new_body != c_.get("body_md"):
+            c_["body_md"] = new_body
+            d.update_kdp_chapter(
+                seq_id_of(d, book_id, c_["seq"]),
+                updated_at=config_mod.now_kst_iso(),
+                body_md=new_body, word_count=_word_count(new_body),
+                status="done")
     qc = None
     if qc_enabled:
         # v31 (알고리즘 QA): AI 표기 백매터 — 생성 프롬프트에 주입 규칙이 없어

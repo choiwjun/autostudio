@@ -118,7 +118,9 @@ def test_fetch_popular_videos_stores_rows(tmp_path, monkeypatch):
                                      max_results=50, fetched_at="2026-08-16T00:00:00+09:00")
     assert d.count_youtube_videos(region="KR") == 2
     assert result["fetched"] == 2
-    assert result["quota_units"] == 1  # videos.list 1회 = 1 unit
+    # v31: videos.list + channels.list(구독자 병합) = 2 units — FakeYT에
+    # channels가 없어 구독자 조회는 graceful 폴백({})되도 수집은 완료된다
+    assert result["quota_units"] == 2
     # 쿼터 로그 기록 확인
     usage, total = d.youtube_quota_usage("2026-08-16")
     assert usage.get("videos.list") == 1
