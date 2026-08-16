@@ -35,6 +35,15 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           YOUTUBE_SERVICE_ACCOUNT_KEY: data/gen-lang-client-0043584530-d27491f12e6b.json
+      # v31 (S-4): 수집 후 스크립트 생성 — ready 없는 상위 후보 3개 (스펙 §5
+      # 'GH Actions 또는 사용자 트리거'. LLM 키 없으면 조용히 건너뛰지 않고
+      # 오류 로그로 기록 — 원인이 배치에서 보이게)
+      - name: Generate shorts scripts (top 3)
+        run: python shorts_script.py --batch 3 || echo "script generation failed (non-fatal)"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BAILIAN_TOKEN_PLAN_API_KEY: ${{ secrets.BAILIAN_TOKEN_PLAN_API_KEY }}
+          OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
       - name: Keep-alive
         if: github.event_name == 'schedule'
         run: |

@@ -182,6 +182,42 @@ def test_generate_script_unknown_topic_returns_none(tmp_path):
     d.close()
 
 
+# ---------- S-4 배치 (run_batch) ----------
+
+def test_run_batch_generates_missing_topics_only(tmp_path):
+    d = make_db(tmp_path)
+    for i, label in enumerate(("주제A", "주제B", "주제C")):
+        d.upsert_shorts_topic(label, 90.0 - i, "{}", "candidate",
+                              "2026-08-16T09:00:00+09:00")
+    # 주제A는 이미 ready 스크립트 보유 → 재생성 대상 제외 (멱등)
+    now = "2026-08-16T10:00:00+09:00"
+    d.insert_shorts_script("주제A", HOOK, ss._compose(HOOK, _body(), CTA),
+                           json.dumps(HASHTAGS), "[]", ss.STATUS_READY,
+                           "[]", now, now)
+    res = ss.run_batch(d, limit=2, runner=_ok_runner)
+    assert [r["topic"] for r in res] == ["주제B", "주제C"]   # 상위 스코어 순
+    assert all(r["status"] == ss.STATUS_READY for r in res)
+    # A는 여전히 1건 (재생성 안 함)
+    a_rows = [s for s in d.list_shorts_scripts() if s["topic"] == "주제A"]
+    assert len(a_rows) == 1
+    d.close()
+
+
+def test_run_batch_empty_noop(tmp_path):
+    d = make_db(tmp_path)
+    assert ss.run_batch(d, limit=3, runner=_ok_runner) == []
+    d.close()
+
+
+def test_run_batch_error_isolated_per_topic(tmp_path):
+    d = make_db(tmp_path)
+    d.upsert_shorts_topic("주제X", 50.0, "{}", "candidate",
+                          "2026-08-16T09:00:00+09:00")
+    res = ss.run_batch(d, limit=1, runner=lambda p, timeout=60: "not json")
+    assert res[0]["status"] == "error" and res[0]["failed"]
+    d.close()
+
+
 # ---------- API 엔드포인트 ----------
 
 def test_shorts_script_endpoints(tmp_path, monkeypatch):

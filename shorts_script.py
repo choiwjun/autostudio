@@ -227,6 +227,26 @@ def generate_script(d, topic, runner=None, topic_row=None):
             "failed": failed}
 
 
+def run_batch(d, limit=3, runner=None):
+    """S-4 배치 — ready 스크립트가 없는 상위 후보 N개 생성 (비용 상한).
+    대상: shorts_topics 후보 중 검수 통과(ready) 스크립트가 없는 것을
+    스코어 내림차순으로 limit개. 이미 ready가 있으면 재생성하지 않는다
+    (멱등 — 매일 배치가 돌아도 같은 주제를 반복 생성하지 않음).
+    반환: [{topic, status, failed}] — 생성 오류(503 계열)는 결과에 error로 기록."""
+    existing_ready = {s["topic"] for s in d.list_shorts_scripts(status=STATUS_READY)}
+    targets = [t for t in d.list_shorts_topics()
+               if t.get("label") and t["label"] not in existing_ready][:max(0, limit)]
+    results = []
+    for t in targets:
+        try:
+            results.append(generate_script(d, t["label"], runner=runner))
+        except ScriptGenerationError as e:
+            logger.warning("batch script fail topic=%s: %s", t["label"], e)
+            results.append({"topic": t["label"], "status": "error",
+                            "failed": [str(e)[:120]]})
+    return results
+
+
 if __name__ == "__main__":
     import db
     import sys
@@ -235,12 +255,18 @@ if __name__ == "__main__":
     cfg = config_mod.load_config()
     conn = db.Database(cfg["db_url"])
     conn.init()
-    label = sys.argv[1] if len(sys.argv) > 1 else ""
-    topic_row = next((r for r in conn.list_shorts_topics()
-                      if not label or r["label"] == label), None)
-    if topic_row is None:
-        logger.error("후보 주제가 없습니다 — 먼저 S-1/S-2 수집을 실행하세요")
-        sys.exit(1)
-    res = generate_script(conn, topic_row["label"])
-    logger.info("S-3 결과: %s", res)
+    if len(sys.argv) > 1 and sys.argv[1] == "--batch":
+        # S-4 배치 진입점 — 상위 후보 N개(기본 3) 생성
+        limit = int(sys.argv[2]) if len(sys.argv) > 2 else 3
+        for r in run_batch(conn, limit=limit):
+            logger.info("S-3 배치: %s", r)
+    else:
+        label = sys.argv[1] if len(sys.argv) > 1 else ""
+        topic_row = next((r for r in conn.list_shorts_topics()
+                          if not label or r["label"] == label), None)
+        if topic_row is None:
+            logger.error("후보 주제가 없습니다 — 먼저 S-1/S-2 수집을 실행하세요")
+            sys.exit(1)
+        res = generate_script(conn, topic_row["label"])
+        logger.info("S-3 결과: %s", res)
     conn.close()

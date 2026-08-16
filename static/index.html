@@ -406,6 +406,7 @@
       <button type="button" id="tabBtnPlanner" onclick="switchTab('planner')">게시 플래너</button>
       <button type="button" id="tabBtnInsights" onclick="switchTab('insights')">수익 인사이트</button>
       <button type="button" id="tabBtnKdp" onclick="switchTab('kdp')">KDP 출간</button>
+      <button type="button" id="tabBtnShorts" onclick="switchTab('shorts')">쇼츠</button>
     </div>
 
     <div id="tabKeywords" class="tabpane on">
@@ -544,6 +545,35 @@
             <tbody id="kdpPerfRows"></tbody></table>
           </div>
           <div class="empty dim" id="kdpPerfEmpty" style="display:none">기록된 성과가 없습니다 — 입력 폼에서 판매·로열티를 추가하세요</div>
+        </div>
+      </section>
+    </div>
+
+    <!-- v31 (S-4): 쇼츠 탭 — 소재 후보(S-2) + 스크립트(S-3) 보기/복사 -->
+    <div id="tabShorts" class="tabpane" aria-label="쇼츠">
+      <section class="card" aria-label="쇼츠">
+        <div class="seg" role="group" aria-label="쇼츠 하위 탭">
+          <button type="button" id="shortsSegTopics" class="on" onclick="shortsSwitch('topics')">소재 후보</button>
+          <button type="button" id="shortsSegScripts" onclick="shortsSwitch('scripts')">스크립트</button>
+        </div>
+        <div id="shortsKpi" class="kpis">
+          <div class="kpi"><div class="kpi-label">소재 후보</div><div class="kpi-value" id="shortsTopicCount">-</div><div class="kpi-sub">S-2 틈새 스코어링</div></div>
+          <div class="kpi"><div class="kpi-label">ready 스크립트</div><div class="kpi-value" id="shortsReadyCount">-</div><div class="kpi-sub">검수 통과</div></div>
+          <div class="kpi"><div class="kpi-label">qc_failed</div><div class="kpi-value" id="shortsFailCount">-</div><div class="kpi-sub">원인 확인 후 재생성</div></div>
+        </div>
+        <div id="shortsTopicsPane">
+          <div class="table-wrap">
+            <table><thead><tr><th>#</th><th>주제</th><th>스코어</th><th>영상/채널</th><th>급상승/구독비/반응/틈새</th><th>상태</th><th></th></tr></thead>
+            <tbody id="shortsTopicRows"></tbody></table>
+          </div>
+          <div class="empty dim" id="shortsTopicEmpty">소재 후보가 없습니다 — 쇼츠 수집 배치(매일 07:45 KST)가 S-2 스코어링을 자동 실행합니다</div>
+        </div>
+        <div id="shortsScriptsPane" class="tabpane" style="display:none">
+          <div class="table-wrap">
+            <table><thead><tr><th>#</th><th>주제</th><th>상태</th><th>대본 (hook · 본문 · CTA · 해시태그)</th><th>생성일</th><th></th></tr></thead>
+            <tbody id="shortsScriptRows"></tbody></table>
+          </div>
+          <div class="empty dim" id="shortsScriptEmpty">생성된 스크립트가 없습니다 — 소재 후보에서 '스크립트 생성'으로 시작하세요</div>
         </div>
       </section>
     </div>
@@ -1585,7 +1615,7 @@ async function deleteSeed(id) {
 }
 
 // v18: 탭 전환 — 플래너/인사이트는 첫 표시 시 1회 로드
-let plannerLoaded = false, insightsLoaded = false, kdpLoaded = false;
+let plannerLoaded = false, insightsLoaded = false, kdpLoaded = false, shortsLoaded = false;
 let kdpSeg = 'books';
 
 function switchTab(name) {
@@ -1593,13 +1623,16 @@ function switchTab(name) {
   document.getElementById('tabPlanner').classList.toggle('on', name === 'planner');
   document.getElementById('tabInsights').classList.toggle('on', name === 'insights');
   document.getElementById('tabKdp').classList.toggle('on', name === 'kdp');
+  document.getElementById('tabShorts').classList.toggle('on', name === 'shorts');
   document.getElementById('tabBtnKeywords').classList.toggle('on', name === 'keywords');
   document.getElementById('tabBtnPlanner').classList.toggle('on', name === 'planner');
   document.getElementById('tabBtnInsights').classList.toggle('on', name === 'insights');
   document.getElementById('tabBtnKdp').classList.toggle('on', name === 'kdp');
+  document.getElementById('tabBtnShorts').classList.toggle('on', name === 'shorts');
   if (name === 'planner' && !plannerLoaded) { plannerLoaded = true; loadPlanner(); }
   if (name === 'insights' && !insightsLoaded) { insightsLoaded = true; loadInsights(); }
   if (name === 'kdp' && !kdpLoaded) { kdpLoaded = true; loadKdp(); }
+  if (name === 'shorts' && !shortsLoaded) { shortsLoaded = true; loadShorts(); }
 }
 
 function kdpSwitch(seg) {
@@ -1617,9 +1650,135 @@ function kdpSwitch(seg) {
 }
 
 async function apiKdp(path) {
-  var r = await fetch('/api' + path);
+  // v31 (S-4): KDP 탭이 인증 헤더 없이 fetch해 프로덕션(ENV!=development)에서
+  // 전 API가 401로 죽던 잠재 결함 수정 — api()와 동일하게 authHeaders 병합
+  var r = await fetch('/api' + path, { headers: authHeaders() });
+  if (r.status === 401) { setStatus('토큰이 올바르지 않습니다 — 토큰 입력 후 저장', true); throw new Error('401'); }
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
+}
+
+// ---------- v31 (S-4): 쇼츠 탭 — 소재 후보/스크립트 ----------
+let shortsSeg = 'topics';
+
+function shortsSwitch(seg) {
+  shortsSeg = seg;
+  document.getElementById('shortsSegTopics').classList.toggle('on', seg === 'topics');
+  document.getElementById('shortsSegScripts').classList.toggle('on', seg === 'scripts');
+  document.getElementById('shortsTopicsPane').style.display = seg === 'topics' ? '' : 'none';
+  document.getElementById('shortsScriptsPane').style.display = seg === 'scripts' ? '' : 'none';
+}
+
+async function loadShorts() {
+  try { loadShortsTopics(); } catch (e) { setStatus('쇼츠 로드 실패: ' + e.message); }
+  try { loadShortsScripts(); } catch (e) {}
+}
+
+function shortsPct(v) { return (v == null) ? '-' : (v * 100).toFixed(0) + '%'; }
+
+async function loadShortsTopics() {
+  var data = await api('/shorts/topics');
+  var items = data.items || [];
+  var tb = document.getElementById('shortsTopicRows');
+  tb.innerHTML = '';
+  var scripts = [];
+  try { scripts = (await api('/shorts/scripts')).items || []; } catch (e) {}
+  var hasScript = {};
+  scripts.forEach(function (s) { hasScript[s.topic] = (s.status === 'ready'); });
+  items.forEach(function (t, i) {
+    var ev = t.evidence || {};
+    var tr = document.createElement('tr');
+    var badge = '<span class="badge ' + (t.status === 'candidate' ? 'b-blue' : 'b-gray') + '">' + esc(t.status || 'candidate') + '</span>';
+    var metrics = shortsPct(ev.velocity) + ' / ' + shortsPct(ev.small_channel) + ' / '
+      + shortsPct(ev.reaction) + ' / ' + shortsPct(ev.niche);
+    var btn = hasScript[t.label]
+      ? '<span class="ok">스크립트 ready ✓</span>'
+      : '<button class="btn btn-sm btn-gen" data-shtopic="' + esc(t.label) + '">스크립트 생성</button>';
+    tr.innerHTML = '<td>' + (i + 1) + '</td><td>' + esc(t.label) + '</td>'
+      + '<td>' + (t.score != null ? t.score : '-') + '</td>'
+      + '<td>' + (ev.videos || '-') + ' / ' + (ev.channels || '-') + '</td>'
+      + '<td class="dim">' + metrics + '</td>'
+      + '<td>' + badge + '</td><td>' + btn + '</td>';
+    tb.appendChild(tr);
+  });
+  document.getElementById('shortsTopicCount').textContent = items.length;
+  Array.prototype.forEach.call(
+    tb.querySelectorAll('button[data-shtopic]'), function (btn) {
+      btn.onclick = function () { shortsGenerate(btn.getAttribute('data-shtopic'), btn); };
+    });
+  var d = document.getElementById('shortsTopicEmpty');
+  if (d) d.style.display = items.length ? 'none' : 'block';
+}
+
+async function loadShortsScripts() {
+  var data = await api('/shorts/scripts');
+  var items = data.items || [];
+  var tb = document.getElementById('shortsScriptRows');
+  tb.innerHTML = '';
+  var ready = 0, fail = 0;
+  items.forEach(function (s, i) {
+    if (s.status === 'ready') ready++;
+    if (s.status === 'qc_failed') fail++;
+    var badge = '<span class="badge ' + (s.status === 'ready' ? 'b-green'
+      : s.status === 'qc_failed' ? 'b-warn' : 'b-gray') + '">' + esc(s.status) + '</span>';
+    var tags = (s.hashtags || []).join(' ');
+    var body = '<b>' + esc(s.hook || '') + '</b><br>'
+      + esc((s.script_md || '').replace(/\n+/g, ' ')).slice(0, 160)
+      + '<br><span class="dim">' + esc(tags) + '</span>';
+    if (s.status === 'qc_failed' && (s.qc_detail || []).length) {
+      body += '<br><span class="warn-txt">미달: ' + esc(s.qc_detail.join(', ')) + ' — 재생성 권장</span>';
+    }
+    var copyBtn = '<button class="btn btn-sm btn-gen" data-shcopy="' + s.id + '">복사</button>';
+    var tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + (i + 1) + '</td><td>' + esc(s.topic) + '</td><td>' + badge
+      + '</td><td>' + body + '</td><td>' + esc((s.created_at || '').slice(0, 10))
+      + '</td><td>' + copyBtn + '</td>';
+    tb.appendChild(tr);
+  });
+  document.getElementById('shortsReadyCount').textContent = ready;
+  var failEl = document.getElementById('shortsFailCount');
+  failEl.textContent = fail;
+  failEl.classList.toggle('warn', fail > 0);
+  Array.prototype.forEach.call(
+    tb.querySelectorAll('button[data-shcopy]'), function (btn) {
+      btn.onclick = function () { shortsCopy(parseInt(btn.getAttribute('data-shcopy'), 10), btn); };
+    });
+  var d = document.getElementById('shortsScriptEmpty');
+  if (d) d.style.display = items.length ? 'none' : 'block';
+}
+
+async function shortsGenerate(topic, btn) {
+  if (!confirm('주제 \'' + topic + '\' 스크립트를 생성할까요? (LLM 호출 — 수십 초 소요)')) return;
+  if (btn) { btn.disabled = true; btn.textContent = '생성 중…'; }
+  try {
+    var res = await api('/shorts/scripts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic: topic })
+    });
+    if (res.status === 'ready') {
+      setStatus('쇼츠 스크립트 생성 완료 (ready) — 스크립트 탭에서 확인');
+      shortsSwitch('scripts');
+    } else {
+      setStatus('검수 미달(' + (res.failed || []).join(', ') + ') — qc_failed로 저장됨, 재생성해보세요', true);
+    }
+    loadShortsTopics();
+    loadShortsScripts();
+  } catch (e) {
+    setStatus('스크립트 생성 실패: ' + e.message, true);
+    if (btn) { btn.disabled = false; btn.textContent = '스크립트 생성'; }
+  }
+}
+
+async function shortsCopy(id, btn) {
+  var items = (await api('/shorts/scripts')).items || [];
+  var s = items.filter(function (x) { return x.id === id; })[0];
+  if (!s) return;
+  var text = (s.script_md || '') + '\n\n' + (s.hashtags || []).join(' ');
+  try {
+    await navigator.clipboard.writeText(text);
+    if (btn) { btn.textContent = '복사됨 ✓'; setTimeout(function () { btn.textContent = '복사'; }, 1500); }
+  } catch (e) { setStatus('클립보드 복사 실패 — 수동으로 선택해 복사하세요', true); }
 }
 
 async function loadKdp() {
