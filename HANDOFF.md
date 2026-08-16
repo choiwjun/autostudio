@@ -11,19 +11,24 @@
 |---|---|---|
 | v27~v29.6 운세 기능 (생성·발행 분리, 띠 합본, 대상 배지, 레이아웃) | ✅ 완료 + 배포 | `b7cab8c`~`7930795` |
 | v29.7~v29.9 쇼츠+KDP 기획 다듬기 | ✅ 완료 + 배포 | `cbdc7b0`~`331f00f` |
-| **v30 KDP 파이프라인 구현 (K-1~K-4)** — 주제 선정·책 생성·EPUB·출간 큐·48h 모니터링·대시보드 탭 | ✅ 완료 + 배포 (개발QA 승인, 464 passed) | `6f1634f` |
-| **v30.1 KDP 백로그 해소 (R-1/R-2)** — 배치 research 자율 실행·배치 EPUB 표지 첨부 | ✅ 완료 + 배포 (467 passed, 회귀 0) | `41522de` |
-| **쇼츠 구현 (S-1~S-4)** | ⏸ **다음 단계 — 미착수** (YouTube Data API v3 키 필요) | — |
-| **KDP 파일럿** (52주 워크북 + 아마존 스냅샷 게이트) | ⏸ 대기 — **GH Actions 시크릿 4종 등록 필요** | — |
+| v30 KDP 파이프라인 구현 (K-1~K-4) — 주제 선정·책 생성·EPUB·출간 큐·48h 모니터링·대시보드 탭 | ✅ 완료 + 배포 | `6f1634f` |
+| v30.1 KDP 백로그 해소 (R-1/R-2) — 배치 research 자율 실행·배치 EPUB 표지 첨부 | ✅ 완료 + 배포 | `41522de` |
+| v30.3 쇼츠 S-1 유튜브 수집 (`shorts_research.py` + `youtube_raw`) | ✅ 완료 + 배포 | `3d642e6` |
+| **v30.4 적대적 QA 수정** — NaN 성과점수 만점 오염·NaN 가격 검증 우회·비-ASCII 인증 헤더 500·거대 정수 500·실패 INSERT 잠금 잔존·입력 가드 | ✅ 완료 + 배포 (487 passed) | `da23745` |
+| **v31 알고리즘 전수 분석 + 결함 수정** — KDP ready 구조적 교착 해소(cover 판정·AI 표기 백매터·research 메타데이터 정합·생성 상한 2권/run)·만세력 DST TypeError 2건·2패스 1회차 초안 회수·최신성 연도 판정·물결표 범위·경량 4건 | ✅ 완료 + 배포 (509 passed) | `0470c6a` |
+| **v31.1 쇼츠 S-2 주제 스코어링 + KDP 일관성 패스 실구현** — `shorts_topic.py`(개정 지표 4종·35/25/15/25점)·`shorts_topics` 테이블·channels.list 구독자 병합·KDP `consistency_pass` 챕터별 반영·NULL 컬럼 upsert 수정 | ✅ 완료 + 배포 (522 passed) | `0936c8b` |
+| **v31.2 쇼츠 S-3 스크립트 생성·검수** — `shorts_script.py`(hook/본론/CTA/해시태그 + 검수 5종 + 실측 피드백 재시도)·`shorts_scripts` 테이블·GET/POST `/shorts/scripts` | ✅ 완료 + 배포 (535 passed) | `725c982` |
+| **쇼츠 S-4** 배치 + 대시보드 탭 + 파일럿 | ⏸ **다음 단계** | — |
+| **KDP 파일럿** (52주 워크북 + 아마존 스냅샷 게이트) | ⏸ 대기 — 배치는 시크릿 등록 완료로 **가동 상태** (v31 교착 해소로 ready 도달 가능해짐) | — |
 
-**현재 브랜치: main, origin과 동기화 완료 (v30 `6f1634f`·v30.1 `41522de` 커밋·푸시·배포 반영 — https://autostudio-eight.vercel.app)**
+**현재 브랜치: main, origin과 동기화 완료 (v31.2 `725c982` 커밋·푸시·배포 반영 — https://autostudio-eight.vercel.app)**
 
 ---
 
 ## 2. 파이프라인 운영 상태
 
 - 사용자 요청: 모든 기능 작업을 **work-pipeline(9단계 팀 파이프라인)** 으로 실행
-- 이번 턴: 쇼츠+KDP 기획 다듬기 = **standard 모드 5단계 완료** (요구사항→리서치→리서치QA→기획→기획QA) + QA 보강 2회 + 오픈소스 조사 반영
+- 이번 턴 (2026-08-16 오후, PC 포맷 후 새 환경): 적대적 QA → 알고리즘 전수 분석·수정 → 쇼츠 S-2/S-3 구현 + 개발 환경 재세팅(Windows+WSL2+Docker+gh) 및 로컬 `.env.local` 복구(Vercel production pull)
 - **사용자 규칙 (중요)**: 커밋·푸시·배포는 **사용자가 명시적으로 말할 때만** — "진행해" 말고는 절대 금지. 글로벌 메모리 저장됨
 - 완료된 팀 세션은 `rlm.list_subagents()` → `delete_subagent`로 삭제해 이름 충돌 방지 (이전 팀 이름 재사용 시 필수)
 
@@ -70,29 +75,37 @@
 
 ## 4. 다음 단계
 
-### ⚠️ 선행 조치 (KDP 파일럿 전 필수)
-1. **GH Actions 시크릿 4종 등록** (GitHub → Settings → Secrets): `DATABASE_URL` · `OPENCODE_GO_API_KEY` · `BAILIAN_TOKEN_PLAN_API_KEY` · `GEMINI_API_KEY` — `kdp-pipeline.yml`(스케줄 06:30 KST)이 이 시크릿으로 동작. 미등록 시 배치가 조용히 실패
-2. **calibre/epubcheck 러너 실측** — 배치 최초 실행 시 검증 (로컬은 EPUB 구조 검증만, 12-kdp §2.1)
+### 쇼츠 구현 (14-shorts-pipeline.md §6, tasks.md S-1~S-4)
+1. ~~S-1 수집~~ ✅ v30.3 + v31.1(channels.list 구독자 병합·S-2 자동 연계)
+2. ~~S-2 주제 스코어링~~ ✅ v31.1
+3. ~~S-3 스크립트 생성·검수~~ ✅ v31.2 — TTS/자막·문법검사(hanspell/LanguageTool)만 라이선스 게이트 통과 후 추가 예정
+4. **S-4 배치 + 대시보드 탭 (소재 목록·스크립트 보기/복사) — 다음 작업** (~3h, 데이터 API는 `/shorts/topics`·`/shorts/scripts`로 이미 노출 — 프론트엔드 중심)
+5. **파일럿**: 소재 10개(운세 4+KDP 3+일반 3) → 5개 쇼츠 제작 → 반응 확인 (전제: 채널 개설 + TTS 게이트)
 
-### 쇼츠 구현 (14-shorts-pipeline.md §6, tasks.md S-1~S-4 — 미착수)
-1. **S-1** DB 스키마(youtube_raw·shorts_topics·shorts_scripts) + `shorts_research.py` (유튜브 수집 — API v3) ~3h — **YouTube Data API v3 키 필수**
-2. **S-2** `shorts_topic.py` (주제 판정·틈새 스코어 — 개정 지표) ~2h
-3. **S-3** `shorts_script.py` (스크립트 생성 + 검수 + TTS/자막 — edge-tts 라이선스 게이트) ~3h
-4. **S-4** 배치 + 대시보드 탭 + 파일럿 (10개 소재 → 5개 쇼츠)
+### KDP 파일럿 (배치 가동 중)
+- GH Actions 시크릿 **7종 등록 완료** (DATABASE_URL·NAVER 2종·BAILIAN·OPENCODE·BLOG 2종·YOUTUBE_B64 — `GEMINI_API_KEY`만 미등록, 이미지 생성 skip 경로로 동작)
+- v31 교착 해소로 배치가 책을 ready로 전이 가능해짐 — **다음 배치 실행에서 kdp-pipeline 결과 관찰** (ready 전이·EPUB 조립·일 3권 게이트)
+- "52주 절약 챌린지" 워크북 + 아마존 경쟁도 스냅샷 게이트 (OQ-3) → exit criteria 90일(50권+·리뷰 5개+)
 
-### KDP 파일럿 (시크릿 등록 후)
-- "52주 절약 챌린지" 워크북 1권 + 아마존 경쟁도 스냅샷 게이트 (OQ-3) → exit criteria 90일(50권+·리뷰 5개+)
-- 배치 자율 research(R-1 해소됨)로 신규 주제 후보 자동 산출 → 대시보드에서 승인 → 생성 흐름 확인
+### 지연된 품질 항목 (v31 알고리즘 분석에서 보류 — 수요 있을 때)
+- KDP length QC 밴드(책 전체 640~1440단어) vs 챕터 6~12개 구조 모순 — 설계 의도 확인 후 조정 (현행은 챕터당 ~170단어로만 통과)
+- kdp_research 스냅샷 파서 price/rating/reviews 미추출 → 틈새 점수가 권수 항으로 퇴화 (v31.1: unavailable 마킹만 추가)
+- draft_generator LLM 폴백이 같은 timeout으로 2차 호출 → 하드 예산(55s) 초과 여지
+- AdPost 제목 매칭(`ORDER BY id DESC`)이 리프레시 재생성본에 과거 성과 부착 가능
+- 검수 피드백 없는 맹재시도 항목(faq/tables/h2_count)·키워드 밀도 2자 토큰 과대산정 문서화
+- 사소: 만세력 범위 주석(1899 vs 1908)·zodiac 연도 하드코딩(2027년에 문제)·autocomplete max_requests 실측 3배 HTTP
 
 ---
 
 ## 5. 사용자 필요 조치
 
-1. **GH Actions 시크릿 4종 등록** (KDP 배치용 — §4): `DATABASE_URL`·`OPENCODE_GO_API_KEY`·`BAILIAN_TOKEN_PLAN_API_KEY`·`GEMINI_API_KEY`
-2. **YouTube Data API v3 키 발급** (쇼츠 S-1 전 필수) — Google Cloud Console에서 활성화 → `.env.local`에 `YOUTUBE_API_KEY` 추가
-3. **KDP 계정** (출간 전) — 개인 가입, 펜네임, AI 생성 콘텐츠 공개 표기 준비
-4. (기존 미해결) 네이버쇼핑커넥트 PID Vercel env 설정 / BLOG_TOKEN 교체 / Bailian 쿼터 / Google billing
-5. 배포: Vercel CLI 인증됨 (`bricksoftc-7455`) — `vercel --prod --yes` (v30·v30.1 반영 완료)
+1. ~~GH Actions 시크릿 등록~~ ✅ **7종 등록 완료** (§4 참조 — `GEMINI_API_KEY`만 선택 미등록)
+2. ~~YouTube Data API v3 키~~ ✅ `YOUTUBE_SERVICE_ACCOUNT_KEY_B64` 등록 완료 (2026-08-16) — 로컬용 원본 json은 포맷으로 소실, 로컬 테스트 필요 시 Google Cloud에서 재생성
+3. **채널 구분 결정** (파일럿 전) — 운세(한국어)/KDP(영어) 최소 2채널 권장 (OQ-5)
+4. (파일럿 전) **TTS 검증 게이트** — edge-tts 한국어 품질 청취 + 상업 라이선스 확인, 대체재 **MeloTTS**(MIT·한국어) 우선 검토
+5. **KDP 계정** (출간 전) — 개인 가입, 펜네임, AI 생성 콘텐츠 공개 표기 준비
+6. (선택) 쇼츠 제작 도구 — CapCut/Shotcut (자동화 아님)
+7. (기존 미해결) 네이버쇼핑커넥트 PID Vercel env 설정 / Bailian 쿼터 / Google billing
 
 ---
 
@@ -106,3 +119,6 @@
 - **팀 spawn 전**: 같은 이름 이전 팀 세션 삭제 필수 (`rlm.list_subagents()` → `delete_subagent`)
 - **refine 스킬**: 프로젝트 `refine.py`가 섀도잉 — 스킬은 `/home/wj941/.npm-global/lib/node_modules/prime-agent/dist/skills/refine/src/refine/__init__.py`를 importlib로 직접 로드
 - **프로덕션 DB**: `.env.local` DATABASE_URL = Supabase. 실운영 페이지: `https://autostudio-eight.vercel.app`
+- **(2026-08-16 재세팅)** PC 포맷 후 환경 재구축 완료: Windows(git/Python 3.12/Node 24/VS Code/gh/Docker) + WSL2 Ubuntu 26.04. 로컬 `.env.local`은 **Vercel(bricksoftc-7455) production에서 pull하여 복구** — NAVER/BAILIAN/OPENCODE/DATABASE_URL(pooler)/DASHBOARD_TOKEN 포함. placeholder `.env`는 `.env.placeholder-backup`으로 이동 (load 순서상 `.env`가 우선이라 실제 키를 가림 — 복원 금지)
+- **배포 주소 함정**: `autostudio-mu.vercel.app`은 **옛 배포의 고유 URL (500)** — 현행 프로덕션은 `autostudio-eight.vercel.app`만 사용. GitHub repo homepage는 v31 세션에서 eight로 갱신 완료
+- **GitHub Secrets 읽기 불가**: 로컬 키 분실 시 Vercel에서 pull (위 항목) — GH Actions secrets은 정책상 재조회 불가, 필요 시 각 콘솔에서 재발급
