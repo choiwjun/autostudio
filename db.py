@@ -224,6 +224,35 @@ CREATE TABLE IF NOT EXISTS kdp_qc_results (
 );
 CREATE INDEX IF NOT EXISTS idx_kdp_qc_book_run ON kdp_qc_results(book_id, run_at);
 
+-- v30.3: 쇼츠 파이프라인 S-1 — 유튜브 원본 수집 (AC-S1-1: video_id UNIQUE 멱등)
+CREATE TABLE IF NOT EXISTS youtube_raw (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL DEFAULT '',
+    tags TEXT NOT NULL DEFAULT '[]',
+    description TEXT NOT NULL DEFAULT '',
+    channel_id TEXT NOT NULL DEFAULT '',
+    channel_title TEXT NOT NULL DEFAULT '',
+    published_at TEXT NOT NULL DEFAULT '',
+    view_count INTEGER NOT NULL DEFAULT 0,
+    like_count INTEGER NOT NULL DEFAULT 0,
+    comment_count INTEGER NOT NULL DEFAULT 0,
+    share_count INTEGER,
+    region TEXT NOT NULL DEFAULT 'KR',
+    fetched_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_youtube_raw_fetched ON youtube_raw(fetched_at);
+
+-- v30.3: S-1 — 쿼터 사용량 로그 (AC-S1-1③, AC-S1-4③)
+CREATE TABLE IF NOT EXISTS youtube_quota_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_at TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    units INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'ok',
+    note TEXT NOT NULL DEFAULT ''
+);
+
 """,
     "postgres": """
 CREATE TABLE IF NOT EXISTS seed_keywords (
@@ -435,6 +464,35 @@ CREATE TABLE IF NOT EXISTS kdp_qc_results (
     UNIQUE(book_id, run_at, qc_item)
 );
 CREATE INDEX IF NOT EXISTS idx_kdp_qc_book_run ON kdp_qc_results(book_id, run_at);
+
+-- v30.3: 쇼츠 파이프라인 S-1 — 유튜브 원본 수집 (AC-S1-1: video_id UNIQUE 멱등)
+CREATE TABLE IF NOT EXISTS youtube_raw (
+    id SERIAL PRIMARY KEY,
+    video_id TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL DEFAULT '',
+    tags TEXT NOT NULL DEFAULT '[]',
+    description TEXT NOT NULL DEFAULT '',
+    channel_id TEXT NOT NULL DEFAULT '',
+    channel_title TEXT NOT NULL DEFAULT '',
+    published_at TEXT NOT NULL DEFAULT '',
+    view_count INTEGER NOT NULL DEFAULT 0,
+    like_count INTEGER NOT NULL DEFAULT 0,
+    comment_count INTEGER NOT NULL DEFAULT 0,
+    share_count INTEGER,
+    region TEXT NOT NULL DEFAULT 'KR',
+    fetched_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_youtube_raw_fetched ON youtube_raw(fetched_at);
+
+-- v30.3: S-1 — 쿼터 사용량 로그 (AC-S1-1③, AC-S1-4③)
+CREATE TABLE IF NOT EXISTS youtube_quota_log (
+    id SERIAL PRIMARY KEY,
+    run_at TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    units INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'ok',
+    note TEXT NOT NULL DEFAULT ''
+);
 
 """,
 }
@@ -2003,6 +2061,87 @@ LIMIT ?"""
         return self._qd(
             "SELECT qc_item, passed, detail FROM kdp_qc_results "
             "WHERE book_id = ? ORDER BY id", (book_id,), fetch=True)
+
+    # ---------- v30.3: 쇼츠 파이프라인 S-1 — 유튜브 원본 수집 (AC-S1-1) ----------
+
+    def upsert_youtube_video(self, video):
+        """video_id 기준 멱등 UPSERT — 재수집 시 기존 행 갱신 (AC-S1-1②).
+        video: dict (title, tags, description, channel_id, channel_title,
+        published_at, view_count, like_count, comment_count, share_count,
+        region, fetched_at)"""
+        cols = ("video_id", "title", "tags", "description", "channel_id",
+                "channel_title", "published_at", "view_count", "like_count",
+                "comment_count", "share_count", "region", "fetched_at")
+        values = tuple(video.get(c) if video.get(c) is not None else "" for c in cols)
+        if self.dialect == "postgres":
+            self._q(
+                None,
+                "INSERT INTO youtube_raw (video_id, title, tags, description, "
+                "channel_id, channel_title, published_at, view_count, like_count, "
+                "comment_count, share_count, region, fetched_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (video_id) DO UPDATE SET title = EXCLUDED.title, "
+                "tags = EXCLUDED.tags, description = EXCLUDED.description, "
+                "channel_id = EXCLUDED.channel_id, "
+                "channel_title = EXCLUDED.channel_title, "
+                "published_at = EXCLUDED.published_at, "
+                "view_count = EXCLUDED.view_count, "
+                "like_count = EXCLUDED.like_count, "
+                "comment_count = EXCLUDED.comment_count, "
+                "share_count = EXCLUDED.share_count, "
+                "region = EXCLUDED.region, fetched_at = EXCLUDED.fetched_at",
+                values)
+        else:
+            self._qd(
+                "INSERT INTO youtube_raw (video_id, title, tags, description, "
+                "channel_id, channel_title, published_at, view_count, like_count, "
+                "comment_count, share_count, region, fetched_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (video_id) DO UPDATE SET title = excluded.title, "
+                "tags = excluded.tags, description = excluded.description, "
+                "channel_id = excluded.channel_id, "
+                "channel_title = excluded.channel_title, "
+                "published_at = excluded.published_at, "
+                "view_count = excluded.view_count, "
+                "like_count = excluded.like_count, "
+                "comment_count = excluded.comment_count, "
+                "share_count = excluded.share_count, "
+                "region = excluded.region, fetched_at = excluded.fetched_at",
+                values)
+
+    def count_youtube_videos(self, region=""):
+        sql = "SELECT COUNT(*) AS c FROM youtube_raw"
+        params = ()
+        if region:
+            sql += " WHERE region = ?"
+            params = (region,)
+        return self._qd(sql, params, fetch=True)[0]["c"]
+
+    def list_youtube_videos(self, region="", limit=50, offset=0):
+        sql = "SELECT * FROM youtube_raw"
+        params = []
+        if region:
+            sql += " WHERE region = ?"
+            params.append(region)
+        sql += " ORDER BY fetched_at DESC, id DESC LIMIT ? OFFSET ?"
+        params += [limit, offset]
+        return self._qd(sql, tuple(params), fetch=True)
+
+    def log_youtube_quota(self, run_at, endpoint, units=1, status="ok", note=""):
+        """쿼터 사용 로그 (AC-S1-1③, AC-S1-4③)"""
+        self._qd(
+            "INSERT INTO youtube_quota_log (run_at, endpoint, units, status, note) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (run_at, endpoint, units, status, note))
+
+    def youtube_quota_usage(self, day):
+        """특정 일(YYYY-MM-DD) 쿼터 사용 합계 — {endpoint: units} + total"""
+        rows = self._qd(
+            "SELECT endpoint, SUM(units) AS units FROM youtube_quota_log "
+            "WHERE run_at LIKE ? GROUP BY endpoint",
+            (day + "%",), fetch=True)
+        total = sum(r["units"] for r in rows)
+        return {r["endpoint"]: r["units"] for r in rows}, total
 
     def close(self):
 
