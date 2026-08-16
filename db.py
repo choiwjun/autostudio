@@ -266,6 +266,22 @@ CREATE TABLE IF NOT EXISTS shorts_topics (
 );
 CREATE INDEX IF NOT EXISTS idx_shorts_topics_score ON shorts_topics(score DESC);
 
+-- v31: 쇼츠 파이프라인 S-3 — 스크립트 산출물 (14-shorts-pipeline §4 데이터 모델:
+-- topic · hook · script_md · hashtags · ref_video_ids · status draft/ready/qc_failed/published)
+CREATE TABLE IF NOT EXISTS shorts_scripts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic TEXT NOT NULL,
+    hook TEXT NOT NULL DEFAULT '',
+    script_md TEXT NOT NULL DEFAULT '',
+    hashtags TEXT NOT NULL DEFAULT '[]',
+    ref_video_ids TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'draft',
+    qc_detail TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_shorts_scripts_status ON shorts_scripts(status);
+
 """,
     "postgres": """
 CREATE TABLE IF NOT EXISTS seed_keywords (
@@ -519,6 +535,21 @@ CREATE TABLE IF NOT EXISTS shorts_topics (
     created_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_shorts_topics_score ON shorts_topics(score DESC);
+
+-- v31: 쇼츠 파이프라인 S-3 — 스크립트 산출물 (14-shorts-pipeline §4 데이터 모델)
+CREATE TABLE IF NOT EXISTS shorts_scripts (
+    id SERIAL PRIMARY KEY,
+    topic TEXT NOT NULL,
+    hook TEXT NOT NULL DEFAULT '',
+    script_md TEXT NOT NULL DEFAULT '',
+    hashtags TEXT NOT NULL DEFAULT '[]',
+    ref_video_ids TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'draft',
+    qc_detail TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_shorts_scripts_status ON shorts_scripts(status);
 
 """,
 }
@@ -2213,6 +2244,44 @@ LIMIT ?"""
         sql = ("SELECT * FROM shorts_topics "
                + ("WHERE status = ? " if status else "")
                + "ORDER BY score DESC, id DESC LIMIT ?")
+        params = (status, limit) if status else (limit,)
+        return self._qd(sql, params, fetch=True)
+
+    def youtube_video_titles(self, video_ids):
+        """v31 (S-3): 참고 영상 제목 조회 — 생성 프롬프트 그라운딩용."""
+        ids = [v for v in dict.fromkeys(video_ids) if v][:20]
+        if not ids:
+            return []
+        ph = ",".join("?" for _ in ids)
+        rows = self._qd(
+            f"SELECT title FROM youtube_raw WHERE video_id IN ({ph})",
+            tuple(ids), fetch=True)
+        return [r["title"] for r in rows if r.get("title")]
+
+    # ---------- v31: 쇼츠 파이프라인 S-3 — 스크립트 산출물 ----------
+
+    def insert_shorts_script(self, topic, hook, script_md, hashtags_json,
+                             ref_video_ids_json, status, qc_detail_json,
+                             created_at, updated_at):
+        self._qd(
+            "INSERT INTO shorts_scripts (topic, hook, script_md, hashtags, "
+            "ref_video_ids, status, qc_detail, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (topic, hook, script_md, hashtags_json, ref_video_ids_json,
+             status, qc_detail_json, created_at, updated_at))
+        return self._qd(
+            "SELECT id FROM shorts_scripts ORDER BY id DESC LIMIT 1",
+            (), fetch=True)[0]["id"]
+
+    def get_shorts_script(self, script_id):
+        rows = self._qd("SELECT * FROM shorts_scripts WHERE id = ?",
+                        (script_id,), fetch=True)
+        return rows[0] if rows else None
+
+    def list_shorts_scripts(self, status="", limit=50):
+        sql = ("SELECT * FROM shorts_scripts "
+               + ("WHERE status = ? " if status else "")
+               + "ORDER BY id DESC LIMIT ?")
         params = (status, limit) if status else (limit,)
         return self._qd(sql, params, fetch=True)
 

@@ -189,11 +189,16 @@ class KdpPerformanceIn(BaseModel):
     sales: int = 0
     royalty: float = 0.0
 
-    # v30.4 (적대적 QA): NaN/Infinity 성과값 차단 (KdpPublishIn과 동일 계열)
+    # v31 (알고리즘 QA): NaN/Infinity 성과값 차단 (KdpPublishIn과 동일 계열)
     @field_validator("royalty")
     @classmethod
     def _royalty_finite(cls, v):
         return _reject_nonfinite(v, "로열티")
+
+
+class ShortsScriptIn(BaseModel):
+    # v31 (S-3): 쇼츠 스크립트 생성 트리거 — shorts_topics 후보 label
+    topic: str
 
 
 def _validate_text(value, field_label, max_len):
@@ -1297,6 +1302,37 @@ def create_app(cfg):
             except (TypeError, json_mod.JSONDecodeError):
                 it["evidence"] = {}
         return {"items": items}
+
+    @app.get("/shorts/scripts", dependencies=[Depends(require_token)])
+    def list_shorts_scripts(status: str = ""):
+        # S-3: 스크립트 목록 — hashtags/qc_detail/ref_video_ids JSON 파싱 노출
+        import json as json_mod
+        items = run_db(lambda d: d.list_shorts_scripts(status=status))
+        for it in items:
+            for field in ("hashtags", "ref_video_ids", "qc_detail"):
+                try:
+                    parsed = json_mod.loads(it.get(field) or "[]")
+                    it[field] = parsed if isinstance(parsed, list) else []
+                except (TypeError, json_mod.JSONDecodeError):
+                    it[field] = []
+        return {"items": items}
+
+    @app.post("/shorts/scripts", dependencies=[Depends(require_token)])
+    def create_shorts_script(body: ShortsScriptIn):
+        # S-3: 스크립트 생성 (사용자 트리거 — 스펙 §5 'GH Actions 또는 사용자 트리거')
+        import shorts_script
+        _validate_text(body.topic, "주제", 100)
+        try:
+            result = run_db(lambda d: shorts_script.generate_script(
+                d, body.topic))
+        except shorts_script.ScriptGenerationError as e:
+            logger.warning("shorts script generation failed topic=%s: %s",
+                           body.topic, e)
+            raise HTTPException(status_code=503, detail=str(e))
+        if result is None:
+            raise HTTPException(status_code=404,
+                                detail="주제 후보를 찾을 수 없습니다")
+        return result
 
     @app.get("/")
     def index():
