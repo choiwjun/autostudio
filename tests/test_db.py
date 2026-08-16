@@ -1,4 +1,5 @@
 # tests/test_db.py
+import db
 from db import Database
 
 
@@ -709,3 +710,75 @@ def test_record_adpost_metrics_updates_score_and_boost(tmp_path):
     draft = d.get_draft(did)
     assert draft["published_at"] == "2026-08-05T00:00:00+09:00"
     assert d.get_keyword(kid)["performance_boost"] == 10.0
+
+
+def test_postgres_schema_has_no_trailing_comma_and_table_parity():
+    """회귀(v30.1→v31): postgres 스키마의 fortune_generations 정의에 trailing
+    comma(',')가 남아 있어 db.init()이 SyntaxError로 실패 → 배포 후 모든 DB
+    조회 API(/api/keywords, /api/categories 등)가 500을 반환했다.
+    또한 v30에서 UNIQUE(ref_date, content_type) 제약이 누락됐었다 (sqlite와 불일치).
+
+    postgres는 다중 문장 스키마를 통째로 파싱하므로 CREATE TABLE IF NOT EXISTS
+    하나의 오타가 init() 전체를 죽인다. sqlite는 executescript가 문장 단위로
+    진행돼 테스트가 이를 잡지 못했던 것 — 정적 검증으로 보완한다."""
+    import inspect
+    import re
+    src = inspect.getsource(db)
+    m = re.search(r'"postgres": """(.*?)"""', src, re.DOTALL)
+    assert m, "db.py에 postgres 스키마 문자열이 있어야 한다"
+    pg_schema = m.group(1)
+
+    # 1) 모든 CREATE TABLE 정의에서 닫는 괄호 직전 컬럼/제약이 ','로 끝나면 안 됨
+    for name, body in re.findall(
+            r'CREATE TABLE IF NOT EXISTS (\w+) \((.*?)\);', pg_schema, re.DOTALL):
+        lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
+        assert lines, f"{name} 테이블 정의가 비어 있음"
+        assert not lines[-1].endswith(","), (
+            f"postgres 스키마 {name} 테이블에 trailing comma — "
+            "init()이 SyntaxError로 실패해 모든 API 500 발생")
+
+    # 2) sqlite/postgres 테이블·컬럼 패리티 (v30에서 fortune_generations의
+    #    UNIQUE 제약이 pg에서만 누락됐던 회귀 재발 방지)
+    def extract_tables(schema):
+        out = {}
+        for name, body in re.findall(
+                r'CREATE TABLE IF NOT EXISTS (\w+) \((.*?)\);', schema, re.DOTALL):
+            cols = [ln.strip() for ln in body.splitlines()
+                    if ln.strip() and not ln.strip().startswith("--")]
+            out[name] = cols
+        return out
+
+    ms = re.search(r'"sqlite": """(.*?)"""', src, re.DOTALL)
+    assert ms
+    sqlite_tables = extract_tables(ms.group(1))
+    pg_tables = extract_tables(pg_schema)
+
+    def col_names(table_defs):
+        # UNIQUE(...) 같은 테이블 제약과 일반 컬럼을 분리
+        cols, constraints = set(), set()
+        for ln in table_defs:
+            if ln.startswith(("UNIQUE", "PRIMARY KEY", "FOREIGN KEY", "CHECK")):
+                constraints.add(ln)
+            else:
+                cols.add(ln.split()[0])
+        return cols, constraints
+
+    assert set(sqlite_tables) == set(pg_tables), (
+        f"sqlite/postgres 테이블 불일치: "
+        f"{set(sqlite_tables) ^ set(pg_tables)}")
+    for t in sqlite_tables:
+        sc, scons = col_names(sqlite_tables[t])
+        pc, pcons = col_names(pg_tables[t])
+        assert sc == pc, f"{t} 컬럼 불일치 sqlite={sc ^ pc}"
+
+        def unique_keys(cons):
+            out = set()
+            for c in cons:
+                mm = re.match(r"UNIQUE\((.+)\)", c)
+                if mm:
+                    out.add(tuple(x.strip() for x in mm.group(1).split(",")))
+            return out
+        assert unique_keys(scons) == unique_keys(pcons), (
+            f"{t} UNIQUE 제약 불일치 "
+            f"sqlite={unique_keys(scons)} pg={unique_keys(pcons)}")
+

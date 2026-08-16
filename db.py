@@ -356,6 +356,7 @@ CREATE TABLE IF NOT EXISTS fortune_generations (
     status TEXT NOT NULL DEFAULT 'generated',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT '',
+    UNIQUE(ref_date, content_type)
 );
 
 -- v30: KDP 파이프라인 (12-kdp §3 + QA-D3)
