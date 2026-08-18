@@ -163,6 +163,27 @@ def test_replace_and_get_kdp_qc_results(tmp_path):
     d.close()
 
 
+def test_replace_kdp_qc_results_sql_is_postgres_compatible(tmp_path):
+    # v31.4 회귀 가드: INSERT OR REPLACE(SQLite 전용)가 프로덕션 Postgres 배치에서
+    # "syntax error at or near OR"를 내 책 생성 런이 실패했음 — 재도입 차단.
+    # 선행 DELETE가 (book_id, run_at) 중복을 배제하므로 일반 INSERT면 충분하다.
+    d = make_db(tmp_path)
+    bid = _seed_book(d, status="assembling")
+    captured = []
+    orig_qd = d._qd
+
+    def spy(sql, params, fetch=False):
+        captured.append(sql)
+        return orig_qd(sql, params, fetch=fetch)
+
+    d._qd = spy
+    d.replace_kdp_qc_results(bid, "2026-08-16T00:00:00",
+                             [{"qc_item": "length", "passed": 1, "detail": ""}])
+    assert any(s.lstrip().startswith("INSERT") for s in captured)
+    assert not any("OR REPLACE" in s.upper() for s in captured)
+    d.close()
+
+
 def test_publish_day_gate_atomic_concurrency(tmp_path):
     # M-2: 동시 2 스레드가 게이트 호출 → 총 3권 초과 불가 (원자적 슬롯 선점)
     import threading

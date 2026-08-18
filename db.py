@@ -2123,7 +2123,10 @@ LIMIT ?"""
                  (book_id, run_at))
         for r in results:
             self._qd(
-                "INSERT OR REPLACE INTO kdp_qc_results (book_id, run_at, qc_item, "
+                # v31.4: INSERT OR REPLACE는 SQLite 전용 문법 — 프로덕션 배치에서
+                # Postgres "syntax error at or near OR"로 책 생성이 실패했음.
+                # 선행 DELETE가 중복을 배제하므로 양 백엔드 공통 INSERT로 충분.
+                "INSERT INTO kdp_qc_results (book_id, run_at, qc_item, "
                 "passed, detail) VALUES (?, ?, ?, ?, ?)",
                 (book_id, run_at, r["qc_item"], 1 if r["passed"] else 0,
                  r.get("detail") or ""))
