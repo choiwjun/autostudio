@@ -402,6 +402,18 @@
       </div>
     </section>
 
+    <!-- v32.1: 유입 키워드 피드백 — 탭 목록 위 최상단 배치(버튼 클릭 시 즉시 보임) -->
+    <section id="inflowPanel" class="card" style="display:none">
+      <p class="dim" style="margin-top:0">크리에이터 어드바이저(트렌드)의 유입 키워드 표를 복사해 붙여넣으세요 —
+        유입 키워드 계열은 우선순위 가점(유입 배지), 게시 3회 이상인데 유입이 없는 키워드는 감점됩니다 (최근 30일 반영).</p>
+      <textarea id="inflowText" rows="6" style="width:100%; box-sizing:border-box"
+                placeholder="예)&#10;실비보험&#9;120&#10;에어프라이어 청소&#9;80&#10;노트북 추천" aria-label="유입 키워드 붙여넣기"></textarea>
+      <div style="margin-top:8px; display:flex; gap:8px; align-items:center">
+        <button class="btn btn-primary" onclick="importInflow()">반영</button>
+        <span id="inflowResult" class="dim"></span>
+      </div>
+    </section>
+
     <!-- v18: 탭 — 키워드 목록 / 게시 플래너 / 수익 인사이트 -->
     <div class="tabs" role="tablist">
       <button type="button" id="tabBtnKeywords" class="on" onclick="switchTab('keywords')">키워드 목록</button>
@@ -512,18 +524,6 @@
         <button class="btn" onclick="addSeed()">추가</button>
       </div>
       <ul id="seedList"></ul>
-    </section>
-
-    <!-- v32: 유입 키워드 피드백 — 크리에이터 어드바이저 붙여넣기 임포트 -->
-    <section id="inflowPanel" class="card" style="display:none">
-      <p class="dim" style="margin-top:0">크리에이터 어드바이저(트렌드)의 유입 키워드 표를 복사해 붙여넣으세요 —
-        유입 키워드 계열은 우선순위 가점(유입 배지), 게시 3회 이상인데 유입이 없는 키워드는 감점됩니다 (최근 30일 반영).</p>
-      <textarea id="inflowText" rows="6" style="width:100%; box-sizing:border-box"
-                placeholder="예)&#10;실비보험&#9;120&#10;에어프라이어 청소&#9;80&#10;노트북 추천" aria-label="유입 키워드 붙여넣기"></textarea>
-      <div style="margin-top:8px; display:flex; gap:8px; align-items:center">
-        <button class="btn btn-primary" onclick="importInflow()">반영</button>
-        <span id="inflowResult" class="dim"></span>
-      </div>
     </section>
 
     <!-- v30: KDP 출간 탭 (storyboard §1.1 — .tabs + 내부 .seg) -->
@@ -1595,13 +1595,20 @@ function openSeeds() {
 // ---------- v32: 유입 키워드 피드백 (크리에이터 어드바이저 실측) ----------
 function toggleInflow() {
   const panel = document.getElementById('inflowPanel');
-  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  const open = panel.style.display === 'none';
+  panel.style.display = open ? 'block' : 'none';
+  // v32.1: 패널이 화면 밖에서 열려 '반응 없음'으로 보이던 문제 — 시야로 스크롤
+  if (open) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 async function importInflow() {
   const text = document.getElementById('inflowText').value.trim();
   const result = document.getElementById('inflowResult');
-  if (!text) { result.textContent = '붙여넣을 내용이 없습니다'; return; }
+  if (!text) {
+    result.textContent = '붙여넣을 내용이 없습니다';
+    setStatus('붙여넣을 내용이 없습니다', true);
+    return;
+  }
   result.textContent = '반영 중...';
   try {
     const res = await api('/inflow/import', {
@@ -1609,13 +1616,16 @@ async function importInflow() {
       headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ text }),
     });
-    result.textContent =
-      `${res.imported}개 반영 — 유입 가점 ${res.boosted} · 무유입 감점 ${res.demoted}`;
+    const msg = `${res.imported}개 반영 — 유입 가점 ${res.boosted} · 무유입 감점 ${res.demoted}`;
+    result.textContent = msg;
+    setStatus(msg);  // v32.1: 전역 상태바에도 표시 — 결과 인지 보장
     document.getElementById('inflowText').value = '';
     resetAndLoad();
   } catch (e) {
-    result.textContent = String(e.message) === '401'
+    const msg = String(e.message) === '401'
       ? '토큰이 올바르지 않습니다' : '반영 실패: ' + e.message;
+    result.textContent = msg;
+    setStatus(msg, true);
   }
 }
 

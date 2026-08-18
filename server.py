@@ -1407,8 +1407,11 @@ def create_app(cfg):
 
     @app.get("/")
     def index():
+        # v32.1: no-store — 배포 후 브라우저 캐시로 옛 대시보드가 서빙되는
+        # 문제(여러 번 재발)를 원천 차단
         return FileResponse(os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "static", "index.html"))
+            os.path.dirname(os.path.abspath(__file__)), "static", "index.html"),
+            headers={"Cache-Control": "no-store"})
 
     return app
 
