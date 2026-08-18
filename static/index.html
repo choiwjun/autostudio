@@ -394,6 +394,8 @@
                 title="모든 활성 키워드">전체</button>
       </div>
       <button class="btn" onclick="toggleSeeds()">시드키워드 관리</button>
+      <button class="btn" onclick="toggleInflow()"
+              title="크리에이터 어드바이저 실측 유입 키워드 반영 — 유입 계열 우선순위 가점·무유입 감점">유입 키워드 반영</button>
       <div class="token-box">
         <input id="token" type="password" placeholder="토큰" aria-label="대시보드 토큰">
         <button class="btn" onclick="saveToken()">토큰 저장</button>
@@ -510,6 +512,18 @@
         <button class="btn" onclick="addSeed()">추가</button>
       </div>
       <ul id="seedList"></ul>
+    </section>
+
+    <!-- v32: 유입 키워드 피드백 — 크리에이터 어드바이저 붙여넣기 임포트 -->
+    <section id="inflowPanel" class="card" style="display:none">
+      <p class="dim" style="margin-top:0">크리에이터 어드바이저(트렌드)의 유입 키워드 표를 복사해 붙여넣으세요 —
+        유입 키워드 계열은 우선순위 가점(유입 배지), 게시 3회 이상인데 유입이 없는 키워드는 감점됩니다 (최근 30일 반영).</p>
+      <textarea id="inflowText" rows="6" style="width:100%; box-sizing:border-box"
+                placeholder="예)&#10;실비보험&#9;120&#10;에어프라이어 청소&#9;80&#10;노트북 추천" aria-label="유입 키워드 붙여넣기"></textarea>
+      <div style="margin-top:8px; display:flex; gap:8px; align-items:center">
+        <button class="btn btn-primary" onclick="importInflow()">반영</button>
+        <span id="inflowResult" class="dim"></span>
+      </div>
     </section>
 
     <!-- v30: KDP 출간 탭 (storyboard §1.1 — .tabs + 내부 .seg) -->
@@ -773,7 +787,7 @@ async function load() {
     if (!i.active) tr.classList.add('excluded');
     tr.innerHTML = `
       <td>${priorityCell(i.priority)}</td>
-      <td class="td-kw">${esc(i.keyword)}${i.active ? '' : ' <span class="badge b-gray">제외됨</span>'}</td>
+      <td class="td-kw">${esc(i.keyword)}${i.inflow_score > 0 ? ' <span class="badge b-green" title="실측 유입 키워드 계열 — 우선순위 가점">유입</span>' : ''}${i.active ? '' : ' <span class="badge b-gray">제외됨</span>'}</td>
       <td>${esc(i.category)}</td>
       <td class="num">${esc(aiCite)}</td>
       <td>${gaugeCell(i.opportunity)}</td>
@@ -1576,6 +1590,33 @@ async function toggleSeeds() {
 function openSeeds() {
   document.getElementById('seedsPanel').style.display = 'block';
   renderSeeds();
+}
+
+// ---------- v32: 유입 키워드 피드백 (크리에이터 어드바이저 실측) ----------
+function toggleInflow() {
+  const panel = document.getElementById('inflowPanel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+async function importInflow() {
+  const text = document.getElementById('inflowText').value.trim();
+  const result = document.getElementById('inflowResult');
+  if (!text) { result.textContent = '붙여넣을 내용이 없습니다'; return; }
+  result.textContent = '반영 중...';
+  try {
+    const res = await api('/inflow/import', {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ text }),
+    });
+    result.textContent =
+      `${res.imported}개 반영 — 유입 가점 ${res.boosted} · 무유입 감점 ${res.demoted}`;
+    document.getElementById('inflowText').value = '';
+    resetAndLoad();
+  } catch (e) {
+    result.textContent = String(e.message) === '401'
+      ? '토큰이 올바르지 않습니다' : '반영 실패: ' + e.message;
+  }
 }
 
 async function renderSeeds() {

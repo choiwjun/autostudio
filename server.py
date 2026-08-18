@@ -201,6 +201,13 @@ class ShortsScriptIn(BaseModel):
     topic: str
 
 
+class InflowImportIn(BaseModel):
+    # v32: 크리에이터 어드바이저 실측 유입 키워드 임포트 — 구조화 items와
+    # 붙여넣기 text(표 복사 "키워드 방문수" 행) 두 경로 병행 수용
+    items: list = []
+    text: str = ""
+
+
 def _validate_text(value, field_label, max_len):
     """v30.4 (적대적 QA): 저장 전 텍스트 입력 가드 — null byte와 과대 길이 차단.
     null byte는 SQLite에는 저장되지만 Postgres \u0000 거부로 프로덕션에서만
@@ -1049,6 +1056,70 @@ def create_app(cfg):
             result["message"] = (f"시간 예산 내 {len(rows) - skipped}/{len(rows)}행 처리 — "
                                  "같은 CSV 재업로드로 나머지를 반영하세요")
         return result
+
+    # ---------- v32: 유입 키워드 피드백 루프 (크리에이터 어드바이저 실측) ----------
+    # 대시보드 추천(시장 가설)과 실제 블로그 유입(실측)의 괴리를 닫는 루프:
+    # 유입 키워드 계열은 priority 가점, 게시 반복에도 유입 0인 키워드는 감점.
+
+    INFLOW_IMPORT_MAX_ITEMS = 1000
+
+    @app.post("/inflow/import", dependencies=[Depends(require_token)])
+    def import_inflow_keywords(body: InflowImportIn):
+        items, seen = [], set()
+
+        def add(keyword, visits):
+            keyword = (keyword or "").strip()
+            if not keyword or keyword in seen:
+                return
+            seen.add(keyword)
+            _validate_text(keyword, "키워드", 200)
+            try:
+                # 천 단위 콤마("1,234") 허용 — 방문수 복사본 서식 차이
+                visits = max(0, min(int(str(visits).replace(",", "")), 10**9))
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400, detail="방문수는 숫자여야 합니다")
+            items.append({"keyword": keyword, "visits": visits})
+
+        for it in body.items:
+            if not isinstance(it, dict):
+                raise HTTPException(
+                    status_code=400, detail="items 형식이 올바르지 않습니다")
+            add(str(it.get("keyword") or ""), it.get("visits") or 0)
+        for line in (body.text or "").splitlines():
+            line = line.replace("\t", " ").strip()
+            if not line:
+                continue
+            keyword, _, tail = line.rpartition(" ")
+            try:
+                visits = int(tail.replace(",", ""))
+            except ValueError:  # 방문수 없는 행 — 키워드만 임포트
+                keyword, visits = line, 0
+            add(keyword, visits)
+        # 빈 임포트는 스코어링 재계산 자체를 건너뜀 — 유입 데이터가 없는
+        # 상태의 재계산은 '게시 N회 무유입' 감점만 대량 발생시키는 부작용
+        if not items:
+            return {"imported": 0, "boosted": 0, "demoted": 0,
+                    "recorded_at": config_mod.today_kst().isoformat()}
+        if len(items) > INFLOW_IMPORT_MAX_ITEMS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"유입 키워드는 1회 {INFLOW_IMPORT_MAX_ITEMS}개까지 임포트할 수 있습니다")
+        today = config_mod.today_kst()
+        recorded_at = today.isoformat()
+        since = (today - timedelta(days=db.INFLOW_WINDOW_DAYS)).isoformat()
+        run_db(lambda d: d.upsert_inflow_snapshot(
+            items, recorded_at, config_mod.now_kst_iso()))
+        boosted, demoted = run_db(lambda d: d.apply_inflow_scoring(since))
+        return {"imported": len(items), "boosted": boosted, "demoted": demoted,
+                "recorded_at": recorded_at}
+
+    @app.get("/inflow/keywords", dependencies=[Depends(require_token)])
+    def list_inflow():
+        since = (config_mod.today_kst()
+                 - timedelta(days=db.INFLOW_WINDOW_DAYS)).isoformat()
+        return {"items": run_db(lambda d: d.list_inflow_keywords(since)),
+                "days": db.INFLOW_WINDOW_DAYS}
 
     # ---------- v18: 게시 플래너 · 리프레시 · 수익 인사이트 ----------
 

@@ -10,6 +10,12 @@ try:
 except ImportError:  # 로컬에서 psycopg2 없이도 SQLite 사용 가능
     CONNECTION_ERRORS = ()
 
+# v32: 유입 키워드 피드백 루프 (크리에이터 어드바이저 실측 → 스코어링 반영)
+INFLOW_WINDOW_DAYS = 30      # 최근 N일 유입 스냅샷만 스코어링에 반영
+INFLOW_FAMILY_BOOST = 12.0   # 유입 키워드 계열(완전일치·포함) 가점
+INFLOW_NO_RESULT_PENALTY = -10.0  # 게시 반복에도 유입 0인 키워드 감점
+NO_RESULT_MIN_DRAFTS = 3     # 감점 대상 최소 게시 수
+
 # SQLite(개발/테스트)와 Postgres(프로덕션) 스키마. URL 스킴으로 백엔드 전환.
 # 점수 4종(growth/opportunity/commercial/demand_idx)은 수집 시 사전계산 저장 (NULL = 미산출)
 SCHEMAS = {
@@ -25,8 +31,20 @@ CREATE TABLE IF NOT EXISTS keywords (
     category TEXT NOT NULL DEFAULT '',
     first_seen TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
-    performance_boost REAL NOT NULL DEFAULT 0
+    performance_boost REAL NOT NULL DEFAULT 0,
+    inflow_score REAL NOT NULL DEFAULT 0
 );
+-- v32: 크리에이터 어드바이저 실측 유입 키워드 스냅샷 (피드백 루프)
+CREATE TABLE IF NOT EXISTS inflow_keywords (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    keyword TEXT NOT NULL,
+    visits INTEGER NOT NULL DEFAULT 0,
+    recorded_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(keyword, recorded_at)
+);
+CREATE INDEX IF NOT EXISTS idx_inflow_keywords_recorded
+    ON inflow_keywords(recorded_at);
 CREATE TABLE IF NOT EXISTS daily_stats (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     keyword_id INTEGER NOT NULL REFERENCES keywords(id),
@@ -295,8 +313,20 @@ CREATE TABLE IF NOT EXISTS keywords (
     category TEXT NOT NULL DEFAULT '',
     first_seen TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
-    performance_boost DOUBLE PRECISION NOT NULL DEFAULT 0
+    performance_boost DOUBLE PRECISION NOT NULL DEFAULT 0,
+    inflow_score DOUBLE PRECISION NOT NULL DEFAULT 0
 );
+-- v32: 크리에이터 어드바이저 실측 유입 키워드 스냅샷 (피드백 루프)
+CREATE TABLE IF NOT EXISTS inflow_keywords (
+    id SERIAL PRIMARY KEY,
+    keyword TEXT NOT NULL,
+    visits INTEGER NOT NULL DEFAULT 0,
+    recorded_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(keyword, recorded_at)
+);
+CREATE INDEX IF NOT EXISTS idx_inflow_keywords_recorded
+    ON inflow_keywords(recorded_at);
 CREATE TABLE IF NOT EXISTS daily_stats (
     id SERIAL PRIMARY KEY,
     keyword_id INTEGER NOT NULL REFERENCES keywords(id),
@@ -611,7 +641,9 @@ class Database:
         "ELSE COALESCE(ds.demand_idx, 0) / 0.02 END "
         f"+ 15.0 * {GROWTH_NORM_SQL} "
         f"+ 30.0 * {EFFECTIVE_CPC_SQL} "
-        "+ COALESCE(k.performance_boost, 0) AS NUMERIC), 1)"
+        "+ COALESCE(k.performance_boost, 0) "
+        # v32: 실측 유입 피드백 — 크리에이터 어드바이저 유입 계열 가점·무유입 감점
+        "+ COALESCE(k.inflow_score, 0) AS NUMERIC), 1)"
     )
     # v14: performance_boost 누적 클램프 — 다수 초안 피드백의 무한 누적/상쇄 왜곡 방지
     BOOST_CLAMP_SQL = {
@@ -765,6 +797,9 @@ LEFT JOIN daily_stats ds
         # v31: 쇼츠 S-2 정규화 지표 ②(조회/구독 비율)용 채널 구독자수
         ("youtube_raw", "subscriber_count", "INTEGER",
          "BIGINT"),
+        # v32: 유입 키워드 피드백 — 실측 유입 계열 가점·무유입 감점 저장 컬럼
+        ("keywords", "inflow_score", "REAL NOT NULL DEFAULT 0",
+         "DOUBLE PRECISION NOT NULL DEFAULT 0"),
     )
 
     def _migrate(self):
@@ -1232,6 +1267,7 @@ SELECT k.id, k.keyword, k.active, k.first_seen, ds.day,
        ds.opportunity, ds.commercial, ds.growth, ds.demand_idx, ds.shop_click_idx,
        ds.fresh_ratio, ds.total_sim, ds.shop_total, ds.ai_cite_idx,
        ds.demand_growth,
+       k.inflow_score,
        {self.PRIORITY_SQL} AS priority,
        (SELECT COUNT(*) FROM daily_stats h WHERE h.keyword_id = k.id) AS days
 {self._KEYWORD_BASE}{where_sql}
@@ -1595,6 +1631,79 @@ LIMIT ?"""
     def category_cpc_stats_list(self):
         return self._qd(
             "SELECT * FROM category_cpc_stats ORDER BY revenue DESC", (), fetch=True)
+
+    # ---------- v32: 유입 키워드 피드백 루프 (크리에이터 어드바이저 실측) ----------
+
+    @staticmethod
+    def inflow_family(a, b):
+        """유입 키워드 계열 판정 — 완전일치 또는 포함 관계. 짧은 쪽 토큰이
+        4자 이상일 때만 포함을 인정해 과매칭 차단('보험' 2자가 '실비보험추천'
+        계열 전체를 끄는 오염). 4자 이상이면 긴 변형도 같은 계열로 본다
+        ('에어프라이어' ↔ '에어프라이어 추천 리스트')."""
+        a, b = (a or "").strip(), (b or "").strip()
+        if not a or not b:
+            return False
+        if a == b:
+            return True
+        short, long = sorted((a, b), key=len)
+        return len(short) >= 4 and short in long
+
+    def upsert_inflow_snapshot(self, items, recorded_at, created_at):
+        """유입 키워드 1회분 저장 — (keyword, recorded_at) UNIQUE로 같은 날
+        재임포트는 방문수 갱신(멱등). 여러 날 스냅샷은 누적되어 창 기간
+        동안 스코어링에 반영된다."""
+        for it in items:
+            self._q(
+                "INSERT INTO inflow_keywords (keyword, visits, recorded_at, "
+                "created_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(keyword, recorded_at) DO UPDATE SET "
+                "visits = excluded.visits",
+                "INSERT INTO inflow_keywords (keyword, visits, recorded_at, "
+                "created_at) VALUES (%s, %s, %s, %s) "
+                "ON CONFLICT (keyword, recorded_at) DO UPDATE SET "
+                "visits = EXCLUDED.visits",
+                (it["keyword"], it["visits"], recorded_at, created_at),
+            )
+
+    def list_inflow_keywords(self, since):
+        """창 기간 내 유입 키워드 집계 (키워드별 최대 방문수)."""
+        return self._qd(
+            "SELECT keyword, MAX(visits) AS visits, MAX(recorded_at) AS "
+            "recorded_at FROM inflow_keywords WHERE recorded_at >= ? "
+            "GROUP BY keyword ORDER BY visits DESC, keyword",
+            (since,), fetch=True,
+        )
+
+    def apply_inflow_scoring(self, since):
+        """keywords.inflow_score 재계산 — 유입 계열 가점(+INFLOW_FAMILY_BOOST),
+        NO_RESULT_MIN_DRAFTS 이상 게시에도 유입 없는 키워드 감점
+        (INFLOW_NO_RESULT_PENALTY). 시장 가설(발굴 점수)과 실측 유입의
+        괴리를 우선순위로 닫는 루프. 반환: (boosted, demoted)."""
+        inflow_kws = [r["keyword"] for r in self.list_inflow_keywords(since)]
+        rows = self._qd("SELECT id, keyword FROM keywords", (), fetch=True)
+        pub_counts = {r["keyword_id"]: r["c"] for r in self._qd(
+            "SELECT keyword_id, COUNT(*) AS c FROM drafts "
+            "WHERE status = 'published' GROUP BY keyword_id",
+            (), fetch=True)}
+        pairs, boosted, demoted = [], 0, 0
+        for r in rows:
+            if any(self.inflow_family(r["keyword"], ik) for ik in inflow_kws):
+                score, boosted = INFLOW_FAMILY_BOOST, boosted + 1
+            elif pub_counts.get(r["id"], 0) >= NO_RESULT_MIN_DRAFTS:
+                score, demoted = INFLOW_NO_RESULT_PENALTY, demoted + 1
+            else:
+                score = 0.0
+            pairs.append((r["id"], score))
+        if pairs:
+            case_sql = " ".join("WHEN ? THEN ?" for _ in pairs)
+            params = [v for p in pairs for v in p] + [p[0] for p in pairs]
+            self._qd(
+                f"UPDATE keywords SET inflow_score = CASE id {case_sql} "
+                f"ELSE inflow_score END "
+                f"WHERE id IN ({', '.join('?' * len(pairs))})",
+                tuple(params),
+            )
+        return boosted, demoted
 
     def publish_plan(self, limit=10):
         """미게시 초안 게시 추천 대기열 — 이미지 완성 상태가 우선, 동일하면
